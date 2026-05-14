@@ -26,7 +26,7 @@
 
 .EXAMPLE
     # One-liner (no clone required):
-    iwr https://raw.githubusercontent.com/ahmed-mili/windows-pwsh-config/main/install.ps1 -UseBasicParsing | iex
+    iex (irm https://raw.githubusercontent.com/ahmed-mili/windows-pwsh-config/main/install.ps1).TrimStart([char]0xFEFF)
 
 .EXAMPLE
     # From a local clone:
