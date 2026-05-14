@@ -2,8 +2,8 @@
 
 Single-file installer for a clean, modern Windows Terminal + PowerShell setup
 with the Arch-rice aesthetic: Catppuccin Mocha, JetBrains Mono Nerd Font,
-Fastfetch splash, Oh My Posh prompt, Terminal-Icons, fzf, and PSReadLine
-fish-like predictions. **Windows only.**
+Fastfetch splash, Terminal-Icons, fzf, and PSReadLine fish-like predictions.
+The native PowerShell prompt is kept (`PS C:\Users\Ahmed>`). **Windows only.**
 
 ## Install
 
@@ -15,8 +15,8 @@ iwr https://raw.githubusercontent.com/ahmed-mili/terminal-config-bundle/main/ins
 
 Installs the following via `winget` (skipped if already present):
 **PowerShell 7**, **Windows Terminal**, **fzf**, **JetBrains Mono Nerd Font**,
-**Fastfetch**, **Oh My Posh**. Installs the `CompletionPredictor`, `PSFzf`
-and `Terminal-Icons` modules from the PSGallery into PowerShell 7's module path.
+**Fastfetch**. Installs the `CompletionPredictor`, `PSFzf` and `Terminal-Icons`
+modules from the PSGallery into PowerShell 7's module path.
 
 Sets `CurrentUser` execution policy to `RemoteSigned`, marks the PSGallery repo
 as `Trusted`, and deploys these three files (any existing config is backed up
@@ -31,17 +31,17 @@ as `<name>.bak-<timestamp>` first):
 The PS 7 profile turns on PSReadLine inline predictions with Catppuccin-aligned
 syntax colors, rebinds Tab to accept the suggestion (falling back to the
 completion menu), imports Terminal-Icons for Nerd Font icons in `ls`, wires
-PSFzf for fuzzy history and file pickers, initializes Oh My Posh with the
-`catppuccin_mocha` theme, and runs `fastfetch --logo arch` at the top of every
-interactive session. The PS 5 profile forces UTF-8, neutralizes the default
-blue background, and exposes an `isadmin` helper. The Windows Terminal
-settings ship `Ctrl+C` / `Ctrl+V` / `Alt+Shift+D` keybindings, the
-**Catppuccin Mocha** color scheme, JetBrains Mono Nerd Font at 11 pt, acrylic
-background at 85 % opacity, and PowerShell 7 as the default profile.
+PSFzf for fuzzy history and file pickers, and runs `fastfetch --logo arch` at
+the top of every interactive session. The PS 5 profile forces UTF-8,
+neutralizes the default blue background, and exposes an `isadmin` helper.
+The Windows Terminal settings ship `Ctrl+C` / `Ctrl+V` / `Alt+Shift+D`
+keybindings, the **Catppuccin Mocha** color scheme, JetBrains Mono Nerd Font
+at 11 pt, acrylic background at 85 % opacity, and PowerShell 7 as the default
+profile.
 
-> When `fzf`, the Nerd Font, Fastfetch or Oh My Posh are freshly installed,
-> the new `PATH` and fonts only apply to **new** shells. Close and reopen
-> Windows Terminal once after install.
+> When `fzf`, the Nerd Font or Fastfetch are freshly installed, the new
+> `PATH` and fonts only apply to **new** shells. Close and reopen Windows
+> Terminal once after install.
 
 ## Keybindings in PS 7
 

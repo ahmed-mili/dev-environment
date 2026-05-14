@@ -100,12 +100,6 @@ if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction S
     Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r' -ErrorAction SilentlyContinue
 }
 
-# ---- Oh My Posh: segmented prompt with the catppuccin_mocha theme ----
-# Theme name is resolved internally by OMP (themes are bundled in the binary).
-if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
-    oh-my-posh init pwsh --config catppuccin_mocha | Invoke-Expression
-}
-
 # ---- Fastfetch splash (Arch logo + system info) ----
 # Runs only in interactive sessions to avoid polluting scripted/piped pwsh calls.
 if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
@@ -303,7 +297,6 @@ Install-WingetPackage -Id 'Microsoft.WindowsTerminal'     -DisplayName 'Windows 
 Install-WingetPackage -Id 'junegunn.fzf'                  -DisplayName 'fzf'
 Install-WingetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont'  -DisplayName 'JetBrains Mono Nerd Font'
 Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
-Install-WingetPackage -Id 'JanDeDobbeleer.OhMyPosh'       -DisplayName 'Oh My Posh'
 
 # ---------------------------------------------------------------------------
 # 2) PowerShell 7 profile
