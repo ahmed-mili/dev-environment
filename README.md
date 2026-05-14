@@ -18,8 +18,13 @@ chassis detection so the `Board` / `Laptop` label stays accurate if you
 move the config between machines.
 
 ```powershell
-iwr https://raw.githubusercontent.com/ahmed-mili/windows-pwsh-config/main/install.ps1 -UseBasicParsing | iex
+iex ((iwr https://raw.githubusercontent.com/ahmed-mili/windows-pwsh-config/main/install.ps1 -UseBasicParsing).Content.TrimStart([char]0xFEFF))
 ```
+
+The `.TrimStart([char]0xFEFF)` is a defensive guard: even if an editor accidentally
+saves `install.ps1` with a UTF-8 BOM, the one-liner still parses cleanly. A
+CI check on `main` (see `.github/workflows/no-bom.yml`) additionally rejects
+any commit that reintroduces a BOM.
 
 ## What it does
 

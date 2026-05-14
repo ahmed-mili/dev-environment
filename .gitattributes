@@ -1,0 +1,11 @@
+# Treat PowerShell scripts as text with LF endings.
+# We also need them stored without a UTF-8 BOM: an editor that adds the BOM
+# back will be caught by .github/workflows/no-bom.yml, which fails the push
+# on main. See README.md for the BOM-tolerant one-liner that strips it at
+# fetch time as a second line of defense.
+*.ps1   text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.jsonc text eol=lf
+*.yml   text eol=lf
+LICENSE text eol=lf
