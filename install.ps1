@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Windows + PowerShell config bundle -- single-file installer.
@@ -193,6 +193,28 @@ if (-not (Test-Path $wtDir)) {
 Write-Step 'Fastfetch config'
 $ffDir        = Join-Path $env:USERPROFILE '.config\fastfetch'
 $ffConfigPath = Join-Path $ffDir 'config.jsonc'
+
+# Patch the embedded config to label row 'Board' as 'Laptop' on portable PCs.
+# Win32_BaseBoard reports the same data on both, but 'Board' is misleading on
+# a laptop where the board IS the machine model.
+# ChassisTypes per SMBIOS: portables = 8,9,10,11,12,14,18,21,30,31,32.
+$laptopChassisTypes = @(8,9,10,11,12,14,18,21,30,31,32)
+$isLaptop = $false
+try {
+    $chassis = (Get-CimInstance Win32_SystemEnclosure -ErrorAction Stop).ChassisTypes
+    foreach ($c in $chassis) {
+        if ($c -in $laptopChassisTypes) { $isLaptop = $true; break }
+    }
+} catch {}
+if ($isLaptop) {
+    # The JSON file stores ESC as the 6-char escape ''; matching the
+    # trailing one anchors the replacement to the right key field.
+    $fastfetchConfig = $fastfetchConfig.Replace('  Board\u001b', '  Laptop\u001b')
+    Write-Ok 'Chassis: laptop -> labelling row as "Laptop"'
+} else {
+    Write-Ok 'Chassis: desktop -> labelling row as "Board"'
+}
+
 Write-Utf8File -Path $ffConfigPath -Content $fastfetchConfig -WithBom $false
 Write-Ok $ffConfigPath
 
