@@ -76,6 +76,12 @@ if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction S
     Import-Module PSFzf -ErrorAction SilentlyContinue
     Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r' -ErrorAction SilentlyContinue
 }
+
+# ---- Fastfetch splash (Arch logo + system info) ----
+# Runs only in interactive sessions to avoid polluting scripted/piped pwsh calls.
+if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
+    fastfetch --logo arch
+}
 '@
 
 $ps5Profile = @'
@@ -115,7 +121,17 @@ $wtSettings = @'
     ],
     "profiles":
     {
-        "defaults": {},
+        "defaults":
+        {
+            "colorScheme": "Catppuccin Mocha",
+            "font":
+            {
+                "face": "JetBrainsMono Nerd Font",
+                "size": 11
+            },
+            "opacity": 95,
+            "useAcrylic": true
+        },
         "list":
         [
             {
@@ -144,7 +160,32 @@ $wtSettings = @'
             }
         ]
     },
-    "schemes": [],
+    "schemes":
+    [
+        {
+            "name": "Catppuccin Mocha",
+            "cursorColor": "#F5E0DC",
+            "selectionBackground": "#585B70",
+            "background": "#1E1E2E",
+            "foreground": "#CDD6F4",
+            "black": "#45475A",
+            "red": "#F38BA8",
+            "green": "#A6E3A1",
+            "yellow": "#F9E2AF",
+            "blue": "#89B4FA",
+            "purple": "#F5C2E7",
+            "cyan": "#94E2D5",
+            "white": "#BAC2DE",
+            "brightBlack": "#585B70",
+            "brightRed": "#F38BA8",
+            "brightGreen": "#A6E3A1",
+            "brightYellow": "#F9E2AF",
+            "brightBlue": "#89B4FA",
+            "brightPurple": "#F5C2E7",
+            "brightCyan": "#94E2D5",
+            "brightWhite": "#A6ADC8"
+        }
+    ],
     "theme": "dark",
     "themes": []
 }
@@ -228,9 +269,11 @@ if ($PSCommandPath -and (Test-Path $PSCommandPath)) {
 # ---------------------------------------------------------------------------
 
 Write-Step 'Prerequisites'
-Install-WingetPackage -Id 'Microsoft.PowerShell'      -DisplayName 'PowerShell 7'
-Install-WingetPackage -Id 'Microsoft.WindowsTerminal' -DisplayName 'Windows Terminal'
-Install-WingetPackage -Id 'junegunn.fzf'              -DisplayName 'fzf'
+Install-WingetPackage -Id 'Microsoft.PowerShell'          -DisplayName 'PowerShell 7'
+Install-WingetPackage -Id 'Microsoft.WindowsTerminal'     -DisplayName 'Windows Terminal'
+Install-WingetPackage -Id 'junegunn.fzf'                  -DisplayName 'fzf'
+Install-WingetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont'  -DisplayName 'JetBrains Mono Nerd Font'
+Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
 
 # ---------------------------------------------------------------------------
 # 2) PowerShell 7 profile
