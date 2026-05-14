@@ -31,13 +31,15 @@ as `Trusted`, and deploys these files (any existing config is backed up as
 | Windows Terminal settings | `~\AppData\Local\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json` |
 | Fastfetch config | `~\.config\fastfetch\config.jsonc` |
 
-The PS 7 profile turns on PSReadLine inline predictions with Catppuccin-aligned
-syntax colors, rebinds Tab to accept the suggestion (falling back to the
-completion menu), imports Terminal-Icons for Nerd Font icons in `ls`, wires
-PSFzf for fuzzy history and file pickers, and runs `fastfetch` at the top of
-every interactive session. The Fastfetch config uses the Windows 11 logo and
-a minimalist `icon + value` layout (one colored geometric icon per line: ▦ OS,
-● CPU, ▶ GPU, ◢ Memory, ⛁ Disk). The PS 5 profile
+The PS 7 profile forces the console to UTF-8, turns on PSReadLine inline
+predictions with Catppuccin-aligned syntax colors, rebinds Tab to accept the
+suggestion (falling back to the completion menu), imports Terminal-Icons for
+Nerd Font icons in `ls`, wires PSFzf for fuzzy history and file pickers, and
+runs `fastfetch` at the top of every interactive session. The Fastfetch config
+is inspired by [SleepyCatHey/Ultimate-Win11-Setup](https://github.com/SleepyCatHey/Ultimate-Win11-Setup):
+a custom ASCII art logo (Catppuccin 9-stop pastel gradient driven by `$2..$9`)
+on the left, OS / CPU / Board / Memory / Disk modules on the right with Nerd
+Font icons colored per the Mocha palette, and color circles as a footer. The PS 5 profile
 forces UTF-8, neutralizes the default blue background, and exposes an `isadmin`
 helper. The Windows Terminal settings ship `Ctrl+C` / `Ctrl+V` / `Alt+Shift+D`
 keybindings, the **Catppuccin Mocha** color scheme, JetBrains Mono Nerd Font at

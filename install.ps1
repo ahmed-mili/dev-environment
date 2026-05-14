@@ -41,6 +41,12 @@ function Write-Note($msg) { Write-Host "    !! $msg" -ForegroundColor Yellow }
 # ---------------------------------------------------------------------------
 
 $ps7Profile = @'
+# Force the console to UTF-8 so non-ASCII output (Fastfetch icons, Nerd Font
+# glyphs, accents in directory names) renders correctly instead of mojibake.
+[Console]::InputEncoding  = [System.Text.UTF8Encoding]::new()
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+$OutputEncoding           = [System.Text.UTF8Encoding]::new()
+
 function isadmin {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
@@ -100,7 +106,8 @@ if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction S
     Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r' -ErrorAction SilentlyContinue
 }
 
-# ---- Fastfetch splash (Arch logo + system info) ----
+# ---- Fastfetch splash (Windows logo + system info) ----
+# Uses the config at ~/.config/fastfetch/config.jsonc deployed by this bundle.
 # Runs only in interactive sessions to avoid polluting scripted/piped pwsh calls.
 if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
     fastfetch
@@ -214,27 +221,58 @@ $wtSettings = @'
 }
 '@
 
-# Fastfetch JSONC config: minimalist single-icon-per-line layout.
-# Icons are simple Unicode geometric chars (no Nerd Font required):
-#   U+25A6 OS | U+25CF CPU | U+25B6 GPU | U+25E2 Memory | U+26C1 Disk
+# Fastfetch JSONC config: SleepyCatHey-inspired layout, Catppuccin Mocha.
+# Logo is a custom ASCII file (deployed alongside this config), with a
+# 9-stop pastel gradient driven by $2..$9 in the .txt source.
+# __ASCII_PATH__ is replaced with the absolute deploy path at install time.
 $fastfetchConfig = @'
 {
-    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
-    "logo": { "source": "windows11_small", "padding": { "top": 1, "right": 3 } },
-    "display": { "separator": "  " },
-    "modules": [
-        "break",
-        { "type": "title", "format": "{user-name-colored}@{host-name-colored}" },
-        "break",
-        { "type": "os",     "key": "▦", "keyColor": "blue" },
-        { "type": "cpu",    "key": "●", "keyColor": "red" },
-        { "type": "gpu",    "key": "▶", "keyColor": "magenta" },
-        { "type": "memory", "key": "◢", "keyColor": "green" },
-        { "type": "disk",   "key": "⛁", "keyColor": "yellow" },
-        "break",
-        { "type": "colors", "paddingLeft": 2, "symbol": "circle" }
-    ]
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+  "logo": {
+    "type": "file",
+    "source": "__ASCII_PATH__",
+    "color": {
+      "1": "#F5E0DC", "2": "#F2CDCD", "3": "#F5C2E7",
+      "4": "#FAB387", "5": "#F9E2AF", "6": "#A6E3A1",
+      "7": "#94E2D5", "8": "#89DCEB", "9": "#74C7EC"
+    },
+    "padding": { "top": 1, "right": 3 }
+  },
+  "display": { "separator": " " },
+  "modules": [
+    "break",
+    { "type": "title", "color": { "user": "#F5C2E7", "at": "#CDD6F4", "host": "#89DCEB" } },
+    "break",
+    { "type": "os",     "key": "", "keyColor": "#89DCEB" },
+    { "type": "cpu",    "key": "", "keyColor": "#F5C2E7" },
+    { "type": "board",  "key": "󰚗", "keyColor": "#FAB387" },
+    { "type": "memory", "key": "", "keyColor": "#A6E3A1", "format": "{used} / {total} ({percentage})" },
+    { "type": "disk",   "key": "", "keyColor": "#94E2D5" },
+    "break",
+    { "type": "colors", "symbol": "circle" }
+  ]
 }
+'@
+
+# Custom ASCII art logo for Fastfetch (Catppuccin pastel gradient via $2..$9).
+$fastfetchAscii = @'
+$2⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+$2⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡠⠔⠉⠀⣄⠀⠀⠀⠀⢀⣀⠤⠐⠚⠙
+$3⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⠐⠁⠀⠀⠀⠀⢀⡇⠐⠉⠀⠀⠀⠀⠀⠀⠀
+$3⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠊⠁⠀⠈⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⡀⡐⡌⢆
+$4⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡠⠃⠀⠀⠀⠀⠠⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠪⢨⢊⠂
+$4⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⠁⠀⡀⠀⠀⠀⢀⠠⢄⢄⢔⢖⠲⣤⢤⣄⠀⢪⢘⠌⠀
+$5⠀⠀⠀⠀⠀⠀⠀⠀⢀⡠⠁⠠⠠⣄⠀⠐⠃⢈⠀⢢⠡⡣⠫⡅⡯⠛⠚⠹⠕⠀⠀⡘
+$5⠀⠀⠀⠀⠀⠀⠀⣰⡢⠐⠈⡠⡑⠜⢛⢃⠠⠀⠨⠠⠑⢈⠁⡑⠃⠀⠀⠀⠀⠀⡔⠁
+$6⠀⠀⠀⠀⠀⠀⠀⠁⠅⢌⠠⠂⠁⠀⠘⢈⠡⠂⠠⠀⠂⠀⠂⠀⠀⠀⠀⠀⠀⣈⣃⠀
+$6⠀⠀⠀⠀⠀⠀⠀⡠⠘⠁⠀⠀⠀⠀⠀⡂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⢒⠝⢌⠢⡑
+$7⠀⠀⠀⠀⠀⠄⠂⠀⠀⠀⠀⠀⣀⡼⡕⡪⢋⠕⡡⠣⡩⠪⡑⢍⠫⡫⠫⣖⢯⢦⠵⠜
+$7⠀⠀⠀⢀⠊⠀⠀⠀⠀⠀⠀⣠⢍⠢⡊⣔⢡⢊⠔⡑⢌⠬⢌⠢⡃⡊⡪⣷⢫⠨⡱⡀
+$8⠀⠀⠀⢲⠀⠀⠀⠀⠀⢀⠰⡟⡢⢣⠨⡂⡪⢐⢑⢌⠢⡑⡔⠵⠊⠂⠊⢿⠑⠕⣈⡇
+$8⠀⠀⠀⠘⢤⠀⠀⠀⠀⠈⠀⢳⠨⠢⡑⠌⡢⢑⠰⢐⡵⠚⠁⠀⠀⠀⠀⠈⡄⠀⠈⠀
+$9⠀⠀⠀⠀⠀⠈⠓⠠⢄⡀⡤⠀⠛⣔⡈⠢⢨⠔⠚⠁⠠⠀⠀⠀⠀⠀⠀⠀⠸⠀⠀⠀
+$9⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠁⠀⠀⠈⠁⠉⠁⠀⠀⠀⠀⠠⠀⠀⠀⠀⠀⠀⠀⣇⠀⠀
+
 '@
 
 # ---------------------------------------------------------------------------
@@ -356,14 +394,24 @@ if (-not (Test-Path $wtDir)) {
 }
 
 # ---------------------------------------------------------------------------
-# 5) Fastfetch config (~/.config/fastfetch/config.jsonc)
+# 5) Fastfetch config + custom ASCII logo (~/.config/fastfetch/)
 # ---------------------------------------------------------------------------
 
 Write-Step 'Fastfetch config'
-$ffDir    = Join-Path $env:USERPROFILE '.config\fastfetch'
-$ffTarget = Join-Path $ffDir 'config.jsonc'
-Write-Utf8File -Path $ffTarget -Content $fastfetchConfig -WithBom $false
-Write-Ok $ffTarget
+$ffDir        = Join-Path $env:USERPROFILE '.config\fastfetch'
+$ffConfigPath = Join-Path $ffDir 'config.jsonc'
+$ffAsciiPath  = Join-Path $ffDir 'ascii.txt'
+
+# Deploy the ASCII logo first so the JSON path is valid before Fastfetch runs.
+Write-Utf8File -Path $ffAsciiPath -Content $fastfetchAscii -WithBom $false
+Write-Ok $ffAsciiPath
+
+# Resolve the placeholder in the JSONC template. Forward slashes work on
+# Windows and avoid JSON-escaping every backslash.
+$asciiPathForJson = $ffAsciiPath.Replace('\', '/')
+$resolvedConfig   = $fastfetchConfig.Replace('__ASCII_PATH__', $asciiPathForJson)
+Write-Utf8File -Path $ffConfigPath -Content $resolvedConfig -WithBom $false
+Write-Ok $ffConfigPath
 
 # ---------------------------------------------------------------------------
 # 6) PowerShell 7 modules: CompletionPredictor + PSFzf
