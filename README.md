@@ -11,11 +11,15 @@ iwr https://raw.githubusercontent.com/ahmed-mili/terminal-config-bundle/main/ins
 ## What it does
 
 - Installs **PowerShell 7** and **Windows Terminal** via `winget` (skipped if already present).
-- Sets `CurrentUser` execution policy to `RemoteSigned` so the deployed profiles load on every future session.
-- Drops a **PowerShell 7 profile** with an `isadmin` helper and a Tab key that accepts PSReadLine's inline grey suggestion when one is visible (falls back to menu-complete otherwise).
-- Drops a **Windows PowerShell 5 profile** that forces UTF-8 on every startup, neutralizes the default blue background, and exposes the same `isadmin` helper.
-- Drops a **Windows Terminal `settings.json`** with `Ctrl+C` / `Ctrl+V` / `Alt+Shift+D` keybindings, dark theme, and PowerShell 7 as the default profile.
+- Sets `CurrentUser` execution policy to `RemoteSigned`.
 - Backs up any existing config as `<name>.bak-<timestamp>` before overwriting.
+- Drops these three files:
+
+| File | Path | Contents |
+| --- | --- | --- |
+| PowerShell 7 profile | `~\Documents\PowerShell\Microsoft.PowerShell_profile.ps1` | `isadmin` helper, Tab accepts PSReadLine's inline grey suggestion (falls back to menu-complete) |
+| Windows PowerShell 5 profile | `~\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` | Forces UTF-8, neutralizes the default blue background, `isadmin` helper |
+| Windows Terminal settings | `~\AppData\Local\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json` | `Ctrl+C` / `Ctrl+V` / `Alt+Shift+D` keybindings, dark theme, PowerShell 7 as default profile |
 
 ## License
 
