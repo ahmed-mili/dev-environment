@@ -69,12 +69,14 @@ $fastfetchConfig = FromB64 $fastfetchConfigB64
 # ---------------------------------------------------------------------------
 
 function Backup-IfExists {
+    # Silent: the .bak-<timestamp> file is created so a re-run never destroys
+    # existing config, but we don't print a line for each one. They pile up
+    # on disk only when there was something to back up, and are easy to find
+    # with `Get-ChildItem -Recurse -Filter '*.bak-*'` if needed.
     param([string]$Path)
     if (Test-Path $Path) {
         $stamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
-        $backup = "$Path.bak-$stamp"
-        Copy-Item $Path $backup -Force
-        Write-Note "backed up existing -> $backup"
+        Copy-Item $Path "$Path.bak-$stamp" -Force
     }
 }
 
@@ -264,11 +266,12 @@ Install-PS7Module -Name PSFzf
 Install-PS7Module -Name Terminal-Icons
 
 Write-Host ''
-Write-Host 'Done. CLOSE Windows Terminal entirely and reopen it so the new PATH (fzf), fonts,' -ForegroundColor Green
-Write-Host 'profiles and `pwsh.exe -NoLogo -NoProfileLoadTime` flag all take effect.'         -ForegroundColor Green
+Write-Host 'Done.' -ForegroundColor Green -NoNewline
+Write-Host ' CLOSE Windows Terminal entirely and reopen it so the new PATH'
+Write-Host '       (fzf), fonts and profiles all take effect.'
 Write-Host ''
-Write-Host 'Keybindings in PS 7:' -ForegroundColor Green
-Write-Host '  - F2          : toggle inline / list prediction view' -ForegroundColor Green
-Write-Host '  - Tab / Right : accept the grey suggestion (or open the completion menu)' -ForegroundColor Green
-Write-Host '  - Ctrl+R      : fuzzy reverse history search (fzf)' -ForegroundColor Green
-Write-Host '  - Ctrl+T      : fuzzy file/directory picker (fzf)' -ForegroundColor Green
+Write-Host 'Keybindings in PS 7' -ForegroundColor Cyan
+Write-Host '  Tab / Right    accept the grey suggestion (or open the completion menu)'
+Write-Host '  F2             toggle inline / list prediction view'
+Write-Host '  Ctrl+R         fuzzy reverse history search (fzf)'
+Write-Host '  Ctrl+T         fuzzy file/directory picker (fzf)'
