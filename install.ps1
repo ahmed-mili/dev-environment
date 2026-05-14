@@ -103,7 +103,7 @@ if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction S
 # ---- Fastfetch splash (Arch logo + system info) ----
 # Runs only in interactive sessions to avoid polluting scripted/piped pwsh calls.
 if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
-    fastfetch --logo arch
+    fastfetch
 }
 '@
 
@@ -211,6 +211,40 @@ $wtSettings = @'
     ],
     "theme": "dark",
     "themes": []
+}
+'@
+
+# Fastfetch JSONC config: segmented Windows 11 layout.
+# ANSI ESC encoded as JSON \u001b (Fastfetch parses these).
+# Nerd Font icons (JetBrains Mono Nerd Font, BMP PUA):
+#   F108 desktop | F1C0 database | F2DB microchip | F26C tv
+#   F0A0 hdd     | E70F windows  | F120 terminal  | F017 clock
+#   E795 devterm | F1B3 cubes
+$fastfetchConfig = @'
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": { "source": "windows11_small", "padding": { "top": 1, "right": 3 } },
+    "display": { "separator": "   ", "color": { "keys": "magenta" } },
+    "modules": [
+        "break",
+        { "type": "title",  "format": "{user-name-colored}@{host-name-colored}" },
+        { "type": "custom", "format": "\u001b[35m──────────── \u001b[33mHardware\u001b[35m ────────────\u001b[0m" },
+        { "type": "host",   "key": "  PC" },
+        { "type": "memory", "key": "  RAM" },
+        { "type": "cpu",    "key": "  CPU" },
+        { "type": "gpu",    "key": "  GPU" },
+        { "type": "disk",   "key": "  Disk" },
+        { "type": "custom", "format": "\u001b[35m───────────── \u001b[33mSystem\u001b[35m ─────────────\u001b[0m" },
+        { "type": "os",     "key": "  OS" },
+        { "type": "kernel", "key": "  Kernel" },
+        { "type": "uptime", "key": "  Uptime" },
+        { "type": "custom", "format": "\u001b[35m────────────── \u001b[33mShell\u001b[35m ──────────────\u001b[0m" },
+        { "type": "shell",    "key": "  Shell" },
+        { "type": "terminal", "key": "  Terminal" },
+        { "type": "packages", "key": "  Packages" },
+        "break",
+        { "type": "colors", "paddingLeft": 2, "symbol": "circle" }
+    ]
 }
 '@
 
@@ -333,7 +367,17 @@ if (-not (Test-Path $wtDir)) {
 }
 
 # ---------------------------------------------------------------------------
-# 5) PowerShell 7 modules: CompletionPredictor + PSFzf
+# 5) Fastfetch config (~/.config/fastfetch/config.jsonc)
+# ---------------------------------------------------------------------------
+
+Write-Step 'Fastfetch config'
+$ffDir    = Join-Path $env:USERPROFILE '.config\fastfetch'
+$ffTarget = Join-Path $ffDir 'config.jsonc'
+Write-Utf8File -Path $ffTarget -Content $fastfetchConfig -WithBom $false
+Write-Ok $ffTarget
+
+# ---------------------------------------------------------------------------
+# 6) PowerShell 7 modules: CompletionPredictor + PSFzf
 # ---------------------------------------------------------------------------
 
 Write-Step 'PowerShell 7 modules'
