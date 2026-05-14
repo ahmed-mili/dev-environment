@@ -195,33 +195,61 @@ Write-Step 'Fastfetch config'
 $ffDir        = Join-Path $env:USERPROFILE '.config\fastfetch'
 $ffConfigPath = Join-Path $ffDir 'config.jsonc'
 
-# Patch the embedded config to label row 'Board' as 'Laptop' on portable PCs.
-# Win32_BaseBoard reports the same data on both, but 'Board' is misleading on
-# a laptop where the board IS the machine model.
-# ChassisTypes per SMBIOS: portables = 8,9,10,11,12,14,18,21,30,31,32.
-$laptopChassisTypes = @(8,9,10,11,12,14,18,21,30,31,32)
+# Decide whether this is a laptop or a desktop, so the "Board" row in
+# fastfetch can be relabelled "Laptop" (with the laptop icon) on portables.
+#
+# Two independent signals are combined because each one fails on some
+# hardware:
+#  1) Win32_SystemEnclosure.ChassisTypes  (SMBIOS)
+#     Some OEMs ship laptops with this field set to "Desktop" (3) or
+#     "Unknown" (2), so on its own it can miss real laptops.
+#  2) Win32_Battery presence
+#     Desktops never have an internal battery exposed via WMI, laptops
+#     always do. Far more reliable in practice than ChassisTypes.
+#
+# Portable SMBIOS chassis types we accept: 8 Portable, 9 Laptop,
+# 10 Notebook, 11 Hand Held, 14 Sub Notebook, 30 Tablet, 31 Convertible,
+# 32 Detachable. (12 Docking Station, 18 Expansion, 21 Peripheral are NOT
+# laptops and were dropped from the previous list.)
+$laptopChassisTypes = @(8,9,10,11,14,30,31,32)
 $isLaptop = $false
+$reason   = ''
 try {
-    $chassis = (Get-CimInstance Win32_SystemEnclosure -ErrorAction Stop).ChassisTypes
+    $chassis = @((Get-CimInstance Win32_SystemEnclosure -ErrorAction Stop).ChassisTypes)
     foreach ($c in $chassis) {
-        if ($c -in $laptopChassisTypes) { $isLaptop = $true; break }
+        if ($c -in $laptopChassisTypes) { $isLaptop = $true; $reason = "ChassisTypes=$c"; break }
     }
 } catch {}
+if (-not $isLaptop) {
+    try {
+        if (Get-CimInstance Win32_Battery -ErrorAction Stop) {
+            $isLaptop = $true
+            $reason   = 'battery present'
+        }
+    } catch {}
+}
+
 if ($isLaptop) {
-    # The JSON file stores ESC as the 6-char escape ''; matching the
-    # trailing one anchors the replacement to the right key field.
+    # The JSON file stores ESC as the 6-char escape ''; the icon glyph
+    # is a 4-byte UTF-8 supplementary-plane char, built here via
+    # ConvertFromUtf32 so this .ps1 source stays free of raw 4-byte chars.
     # U+F0697 = nf-md-developer_board (desktops)
     # U+F0322 = nf-md-laptop          (laptops)
     $boardIcon  = [char]::ConvertFromUtf32(0xF0697)
     $laptopIcon = [char]::ConvertFromUtf32(0xF0322)
-    $boardKey   = $boardIcon  + '  Board'
-    $laptopKey  = $laptopIcon + '  Laptop'
+    $boardKey   = $boardIcon  + '  Board'
+    $laptopKey  = $laptopIcon + '  Laptop'
+
+    $before = $fastfetchConfig
     $fastfetchConfig = $fastfetchConfig.Replace($boardKey, $laptopKey)
-    Write-Ok 'Chassis: laptop -> swapping icon + label to "Laptop"'
+    if ($fastfetchConfig -eq $before) {
+        Write-Note "Laptop detected ($reason) but the board key was not found in the embedded config -- icon NOT swapped."
+    } else {
+        Write-Ok "Chassis: laptop ($reason) -> swapped icon + label to ""Laptop"""
+    }
 } else {
     Write-Ok 'Chassis: desktop -> keeping icon + label "Board"'
 }
-
 Write-Utf8File -Path $ffConfigPath -Content $fastfetchConfig -WithBom $false
 Write-Ok $ffConfigPath
 
