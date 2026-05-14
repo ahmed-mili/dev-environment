@@ -36,7 +36,8 @@ syntax colors, rebinds Tab to accept the suggestion (falling back to the
 completion menu), imports Terminal-Icons for Nerd Font icons in `ls`, wires
 PSFzf for fuzzy history and file pickers, and runs `fastfetch` at the top of
 every interactive session. The Fastfetch config uses the Windows 11 logo and
-shows Hardware / System / Shell sections with Nerd Font icons. The PS 5 profile
+a minimalist `icon + value` layout (one colored geometric icon per line: ▦ OS,
+● CPU, ▶ GPU, ◢ Memory, ⛁ Disk). The PS 5 profile
 forces UTF-8, neutralizes the default blue background, and exposes an `isadmin`
 helper. The Windows Terminal settings ship `Ctrl+C` / `Ctrl+V` / `Alt+Shift+D`
 keybindings, the **Catppuccin Mocha** color scheme, JetBrains Mono Nerd Font at

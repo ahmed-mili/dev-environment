@@ -214,34 +214,23 @@ $wtSettings = @'
 }
 '@
 
-# Fastfetch JSONC config: segmented Windows 11 layout.
-# ANSI ESC encoded as JSON \u001b (Fastfetch parses these).
-# Nerd Font icons (JetBrains Mono Nerd Font, BMP PUA):
-#   F108 desktop | F1C0 database | F2DB microchip | F26C tv
-#   F0A0 hdd     | E70F windows  | F120 terminal  | F017 clock
-#   E795 devterm | F1B3 cubes
+# Fastfetch JSONC config: minimalist single-icon-per-line layout.
+# Icons are simple Unicode geometric chars (no Nerd Font required):
+#   U+25A6 OS | U+25CF CPU | U+25B6 GPU | U+25E2 Memory | U+26C1 Disk
 $fastfetchConfig = @'
 {
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
     "logo": { "source": "windows11_small", "padding": { "top": 1, "right": 3 } },
-    "display": { "separator": "   ", "color": { "keys": "magenta" } },
+    "display": { "separator": "  " },
     "modules": [
         "break",
-        { "type": "title",  "format": "{user-name-colored}@{host-name-colored}" },
-        { "type": "custom", "format": "\u001b[35m──────────── \u001b[33mHardware\u001b[35m ────────────\u001b[0m" },
-        { "type": "host",   "key": "  PC" },
-        { "type": "memory", "key": "  RAM" },
-        { "type": "cpu",    "key": "  CPU" },
-        { "type": "gpu",    "key": "  GPU" },
-        { "type": "disk",   "key": "  Disk" },
-        { "type": "custom", "format": "\u001b[35m───────────── \u001b[33mSystem\u001b[35m ─────────────\u001b[0m" },
-        { "type": "os",     "key": "  OS" },
-        { "type": "kernel", "key": "  Kernel" },
-        { "type": "uptime", "key": "  Uptime" },
-        { "type": "custom", "format": "\u001b[35m────────────── \u001b[33mShell\u001b[35m ──────────────\u001b[0m" },
-        { "type": "shell",    "key": "  Shell" },
-        { "type": "terminal", "key": "  Terminal" },
-        { "type": "packages", "key": "  Packages" },
+        { "type": "title", "format": "{user-name-colored}@{host-name-colored}" },
+        "break",
+        { "type": "os",     "key": "▦", "keyColor": "blue" },
+        { "type": "cpu",    "key": "●", "keyColor": "red" },
+        { "type": "gpu",    "key": "▶", "keyColor": "magenta" },
+        { "type": "memory", "key": "◢", "keyColor": "green" },
+        { "type": "disk",   "key": "⛁", "keyColor": "yellow" },
         "break",
         { "type": "colors", "paddingLeft": 2, "symbol": "circle" }
     ]
