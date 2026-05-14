@@ -45,12 +45,30 @@ function isadmin {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# ---- PSReadLine: modern predictions + smart Tab ----
+# ---- PSReadLine: modern predictions + smart Tab + Catppuccin Mocha colors ----
 # - InlineView by default (grey ghost text). F2 toggles to ListView (dropdown).
 # - Tab accepts the inline prediction if one is visible, else MenuComplete.
 # - Right Arrow / Ctrl+RightArrow also accept (standard PSReadLine behavior).
+# - Syntax-highlight colors aligned with the Catppuccin Mocha palette.
 if (Get-Module -Name PSReadLine -ListAvailable) {
     Set-PSReadLineOption -PredictionSource HistoryAndPlugin -PredictionViewStyle InlineView -ErrorAction SilentlyContinue
+    Set-PSReadLineOption -Colors @{
+        Command            = '#89B4FA'  # Blue
+        Parameter          = '#F5C2E7'  # Pink
+        Variable           = '#F5C2E7'  # Pink
+        String             = '#A6E3A1'  # Green
+        Number             = '#FAB387'  # Peach
+        Type               = '#F9E2AF'  # Yellow
+        Keyword            = '#CBA6F7'  # Mauve
+        Comment            = '#6C7086'  # Overlay0
+        Operator           = '#89DCEB'  # Sky
+        Member             = '#94E2D5'  # Teal
+        Error              = '#F38BA8'  # Red
+        Emphasis           = '#F38BA8'  # Red
+        InlinePrediction   = '#6C7086'  # Overlay0 (dimmed ghost text)
+        Default            = '#CDD6F4'  # Text
+        ContinuationPrompt = '#A6ADC8'  # Subtext0
+    } -ErrorAction SilentlyContinue
     Set-PSReadLineKeyHandler -Key F2 -Function SwitchPredictionView
     Set-PSReadLineKeyHandler -Key Tab -ScriptBlock {
         $line = $null; $cursor = $null
@@ -70,11 +88,22 @@ if (Get-Module -ListAvailable -Name CompletionPredictor) {
     Import-Module CompletionPredictor -ErrorAction SilentlyContinue
 }
 
+# ---- Terminal-Icons: Nerd Font icons in Get-ChildItem (`ls`) output ----
+if (Get-Module -ListAvailable -Name Terminal-Icons) {
+    Import-Module Terminal-Icons -ErrorAction SilentlyContinue
+}
+
 # ---- PSFzf: Ctrl+R fuzzy reverse-history, Ctrl+T fuzzy file/dir picker ----
 # Only loaded when fzf.exe is available on PATH.
 if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction SilentlyContinue)) {
     Import-Module PSFzf -ErrorAction SilentlyContinue
     Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r' -ErrorAction SilentlyContinue
+}
+
+# ---- Oh My Posh: segmented prompt with the catppuccin_mocha theme ----
+# Theme name is resolved internally by OMP (themes are bundled in the binary).
+if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
+    oh-my-posh init pwsh --config catppuccin_mocha | Invoke-Expression
 }
 
 # ---- Fastfetch splash (Arch logo + system info) ----
@@ -129,7 +158,7 @@ $wtSettings = @'
                 "face": "JetBrainsMono Nerd Font",
                 "size": 11
             },
-            "opacity": 95,
+            "opacity": 85,
             "useAcrylic": true
         },
         "list":
@@ -274,6 +303,7 @@ Install-WingetPackage -Id 'Microsoft.WindowsTerminal'     -DisplayName 'Windows 
 Install-WingetPackage -Id 'junegunn.fzf'                  -DisplayName 'fzf'
 Install-WingetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont'  -DisplayName 'JetBrains Mono Nerd Font'
 Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
+Install-WingetPackage -Id 'JanDeDobbeleer.OhMyPosh'       -DisplayName 'Oh My Posh'
 
 # ---------------------------------------------------------------------------
 # 2) PowerShell 7 profile
@@ -347,6 +377,7 @@ function Install-PS7Module {
 
 Install-PS7Module -Name CompletionPredictor
 Install-PS7Module -Name PSFzf
+Install-PS7Module -Name Terminal-Icons
 
 Write-Host ''
 Write-Host 'Done. CLOSE Windows Terminal and reopen it so the new PATH (fzf) and profiles take effect.' -ForegroundColor Green
