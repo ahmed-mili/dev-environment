@@ -33,7 +33,6 @@
     .\install.ps1
 #>
 
-[CmdletBinding()]
 param(
     [switch]$SkipWinget
 )
