@@ -1,28 +1,36 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Windows Terminal + PowerShell config bundle -- single-file installer.
+    Windows + PowerShell config bundle -- single-file installer.
 
 .DESCRIPTION
-    Installs PowerShell 7 and Windows Terminal via winget (if missing),
-    then deploys PS5 + PS7 profiles and the Windows Terminal settings.json
-    for the current user. All payloads are embedded in this single script.
+    Installs PowerShell 7, Windows Terminal, fzf, JetBrainsMono Nerd Font and
+    Fastfetch via winget (skipped if already present), then deploys:
+      - PowerShell 7 profile (UTF-8, Catppuccin PSReadLine, predictions,
+        Terminal-Icons, PSFzf, fastfetch splash with WMI-detected RAM and a
+        per-character gradient USER@HOST header)
+      - Windows PowerShell 5 profile (UTF-8 + isadmin helper)
+      - Windows Terminal settings.json (Catppuccin Mocha scheme, JetBrainsMono
+        Nerd Font 11pt, acrylic, PowerShell 7 default with
+        `pwsh.exe -NoLogo -NoProfileLoadTime`)
+      - Fastfetch config (cool-tone Catppuccin gradient across header,
+        divider and module rows -- no Linux-style 8-color palette footer)
+    All payloads are embedded as base64 (handles ANSI escapes, single quotes
+    and Nerd Font glyphs without quoting issues).
 
 .PARAMETER SkipWinget
-    Skip the winget installation step (PowerShell 7 + Windows Terminal).
-    Use this if Windows Terminal has never been launched on this machine:
-    launch WT once so its LocalState folder is created, then re-run with -SkipWinget.
+    Skip the winget installation step.
 
 .LINK
-    https://github.com/ahmed-mili/terminal-config-bundle
+    https://github.com/ahmed-mili/windows-pwsh-config
+
+.EXAMPLE
+    # One-liner (no clone required):
+    iwr https://raw.githubusercontent.com/ahmed-mili/windows-pwsh-config/main/install.ps1 -UseBasicParsing | iex
 
 .EXAMPLE
     # From a local clone:
     .\install.ps1
-
-.EXAMPLE
-    # One-liner (no clone required):
-    iwr https://raw.githubusercontent.com/ahmed-mili/terminal-config-bundle/main/install.ps1 -UseBasicParsing | iex
 #>
 
 [CmdletBinding()]
@@ -37,243 +45,25 @@ function Write-Ok($msg)   { Write-Host "    OK : $msg" -ForegroundColor Green }
 function Write-Note($msg) { Write-Host "    !! $msg" -ForegroundColor Yellow }
 
 # ---------------------------------------------------------------------------
-# Embedded payloads
+# Embedded payloads (base64 to neutralise quoting / control-char hazards)
 # ---------------------------------------------------------------------------
 
-$ps7Profile = @'
-# Force the console to UTF-8 so non-ASCII output (Fastfetch icons, Nerd Font
-# glyphs, accents in directory names) renders correctly instead of mojibake.
-[Console]::InputEncoding  = [System.Text.UTF8Encoding]::new()
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-$OutputEncoding           = [System.Text.UTF8Encoding]::new()
+$ps7ProfileB64 = 'IyBGb3JjZSB0aGUgY29uc29sZSB0byBVVEYtOCBzbyBub24tQVNDSUkgb3V0cHV0IChGYXN0ZmV0Y2ggaWNvbnMsIE5lcmQgRm9udAojIGdseXBocywgYWNjZW50cyBpbiBkaXJlY3RvcnkgbmFtZXMpIHJlbmRlcnMgY29ycmVjdGx5IGluc3RlYWQgb2YgbW9qaWJha2UuCltDb25zb2xlXTo6SW5wdXRFbmNvZGluZyAgPSBbU3lzdGVtLlRleHQuVVRGOEVuY29kaW5nXTo6bmV3KCkKW0NvbnNvbGVdOjpPdXRwdXRFbmNvZGluZyA9IFtTeXN0ZW0uVGV4dC5VVEY4RW5jb2RpbmddOjpuZXcoKQokT3V0cHV0RW5jb2RpbmcgICAgICAgICAgID0gW1N5c3RlbS5UZXh0LlVURjhFbmNvZGluZ106Om5ldygpCgpmdW5jdGlvbiBpc2FkbWluIHsKICAgIChbU2VjdXJpdHkuUHJpbmNpcGFsLldpbmRvd3NQcmluY2lwYWxdW1NlY3VyaXR5LlByaW5jaXBhbC5XaW5kb3dzSWRlbnRpdHldOjpHZXRDdXJyZW50KCkpLklzSW5Sb2xlKFtTZWN1cml0eS5QcmluY2lwYWwuV2luZG93c0J1aWx0SW5Sb2xlXTo6QWRtaW5pc3RyYXRvcikKfQoKIyAtLS0tIFBTUmVhZExpbmU6IG1vZGVybiBwcmVkaWN0aW9ucyArIHNtYXJ0IFRhYiArIENhdHBwdWNjaW4gTW9jaGEgY29sb3JzIC0tLS0KIyAtIElubGluZVZpZXcgYnkgZGVmYXVsdCAoZ3JleSBnaG9zdCB0ZXh0KS4gRjIgdG9nZ2xlcyB0byBMaXN0VmlldyAoZHJvcGRvd24pLgojIC0gVGFiIGFjY2VwdHMgdGhlIGlubGluZSBwcmVkaWN0aW9uIGlmIG9uZSBpcyB2aXNpYmxlLCBlbHNlIE1lbnVDb21wbGV0ZS4KIyAtIFJpZ2h0IEFycm93IC8gQ3RybCtSaWdodEFycm93IGFsc28gYWNjZXB0IChzdGFuZGFyZCBQU1JlYWRMaW5lIGJlaGF2aW9yKS4KIyAtIFN5bnRheC1oaWdobGlnaHQgY29sb3JzIGFsaWduZWQgd2l0aCB0aGUgQ2F0cHB1Y2NpbiBNb2NoYSBwYWxldHRlLgppZiAoR2V0LU1vZHVsZSAtTmFtZSBQU1JlYWRMaW5lIC1MaXN0QXZhaWxhYmxlKSB7CiAgICBTZXQtUFNSZWFkTGluZU9wdGlvbiAtUHJlZGljdGlvblNvdXJjZSBIaXN0b3J5QW5kUGx1Z2luIC1QcmVkaWN0aW9uVmlld1N0eWxlIElubGluZVZpZXcgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUKICAgIFNldC1QU1JlYWRMaW5lT3B0aW9uIC1Db2xvcnMgQHsKICAgICAgICBDb21tYW5kICAgICAgICAgICAgPSAnIzg5QjRGQScgICMgQmx1ZQogICAgICAgIFBhcmFtZXRlciAgICAgICAgICA9ICcjRjVDMkU3JyAgIyBQaW5rCiAgICAgICAgVmFyaWFibGUgICAgICAgICAgID0gJyNGNUMyRTcnICAjIFBpbmsKICAgICAgICBTdHJpbmcgICAgICAgICAgICAgPSAnI0E2RTNBMScgICMgR3JlZW4KICAgICAgICBOdW1iZXIgICAgICAgICAgICAgPSAnI0ZBQjM4NycgICMgUGVhY2gKICAgICAgICBUeXBlICAgICAgICAgICAgICAgPSAnI0Y5RTJBRicgICMgWWVsbG93CiAgICAgICAgS2V5d29yZCAgICAgICAgICAgID0gJyNDQkE2RjcnICAjIE1hdXZlCiAgICAgICAgQ29tbWVudCAgICAgICAgICAgID0gJyM2QzcwODYnICAjIE92ZXJsYXkwCiAgICAgICAgT3BlcmF0b3IgICAgICAgICAgID0gJyM4OURDRUInICAjIFNreQogICAgICAgIE1lbWJlciAgICAgICAgICAgICA9ICcjOTRFMkQ1JyAgIyBUZWFsCiAgICAgICAgRXJyb3IgICAgICAgICAgICAgID0gJyNGMzhCQTgnICAjIFJlZAogICAgICAgIEVtcGhhc2lzICAgICAgICAgICA9ICcjRjM4QkE4JyAgIyBSZWQKICAgICAgICBJbmxpbmVQcmVkaWN0aW9uICAgPSAnIzZDNzA4NicgICMgT3ZlcmxheTAgKGRpbW1lZCBnaG9zdCB0ZXh0KQogICAgICAgIERlZmF1bHQgICAgICAgICAgICA9ICcjQ0RENkY0JyAgIyBUZXh0CiAgICAgICAgQ29udGludWF0aW9uUHJvbXB0ID0gJyNBNkFEQzgnICAjIFN1YnRleHQwCiAgICB9IC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCiAgICBTZXQtUFNSZWFkTGluZUtleUhhbmRsZXIgLUtleSBGMiAtRnVuY3Rpb24gU3dpdGNoUHJlZGljdGlvblZpZXcKICAgIFNldC1QU1JlYWRMaW5lS2V5SGFuZGxlciAtS2V5IFRhYiAtU2NyaXB0QmxvY2sgewogICAgICAgICRsaW5lID0gJG51bGw7ICRjdXJzb3IgPSAkbnVsbAogICAgICAgIFtNaWNyb3NvZnQuUG93ZXJTaGVsbC5QU0NvbnNvbGVSZWFkTGluZV06OkdldEJ1ZmZlclN0YXRlKFtyZWZdJGxpbmUsIFtyZWZdJGN1cnNvcikKICAgICAgICBbTWljcm9zb2Z0LlBvd2VyU2hlbGwuUFNDb25zb2xlUmVhZExpbmVdOjpBY2NlcHRTdWdnZXN0aW9uKCkKICAgICAgICAkbmV3TGluZSA9ICRudWxsOyAkbmV3Q3Vyc29yID0gJG51bGwKICAgICAgICBbTWljcm9zb2Z0LlBvd2VyU2hlbGwuUFNDb25zb2xlUmVhZExpbmVdOjpHZXRCdWZmZXJTdGF0ZShbcmVmXSRuZXdMaW5lLCBbcmVmXSRuZXdDdXJzb3IpCiAgICAgICAgaWYgKCRsaW5lIC1lcSAkbmV3TGluZSkgewogICAgICAgICAgICBbTWljcm9zb2Z0LlBvd2VyU2hlbGwuUFNDb25zb2xlUmVhZExpbmVdOjpNZW51Q29tcGxldGUoKQogICAgICAgIH0KICAgIH0KfQoKIyAtLS0tIENvbXBsZXRpb25QcmVkaWN0b3I6IHNtYXJ0IHByZWRpY3Rpb25zIGJleW9uZCBzaGVsbCBoaXN0b3J5CiMgKGNtZGxldCBwYXJhbWV0ZXJzLCBnaXQgYnJhbmNoZXMsIGZpbGUgcGF0aHMsIGV0Yy4pIC0tLS0KaWYgKEdldC1Nb2R1bGUgLUxpc3RBdmFpbGFibGUgLU5hbWUgQ29tcGxldGlvblByZWRpY3RvcikgewogICAgSW1wb3J0LU1vZHVsZSBDb21wbGV0aW9uUHJlZGljdG9yIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCn0KCiMgLS0tLSBUZXJtaW5hbC1JY29uczogTmVyZCBGb250IGljb25zIGluIEdldC1DaGlsZEl0ZW0gKGBsc2ApIG91dHB1dCAtLS0tCmlmIChHZXQtTW9kdWxlIC1MaXN0QXZhaWxhYmxlIC1OYW1lIFRlcm1pbmFsLUljb25zKSB7CiAgICBJbXBvcnQtTW9kdWxlIFRlcm1pbmFsLUljb25zIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCn0KCiMgLS0tLSBQU0Z6ZjogQ3RybCtSIGZ1enp5IHJldmVyc2UtaGlzdG9yeSwgQ3RybCtUIGZ1enp5IGZpbGUvZGlyIHBpY2tlciAtLS0tCiMgT25seSBsb2FkZWQgd2hlbiBmemYuZXhlIGlzIGF2YWlsYWJsZSBvbiBQQVRILgppZiAoKEdldC1Nb2R1bGUgLUxpc3RBdmFpbGFibGUgLU5hbWUgUFNGemYpIC1hbmQgKEdldC1Db21tYW5kIGZ6ZiAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSkpIHsKICAgIEltcG9ydC1Nb2R1bGUgUFNGemYgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUKICAgIFNldC1Qc0Z6Zk9wdGlvbiAtUFNSZWFkbGluZUNob3JkUHJvdmlkZXIgJ0N0cmwrdCcgLVBTUmVhZGxpbmVDaG9yZFJldmVyc2VIaXN0b3J5ICdDdHJsK3InIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCn0KCiMgLS0tLSBGYXN0ZmV0Y2ggc3BsYXNoIChXaW5kb3dzIGxvZ28gKyBzeXN0ZW0gaW5mbykgLS0tLQojIFVzZXMgdGhlIGNvbmZpZyBhdCB+Ly5jb25maWcvZmFzdGZldGNoL2NvbmZpZy5qc29uYyBkZXBsb3llZCBieSB0aGlzIGJ1bmRsZS4KIyBSdW5zIG9ubHkgaW4gaW50ZXJhY3RpdmUgc2Vzc2lvbnMgdG8gYXZvaWQgcG9sbHV0aW5nIHNjcmlwdGVkL3BpcGVkIHB3c2ggY2FsbHMuCmlmICgoLW5vdCBbU3lzdGVtLkNvbnNvbGVdOjpJc091dHB1dFJlZGlyZWN0ZWQpIC1hbmQgKEdldC1Db21tYW5kIGZhc3RmZXRjaCAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSkpIHsKICAgICMgQWdncmVnYXRlIHBoeXNpY2FsLW1lbW9yeSBpbmZvIHZpYSBXTUkgKHBvcnRhYmxlIGFjcm9zcyBhbnkgV2luZG93cyBQQykgYW5kCiAgICAjIGV4cG9zZSBhcyAkZW52OkZGX1JBTSBzbyBmYXN0ZmV0Y2gncyBgY29tbWFuZGAgbW9kdWxlIGNhbiBlY2hvIGl0IGNoZWFwbHkKICAgICMgaW5zdGVhZCBvZiBwYXlpbmcgQ0lNIGNvc3Qgb24gZXZlcnkgZmFzdGZldGNoIGludm9jYXRpb24uCiAgICB0cnkgewogICAgICAgICRtID0gR2V0LUNpbUluc3RhbmNlIFdpbjMyX1BoeXNpY2FsTWVtb3J5IC1FcnJvckFjdGlvbiBTdG9wCiAgICAgICAgJHR5cGVNYXAgPSBAeyAyMD0nRERSJzsgMjE9J0REUjInOyAyND0nRERSMyc7IDI2PSdERFI0JzsgMzQ9J0REUjUnIH0KICAgICAgICAkdHlwZXMgPSAkbS5TTUJJT1NNZW1vcnlUeXBlIHwgU29ydC1PYmplY3QgLVVuaXF1ZQogICAgICAgICRzcGVlZHMgPSAkbS5TcGVlZCB8IFNvcnQtT2JqZWN0IC1VbmlxdWUKICAgICAgICAkc2l6ZXMgPSAkbS5DYXBhY2l0eSB8IFNvcnQtT2JqZWN0IC1VbmlxdWUKICAgICAgICAkdmVuZG9ycyA9ICgkbS5NYW51ZmFjdHVyZXIgfCBGb3JFYWNoLU9iamVjdCB7ICRfLlRyaW0oKSB9IHwgV2hlcmUtT2JqZWN0IHsgJF8gfSkgfCBTb3J0LU9iamVjdCAtVW5pcXVlCiAgICAgICAgaWYgKCR0eXBlcy5Db3VudCAtZXEgMSAtYW5kICRzcGVlZHMuQ291bnQgLWVxIDEgLWFuZCAkc2l6ZXMuQ291bnQgLWVxIDEpIHsKICAgICAgICAgICAgJHQgPSAkdHlwZU1hcFtbaW50XSR0eXBlc1swXV07IGlmICgtbm90ICR0KSB7ICR0ID0gJ0RSQU0nIH0KICAgICAgICAgICAgJHNpemVFYWNoID0gW01hdGhdOjpSb3VuZCgkc2l6ZXNbMF0gLyAxR0IsIDIpCiAgICAgICAgICAgICR2ZW5kb3IgPSBpZiAoJHZlbmRvcnMpIHsgIiAoJCgkdmVuZG9ycyAtam9pbiAnLycpKSIgfSBlbHNlIHsgJycgfQogICAgICAgICAgICAkZW52OkZGX1JBTSA9ICIkKCRtLkNvdW50KSAkKFtjaGFyXTB4MDBENykgJHNpemVFYWNoIEdpQiAkdC0kKCRzcGVlZHNbMF0pJHZlbmRvciIKICAgICAgICB9IGVsc2UgewogICAgICAgICAgICAkdG90YWxHaUIgPSBbTWF0aF06OlJvdW5kKCgoJG0gfCBNZWFzdXJlLU9iamVjdCBDYXBhY2l0eSAtU3VtKS5TdW0pIC8gMUdCLCAyKQogICAgICAgICAgICAkdCA9ICR0eXBlTWFwW1tpbnRdJHR5cGVzWzBdXTsgaWYgKC1ub3QgJHQpIHsgJHQgPSAnRFJBTScgfQogICAgICAgICAgICAkZW52OkZGX1JBTSA9ICIkKCRtLkNvdW50KSBzdGlja3MsICR0b3RhbEdpQiBHaUIgJHQgKG1peGVkKSIKICAgICAgICB9CiAgICB9IGNhdGNoIHsKICAgICAgICAkZW52OkZGX1JBTSA9ICcnCiAgICB9CgogICAgIyBQcmludCBhIHBlci1jaGFyYWN0ZXIgZ3JhZGllbnQgVVNFUkBIT1NUIGhlYWRlciBiZWZvcmUgZmFzdGZldGNoLgogICAgIyBUaGUgZ3JhZGllbnQgd2Fsa3MgdGhlIHNhbWUgNSBDYXRwcHVjY2luIHN0b3BzIGFzIHRoZSByZXN0IG9mIHRoZSBzcGxhc2gKICAgICMgKEZsYW1pbmdvIOKGkiBQaW5rIOKGkiBNYXV2ZSDihpIgTGF2ZW5kZXIg4oaSIFNhcHBoaXJlKSBzbyB0aGUgd2hvbGUgaGVhZGVyIGlzIGEKICAgICMgc2luZ2xlIGNvbnRpbnVvdXMgcGFsZXR0ZSByaWJib24uCiAgICAkdGl0bGVUZXh0ID0gIiRlbnY6VVNFUk5BTUVAJGVudjpDT01QVVRFUk5BTUUiCiAgICAjIFJlc3RyaWN0ZWQgZ3JhZGllbnQgZm9yIHRoZSB0aXRsZSDigJQgdXNlcyBvbmx5IHRoZSBjb29sLXNpZGUgdHJpbzoKICAgICMgdGhlIGV4YWN0IGNvbG9ycyBvZiB0aGUgUkFNLCBEcml2ZSBhbmQgRGlzcGxheSByb3dzIG9mIHRoZSBzcGxhc2guCiAgICAkc3RvcHMgPSBAKAogICAgICAgIEAoMTkyLCAxNzgsIDI1MCksICAjIFJBTSAgICAgKGxlcnAgTWF1dmXihpJMYXZlbmRlcikKICAgICAgICBAKDE4MCwgMTkwLCAyNTQpLCAgIyBEcml2ZSAgIChMYXZlbmRlcikKICAgICAgICBAKDE0OCwgMTk0LCAyNDUpICAgIyBEaXNwbGF5IChsZXJwIExhdmVuZGVy4oaSU2FwcGhpcmUpCiAgICApCiAgICAkc2VnQ291bnQgPSAkc3RvcHMuQ291bnQgLSAxCiAgICAkc2IgPSBbU3lzdGVtLlRleHQuU3RyaW5nQnVpbGRlcl06Om5ldygpCiAgICBbdm9pZF0kc2IuQXBwZW5kKCJgbiIpCiAgICAkbiA9ICR0aXRsZVRleHQuTGVuZ3RoCiAgICBmb3IgKCRpID0gMDsgJGkgLWx0ICRuOyAkaSsrKSB7CiAgICAgICAgJHUgPSBpZiAoJG4gLWd0IDEpIHsgKCRpIC8gKCRuIC0gMSkpICogJHNlZ0NvdW50IH0gZWxzZSB7IDAgfQogICAgICAgICRzZWcgPSBbTWF0aF06Ok1pbihbaW50XVtNYXRoXTo6Rmxvb3IoJHUpLCAkc2VnQ291bnQgLSAxKQogICAgICAgICR0ID0gJHUgLSAkc2VnCiAgICAgICAgJGEgPSAkc3RvcHNbJHNlZ107ICRiID0gJHN0b3BzWyRzZWcgKyAxXQogICAgICAgICRyID0gW2ludF1bTWF0aF06OlJvdW5kKCRhWzBdICsgKCRiWzBdIC0gJGFbMF0pICogJHQpCiAgICAgICAgJGcgPSBbaW50XVtNYXRoXTo6Um91bmQoJGFbMV0gKyAoJGJbMV0gLSAkYVsxXSkgKiAkdCkKICAgICAgICAkYmIgPSBbaW50XVtNYXRoXTo6Um91bmQoJGFbMl0gKyAoJGJbMl0gLSAkYVsyXSkgKiAkdCkKICAgICAgICBbdm9pZF0kc2IuQXBwZW5kKCIkKFtjaGFyXTI3KVsxOzM4OzI7JHI7JGc7JHtiYn1tJCgkdGl0bGVUZXh0WyRpXSkiKQogICAgfQogICAgW3ZvaWRdJHNiLkFwcGVuZCgiJChbY2hhcl0yNylbMG0iKQogICAgW0NvbnNvbGVdOjpPdXQuV3JpdGVMaW5lKCRzYi5Ub1N0cmluZygpKQoKICAgIGZhc3RmZXRjaAp9'
 
-function isadmin {
-    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$ps5ProfileB64 = 'ZnVuY3Rpb24gcHJvbXB0IHsgIlBTICQoJGV4ZWN1dGlvbkNvbnRleHQuU2Vzc2lvblN0YXRlLlBhdGguQ3VycmVudExvY2F0aW9uKSQoJz4nICogKCRuZXN0ZWRQcm9tcHRMZXZlbCArIDEpKSAiIH0KCltDb25zb2xlXTo6SW5wdXRFbmNvZGluZyAgPSBbU3lzdGVtLlRleHQuVVRGOEVuY29kaW5nXTo6bmV3KCkKW0NvbnNvbGVdOjpPdXRwdXRFbmNvZGluZyA9IFtTeXN0ZW0uVGV4dC5VVEY4RW5jb2RpbmddOjpuZXcoKQpjaGNwIDY1MDAxID4gJG51bGwKCiRIb3N0LlVJLlJhd1VJLkJhY2tncm91bmRDb2xvciA9ICdCbGFjaycKJEhvc3QuVUkuUmF3VUkuRm9yZWdyb3VuZENvbG9yID0gJ0dyYXknCgpmdW5jdGlvbiBpc2FkbWluIHsKICAgIChbU2VjdXJpdHkuUHJpbmNpcGFsLldpbmRvd3NQcmluY2lwYWxdW1NlY3VyaXR5LlByaW5jaXBhbC5XaW5kb3dzSWRlbnRpdHldOjpHZXRDdXJyZW50KCkpLklzSW5Sb2xlKFtTZWN1cml0eS5QcmluY2lwYWwuV2luZG93c0J1aWx0SW5Sb2xlXTo6QWRtaW5pc3RyYXRvcikKfQ=='
+
+$wtSettingsB64 = 'ewogICAgIiRoZWxwIjogImh0dHBzOi8vYWthLm1zL3Rlcm1pbmFsLWRvY3VtZW50YXRpb24iLAogICAgIiRzY2hlbWEiOiAiaHR0cHM6Ly9ha2EubXMvdGVybWluYWwtcHJvZmlsZXMtc2NoZW1hIiwKICAgICJhY3Rpb25zIjogW10sCiAgICAiY29weUZvcm1hdHRpbmciOiAibm9uZSIsCiAgICAiY29weU9uU2VsZWN0IjogZmFsc2UsCiAgICAiZGVmYXVsdFByb2ZpbGUiOiAiezU3NGU3NzVlLTRmMmEtNWI5Ni1hYzFlLWEyOTYyYTQwMjMzNn0iLAogICAgImtleWJpbmRpbmdzIjoKICAgIFsKICAgICAgICB7ICJpZCI6ICJUZXJtaW5hbC5Db3B5VG9DbGlwYm9hcmQiLCAgICAgImtleXMiOiAiY3RybCtjIiB9LAogICAgICAgIHsgImlkIjogIlRlcm1pbmFsLlBhc3RlRnJvbUNsaXBib2FyZCIsICAia2V5cyI6ICJjdHJsK3YiIH0sCiAgICAgICAgeyAiaWQiOiAiVGVybWluYWwuRHVwbGljYXRlUGFuZUF1dG8iLCAgICJrZXlzIjogImFsdCtzaGlmdCtkIiB9CiAgICBdLAogICAgIm5ld1RhYk1lbnUiOgogICAgWwogICAgICAgIHsgInR5cGUiOiAicmVtYWluaW5nUHJvZmlsZXMiIH0KICAgIF0sCiAgICAicHJvZmlsZXMiOgogICAgewogICAgICAgICJkZWZhdWx0cyI6CiAgICAgICAgewogICAgICAgICAgICAiY29sb3JTY2hlbWUiOiAiQ2F0cHB1Y2NpbiBNb2NoYSIsCiAgICAgICAgICAgICJmb250IjoKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgImZhY2UiOiAiSmV0QnJhaW5zTW9ubyBOZXJkIEZvbnQiLAogICAgICAgICAgICAgICAgInNpemUiOiAxMQogICAgICAgICAgICB9LAogICAgICAgICAgICAib3BhY2l0eSI6IDg1LAogICAgICAgICAgICAidXNlQWNyeWxpYyI6IHRydWUKICAgICAgICB9LAogICAgICAgICJsaXN0IjoKICAgICAgICBbCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICJjb21tYW5kbGluZSI6ICIlU3lzdGVtUm9vdCVcXFN5c3RlbTMyXFxXaW5kb3dzUG93ZXJTaGVsbFxcdjEuMFxccG93ZXJzaGVsbC5leGUiLAogICAgICAgICAgICAgICAgImd1aWQiOiAiezYxYzU0YmJkLWMyYzYtNTI3MS05NmU3LTAwOWE4N2ZmNDRiZn0iLAogICAgICAgICAgICAgICAgImhpZGRlbiI6IHRydWUsCiAgICAgICAgICAgICAgICAibmFtZSI6ICJXaW5kb3dzIFBvd2VyU2hlbGwiCiAgICAgICAgICAgIH0sCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICJjb21tYW5kbGluZSI6ICIlU3lzdGVtUm9vdCVcXFN5c3RlbTMyXFxjbWQuZXhlIiwKICAgICAgICAgICAgICAgICJndWlkIjogInswY2FhMGRhZC0zNWJlLTVmNTYtYThmZi1hZmNlZWVhYTYxMDF9IiwKICAgICAgICAgICAgICAgICJoaWRkZW4iOiBmYWxzZSwKICAgICAgICAgICAgICAgICJuYW1lIjogIkNvbW1hbmQgUHJvbXB0IgogICAgICAgICAgICB9LAogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAiZ3VpZCI6ICJ7YjQ1M2FlNjItNGUzZC01ZTU4LWI5ODktMGE5OThlYzQ0MWI4fSIsCiAgICAgICAgICAgICAgICAiaGlkZGVuIjogZmFsc2UsCiAgICAgICAgICAgICAgICAibmFtZSI6ICJBenVyZSBDbG91ZCBTaGVsbCIsCiAgICAgICAgICAgICAgICAic291cmNlIjogIldpbmRvd3MuVGVybWluYWwuQXp1cmUiCiAgICAgICAgICAgIH0sCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICJjb21tYW5kbGluZSI6ICJwd3NoLmV4ZSAtTm9Mb2dvIC1Ob1Byb2ZpbGVMb2FkVGltZSIsCiAgICAgICAgICAgICAgICAiZ3VpZCI6ICJ7NTc0ZTc3NWUtNGYyYS01Yjk2LWFjMWUtYTI5NjJhNDAyMzM2fSIsCiAgICAgICAgICAgICAgICAiaGlkZGVuIjogZmFsc2UsCiAgICAgICAgICAgICAgICAibmFtZSI6ICJQb3dlclNoZWxsIiwKICAgICAgICAgICAgICAgICJzb3VyY2UiOiAiV2luZG93cy5UZXJtaW5hbC5Qb3dlcnNoZWxsQ29yZSIKICAgICAgICAgICAgfQogICAgICAgIF0KICAgIH0sCiAgICAic2NoZW1lcyI6CiAgICBbCiAgICAgICAgewogICAgICAgICAgICAibmFtZSI6ICJDYXRwcHVjY2luIE1vY2hhIiwKICAgICAgICAgICAgImN1cnNvckNvbG9yIjogIiNGNUUwREMiLAogICAgICAgICAgICAic2VsZWN0aW9uQmFja2dyb3VuZCI6ICIjNTg1QjcwIiwKICAgICAgICAgICAgImJhY2tncm91bmQiOiAiIzFFMUUyRSIsCiAgICAgICAgICAgICJmb3JlZ3JvdW5kIjogIiNDREQ2RjQiLAogICAgICAgICAgICAiYmxhY2siOiAiIzQ1NDc1QSIsCiAgICAgICAgICAgICJyZWQiOiAiI0YzOEJBOCIsCiAgICAgICAgICAgICJncmVlbiI6ICIjQTZFM0ExIiwKICAgICAgICAgICAgInllbGxvdyI6ICIjRjlFMkFGIiwKICAgICAgICAgICAgImJsdWUiOiAiIzg5QjRGQSIsCiAgICAgICAgICAgICJwdXJwbGUiOiAiI0Y1QzJFNyIsCiAgICAgICAgICAgICJjeWFuIjogIiM5NEUyRDUiLAogICAgICAgICAgICAid2hpdGUiOiAiI0JBQzJERSIsCiAgICAgICAgICAgICJicmlnaHRCbGFjayI6ICIjNTg1QjcwIiwKICAgICAgICAgICAgImJyaWdodFJlZCI6ICIjRjM4QkE4IiwKICAgICAgICAgICAgImJyaWdodEdyZWVuIjogIiNBNkUzQTEiLAogICAgICAgICAgICAiYnJpZ2h0WWVsbG93IjogIiNGOUUyQUYiLAogICAgICAgICAgICAiYnJpZ2h0Qmx1ZSI6ICIjODlCNEZBIiwKICAgICAgICAgICAgImJyaWdodFB1cnBsZSI6ICIjRjVDMkU3IiwKICAgICAgICAgICAgImJyaWdodEN5YW4iOiAiIzk0RTJENSIsCiAgICAgICAgICAgICJicmlnaHRXaGl0ZSI6ICIjQTZBREM4IgogICAgICAgIH0KICAgIF0sCiAgICAidGhlbWUiOiAiZGFyayIsCiAgICAidGhlbWVzIjogW10KfQ=='
+
+$fastfetchConfigB64 = 'ew0KICAiJHNjaGVtYSI6ICJodHRwczovL2dpdGh1Yi5jb20vZmFzdGZldGNoLWNsaS9mYXN0ZmV0Y2gvcmF3L2Rldi9kb2MvanNvbl9zY2hlbWEuanNvbiIsDQoNCiAgImxvZ28iOiB7ICJ0eXBlIjogIm5vbmUiIH0sDQoNCiAgImRpc3BsYXkiOiB7DQogICAgInNlcGFyYXRvciI6ICIgICIsDQogICAgImtleSI6IHsgIndpZHRoIjogMTQgfSwNCiAgICAiY29sb3IiOiB7ICJzZXBhcmF0b3IiOiAiIzZDNzA4NiIgfQ0KICB9LA0KDQogICJtb2R1bGVzIjogWw0KICAgIHsgInR5cGUiOiAiY3VzdG9tIiwgICJmb3JtYXQiOiAiXHUwMDFiWzM4OzI7MTkyOzE3ODsyNTBt4pSAXHUwMDFiWzM4OzI7MTkxOzE3OTsyNTBt4pSAXHUwMDFiWzM4OzI7MTkxOzE3OTsyNTBt4pSAXHUwMDFiWzM4OzI7MTkwOzE4MDsyNTFt4pSAXHUwMDFiWzM4OzI7MTkwOzE4MDsyNTFt4pSAXHUwMDFiWzM4OzI7MTg5OzE4MTsyNTFt4pSAXHUwMDFiWzM4OzI7MTg5OzE4MTsyNTFt4pSAXHUwMDFiWzM4OzI7MTg4OzE4MjsyNTFt4pSAXHUwMDFiWzM4OzI7MTg4OzE4MjsyNTFt4pSAXHUwMDFiWzM4OzI7MTg3OzE4MzsyNTJt4pSAXHUwMDFiWzM4OzI7MTg3OzE4MzsyNTJt4pSAXHUwMDFiWzM4OzI7MTg2OzE4NDsyNTJt4pSAXHUwMDFiWzM4OzI7MTg2OzE4NDsyNTJt4pSAXHUwMDFiWzM4OzI7MTg1OzE4NTsyNTJt4pSAXHUwMDFiWzM4OzI7MTg1OzE4NTsyNTJt4pSAXHUwMDFiWzM4OzI7MTg0OzE4NjsyNTNt4pSAXHUwMDFiWzM4OzI7MTgzOzE4NzsyNTNt4pSAXHUwMDFiWzM4OzI7MTgzOzE4NzsyNTNt4pSAXHUwMDFiWzM4OzI7MTgyOzE4ODsyNTNt4pSAXHUwMDFiWzM4OzI7MTgyOzE4ODsyNTNt4pSAXHUwMDFiWzM4OzI7MTgxOzE4OTsyNTRt4pSAXHUwMDFiWzM4OzI7MTgxOzE4OTsyNTRt4pSAXHUwMDFiWzM4OzI7MTgwOzE5MDsyNTRt4pSAXHUwMDFiWzM4OzI7MTc5OzE5MDsyNTRt4pSAXHUwMDFiWzM4OzI7MTc4OzE5MDsyNTNt4pSAXHUwMDFiWzM4OzI7MTc2OzE5MDsyNTNt4pSAXHUwMDFiWzM4OzI7MTc1OzE5MTsyNTNt4pSAXHUwMDFiWzM4OzI7MTc0OzE5MTsyNTJt4pSAXHUwMDFiWzM4OzI7MTcyOzE5MTsyNTJt4pSAXHUwMDFiWzM4OzI7MTcxOzE5MTsyNTFt4pSAXHUwMDFiWzM4OzI7MTY5OzE5MTsyNTFt4pSAXHUwMDFiWzM4OzI7MTY4OzE5MjsyNTFt4pSAXHUwMDFiWzM4OzI7MTY2OzE5MjsyNTBt4pSAXHUwMDFiWzM4OzI7MTY1OzE5MjsyNTBt4pSAXHUwMDFiWzM4OzI7MTY0OzE5MjsyNDlt4pSAXHUwMDFiWzM4OzI7MTYyOzE5MjsyNDlt4pSAXHUwMDFiWzM4OzI7MTYxOzE5MjsyNDlt4pSAXHUwMDFiWzM4OzI7MTU5OzE5MzsyNDht4pSAXHUwMDFiWzM4OzI7MTU4OzE5MzsyNDht4pSAXHUwMDFiWzM4OzI7MTU3OzE5MzsyNDdt4pSAXHUwMDFiWzM4OzI7MTU1OzE5MzsyNDdt4pSAXHUwMDFiWzM4OzI7MTU0OzE5MzsyNDdt4pSAXHUwMDFiWzM4OzI7MTUyOzE5MzsyNDZt4pSAXHUwMDFiWzM4OzI7MTUxOzE5NDsyNDZt4pSAXHUwMDFiWzM4OzI7MTQ5OzE5NDsyNDVt4pSAXHUwMDFiWzM4OzI7MTQ4OzE5NDsyNDVt4pSAXHUwMDFiWzBtIiB9LA0KICAgIHsgInR5cGUiOiAic2hlbGwiLCAgICAgICAia2V5IjogIlx1MDAxYlszODsyOzE5MjsxNzg7MjUwbfOwnrcgIFNoZWxsXHUwMDFiWzBtIiwgICAiZm9ybWF0IjogIntwcmV0dHktbmFtZX0ge3ZlcnNpb259IiB9LA0KICAgIHsgInR5cGUiOiAib3MiLCAgICAgICAgICAia2V5IjogIlx1MDAxYlszODsyOzE4OTsxODE7MjUxbfOwlrMgIE9TXHUwMDFiWzBtIiB9LA0KICAgIHsgInR5cGUiOiAiYm9hcmQiLCAgICAgICAia2V5IjogIlx1MDAxYlszODsyOzE4NjsxODQ7MjUybfOwmpcgIEJvYXJkXHUwMDFiWzBtIiB9LA0KICAgIHsgInR5cGUiOiAiY3B1IiwgICAgICAgICAia2V5IjogIlx1MDAxYlszODsyOzE4MzsxODc7MjUzbfOwu58gIENQVVx1MDAxYlswbSIsICAgICAiZm9ybWF0IjogIntuYW1lfSIgfSwNCiAgICB7ICJ0eXBlIjogImdwdSIsICAgICAgICAgImtleSI6ICJcdTAwMWJbMzg7MjsxODA7MTkwOzI1NG3zsKKuICBHUFVcdTAwMWJbMG0iLCAgICAgImZvcm1hdCI6ICJ7bmFtZX0gKHt0eXBlfSkiLCAiZGV0ZWN0aW9uTWV0aG9kIjogInZ1bGthbiIgfSwNCiAgICB7ICJ0eXBlIjogImNvbW1hbmQiLCAgICAgImtleSI6ICJcdTAwMWJbMzg7MjsxNzI7MTkxOzI1Mm3zsJiYICBSQU1cdTAwMWJbMG0iLCAgICAgInNoZWxsIjogImNtZCIsICJ0ZXh0IjogImVjaG8gJUZGX1JBTSUiIH0sDQogICAgeyAidHlwZSI6ICJwaHlzaWNhbGRpc2siLCJrZXkiOiAiXHUwMDFiWzM4OzI7MTY0OzE5MjsyNTBt87CLiiAgRHJpdmVcdTAwMWJbMG0iLCAgICJmb3JtYXQiOiAie25hbWV9IOKAlCB7aW50ZXJjb25uZWN0fSB7c2l6ZX0iIH0sDQogICAgeyAidHlwZSI6ICJkaXNwbGF5IiwgICAgICJrZXkiOiAiXHUwMDFiWzM4OzI7MTU2OzE5MzsyNDdt87CNuSAgRGlzcGxheVx1MDAxYlswbSIsICJmb3JtYXQiOiAie3dpZHRofXh7aGVpZ2h0fSBAIHtyZWZyZXNoLXJhdGV9SHoiIH0sDQogICAgeyAidHlwZSI6ICJ1cHRpbWUiLCAgICAgICJrZXkiOiAiXHUwMDFiWzM4OzI7MTQ4OzE5NDsyNDVt87CllCAgVXB0aW1lXHUwMDFiWzBtIiB9LA0KICAgICJicmVhayIsDQogICAgImJyZWFrIg0KICBdDQp9DQo='
+
+function FromB64($b64) {
+    [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
 }
 
-# ---- PSReadLine: modern predictions + smart Tab + Catppuccin Mocha colors ----
-# - InlineView by default (grey ghost text). F2 toggles to ListView (dropdown).
-# - Tab accepts the inline prediction if one is visible, else MenuComplete.
-# - Right Arrow / Ctrl+RightArrow also accept (standard PSReadLine behavior).
-# - Syntax-highlight colors aligned with the Catppuccin Mocha palette.
-if (Get-Module -Name PSReadLine -ListAvailable) {
-    Set-PSReadLineOption -PredictionSource HistoryAndPlugin -PredictionViewStyle InlineView -ErrorAction SilentlyContinue
-    Set-PSReadLineOption -Colors @{
-        Command            = '#89B4FA'  # Blue
-        Parameter          = '#F5C2E7'  # Pink
-        Variable           = '#F5C2E7'  # Pink
-        String             = '#A6E3A1'  # Green
-        Number             = '#FAB387'  # Peach
-        Type               = '#F9E2AF'  # Yellow
-        Keyword            = '#CBA6F7'  # Mauve
-        Comment            = '#6C7086'  # Overlay0
-        Operator           = '#89DCEB'  # Sky
-        Member             = '#94E2D5'  # Teal
-        Error              = '#F38BA8'  # Red
-        Emphasis           = '#F38BA8'  # Red
-        InlinePrediction   = '#6C7086'  # Overlay0 (dimmed ghost text)
-        Default            = '#CDD6F4'  # Text
-        ContinuationPrompt = '#A6ADC8'  # Subtext0
-    } -ErrorAction SilentlyContinue
-    Set-PSReadLineKeyHandler -Key F2 -Function SwitchPredictionView
-    Set-PSReadLineKeyHandler -Key Tab -ScriptBlock {
-        $line = $null; $cursor = $null
-        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptSuggestion()
-        $newLine = $null; $newCursor = $null
-        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$newLine, [ref]$newCursor)
-        if ($line -eq $newLine) {
-            [Microsoft.PowerShell.PSConsoleReadLine]::MenuComplete()
-        }
-    }
-}
-
-# ---- CompletionPredictor: smart predictions beyond shell history
-# (cmdlet parameters, git branches, file paths, etc.) ----
-if (Get-Module -ListAvailable -Name CompletionPredictor) {
-    Import-Module CompletionPredictor -ErrorAction SilentlyContinue
-}
-
-# ---- Terminal-Icons: Nerd Font icons in Get-ChildItem (`ls`) output ----
-if (Get-Module -ListAvailable -Name Terminal-Icons) {
-    Import-Module Terminal-Icons -ErrorAction SilentlyContinue
-}
-
-# ---- PSFzf: Ctrl+R fuzzy reverse-history, Ctrl+T fuzzy file/dir picker ----
-# Only loaded when fzf.exe is available on PATH.
-if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction SilentlyContinue)) {
-    Import-Module PSFzf -ErrorAction SilentlyContinue
-    Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r' -ErrorAction SilentlyContinue
-}
-
-# ---- Fastfetch splash (Windows logo + system info) ----
-# Uses the config at ~/.config/fastfetch/config.jsonc deployed by this bundle.
-# Runs only in interactive sessions to avoid polluting scripted/piped pwsh calls.
-if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
-    fastfetch
-}
-'@
-
-$ps5Profile = @'
-function prompt { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " }
-
-# Force Windows PowerShell to UTF-8 on every startup.
-[Console]::InputEncoding  = [System.Text.UTF8Encoding]::new()
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-chcp 65001 > $null
-
-# Neutralize the default blue background of Windows PowerShell.
-$Host.UI.RawUI.BackgroundColor = 'Black'
-$Host.UI.RawUI.ForegroundColor = 'Gray'
-
-function isadmin {
-    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-'@
-
-$wtSettings = @'
-{
-    "$help": "https://aka.ms/terminal-documentation",
-    "$schema": "https://aka.ms/terminal-profiles-schema",
-    "actions": [],
-    "copyFormatting": "none",
-    "copyOnSelect": false,
-    "defaultProfile": "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
-    "keybindings":
-    [
-        { "id": "Terminal.CopyToClipboard",     "keys": "ctrl+c" },
-        { "id": "Terminal.PasteFromClipboard",  "keys": "ctrl+v" },
-        { "id": "Terminal.DuplicatePaneAuto",   "keys": "alt+shift+d" }
-    ],
-    "newTabMenu":
-    [
-        { "type": "remainingProfiles" }
-    ],
-    "profiles":
-    {
-        "defaults":
-        {
-            "colorScheme": "Catppuccin Mocha",
-            "font":
-            {
-                "face": "JetBrainsMono Nerd Font",
-                "size": 11
-            },
-            "opacity": 85,
-            "useAcrylic": true
-        },
-        "list":
-        [
-            {
-                "commandline": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-                "guid": "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}",
-                "hidden": true,
-                "name": "Windows PowerShell"
-            },
-            {
-                "commandline": "%SystemRoot%\\System32\\cmd.exe",
-                "guid": "{0caa0dad-35be-5f56-a8ff-afceeeaa6101}",
-                "hidden": false,
-                "name": "Command Prompt"
-            },
-            {
-                "guid": "{b453ae62-4e3d-5e58-b989-0a998ec441b8}",
-                "hidden": false,
-                "name": "Azure Cloud Shell",
-                "source": "Windows.Terminal.Azure"
-            },
-            {
-                "guid": "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
-                "hidden": false,
-                "name": "PowerShell",
-                "source": "Windows.Terminal.PowershellCore"
-            }
-        ]
-    },
-    "schemes":
-    [
-        {
-            "name": "Catppuccin Mocha",
-            "cursorColor": "#F5E0DC",
-            "selectionBackground": "#585B70",
-            "background": "#1E1E2E",
-            "foreground": "#CDD6F4",
-            "black": "#45475A",
-            "red": "#F38BA8",
-            "green": "#A6E3A1",
-            "yellow": "#F9E2AF",
-            "blue": "#89B4FA",
-            "purple": "#F5C2E7",
-            "cyan": "#94E2D5",
-            "white": "#BAC2DE",
-            "brightBlack": "#585B70",
-            "brightRed": "#F38BA8",
-            "brightGreen": "#A6E3A1",
-            "brightYellow": "#F9E2AF",
-            "brightBlue": "#89B4FA",
-            "brightPurple": "#F5C2E7",
-            "brightCyan": "#94E2D5",
-            "brightWhite": "#A6ADC8"
-        }
-    ],
-    "theme": "dark",
-    "themes": []
-}
-'@
-
-# Fastfetch JSONC config: SleepyCatHey-inspired layout, Catppuccin Mocha.
-# Logo is a custom ASCII file (deployed alongside this config), with a
-# 9-stop pastel gradient driven by $2..$9 in the .txt source.
-# __ASCII_PATH__ is replaced with the absolute deploy path at install time.
-$fastfetchConfig = @'
-{
-  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
-  "logo": {
-    "type": "file",
-    "source": "__ASCII_PATH__",
-    "color": {
-      "1": "#F5E0DC", "2": "#F2CDCD", "3": "#F5C2E7",
-      "4": "#FAB387", "5": "#F9E2AF", "6": "#A6E3A1",
-      "7": "#94E2D5", "8": "#89DCEB", "9": "#74C7EC"
-    },
-    "padding": { "top": 1, "right": 3 }
-  },
-  "display": { "separator": " " },
-  "modules": [
-    "break",
-    { "type": "title", "color": { "user": "#F5C2E7", "at": "#CDD6F4", "host": "#89DCEB" } },
-    "break",
-    { "type": "os",     "key": "", "keyColor": "#89DCEB" },
-    { "type": "cpu",    "key": "", "keyColor": "#F5C2E7" },
-    { "type": "board",  "key": "󰚗", "keyColor": "#FAB387" },
-    { "type": "memory", "key": "", "keyColor": "#A6E3A1", "format": "{used} / {total} ({percentage})" },
-    { "type": "disk",   "key": "", "keyColor": "#94E2D5" },
-    "break",
-    { "type": "colors", "symbol": "circle" }
-  ]
-}
-'@
-
-# Custom ASCII art logo for Fastfetch (Catppuccin pastel gradient via $2..$9).
-$fastfetchAscii = @'
-$2⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-$2⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡠⠔⠉⠀⣄⠀⠀⠀⠀⢀⣀⠤⠐⠚⠙
-$3⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⠐⠁⠀⠀⠀⠀⢀⡇⠐⠉⠀⠀⠀⠀⠀⠀⠀
-$3⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠊⠁⠀⠈⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⡀⡐⡌⢆
-$4⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡠⠃⠀⠀⠀⠀⠠⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠪⢨⢊⠂
-$4⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⠁⠀⡀⠀⠀⠀⢀⠠⢄⢄⢔⢖⠲⣤⢤⣄⠀⢪⢘⠌⠀
-$5⠀⠀⠀⠀⠀⠀⠀⠀⢀⡠⠁⠠⠠⣄⠀⠐⠃⢈⠀⢢⠡⡣⠫⡅⡯⠛⠚⠹⠕⠀⠀⡘
-$5⠀⠀⠀⠀⠀⠀⠀⣰⡢⠐⠈⡠⡑⠜⢛⢃⠠⠀⠨⠠⠑⢈⠁⡑⠃⠀⠀⠀⠀⠀⡔⠁
-$6⠀⠀⠀⠀⠀⠀⠀⠁⠅⢌⠠⠂⠁⠀⠘⢈⠡⠂⠠⠀⠂⠀⠂⠀⠀⠀⠀⠀⠀⣈⣃⠀
-$6⠀⠀⠀⠀⠀⠀⠀⡠⠘⠁⠀⠀⠀⠀⠀⡂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⢒⠝⢌⠢⡑
-$7⠀⠀⠀⠀⠀⠄⠂⠀⠀⠀⠀⠀⣀⡼⡕⡪⢋⠕⡡⠣⡩⠪⡑⢍⠫⡫⠫⣖⢯⢦⠵⠜
-$7⠀⠀⠀⢀⠊⠀⠀⠀⠀⠀⠀⣠⢍⠢⡊⣔⢡⢊⠔⡑⢌⠬⢌⠢⡃⡊⡪⣷⢫⠨⡱⡀
-$8⠀⠀⠀⢲⠀⠀⠀⠀⠀⢀⠰⡟⡢⢣⠨⡂⡪⢐⢑⢌⠢⡑⡔⠵⠊⠂⠊⢿⠑⠕⣈⡇
-$8⠀⠀⠀⠘⢤⠀⠀⠀⠀⠈⠀⢳⠨⠢⡑⠌⡢⢑⠰⢐⡵⠚⠁⠀⠀⠀⠀⠈⡄⠀⠈⠀
-$9⠀⠀⠀⠀⠀⠈⠓⠠⢄⡀⡤⠀⠛⣔⡈⠢⢨⠔⠚⠁⠠⠀⠀⠀⠀⠀⠀⠀⠸⠀⠀⠀
-$9⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠁⠀⠀⠈⠁⠉⠁⠀⠀⠀⠀⠠⠀⠀⠀⠀⠀⠀⠀⣇⠀⠀
-
-'@
+$ps7Profile      = FromB64 $ps7ProfileB64
+$ps5Profile      = FromB64 $ps5ProfileB64
+$wtSettings      = FromB64 $wtSettingsB64
+$fastfetchConfig = FromB64 $fastfetchConfigB64
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -289,9 +79,8 @@ function Backup-IfExists {
     }
 }
 
-# Writes a file with explicit UTF-8 encoding.
-# BOM is recommended for .ps1 profiles so Windows PowerShell 5.1 parses
-# accented chars correctly. No BOM for JSON, to keep parsers happy.
+# UTF-8 write. PS profile .ps1 files get a BOM so Windows PowerShell 5.1 parses
+# accented chars correctly. JSON / JSONC get no BOM to keep parsers happy.
 function Write-Utf8File {
     param(
         [Parameter(Mandatory)] [string]$Path,
@@ -327,12 +116,10 @@ function Install-WingetPackage {
 
 Write-Step 'Bootstrap'
 
-# Process scope: always permissive so the rest of this script runs.
 if ((Get-ExecutionPolicy -Scope Process) -notin 'Bypass','Unrestricted') {
     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 }
 
-# CurrentUser scope: persistent fix so deployed profiles can load in future sessions.
 $current = Get-ExecutionPolicy -Scope CurrentUser
 if ($current -notin 'RemoteSigned','Unrestricted','Bypass') {
     Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
@@ -341,22 +128,19 @@ if ($current -notin 'RemoteSigned','Unrestricted','Bypass') {
     Write-Ok "CurrentUser execution policy already permissive ($current)"
 }
 
-# If this script was downloaded to disk (clone, ZIP, OneDrive...), unblock it
-# so a subsequent dot-source doesn't trip on the Zone.Identifier ADS.
-# When invoked via `iwr | iex`, $PSCommandPath is empty -- skip silently.
 if ($PSCommandPath -and (Test-Path $PSCommandPath)) {
     try { Unblock-File $PSCommandPath -ErrorAction Stop } catch {}
 }
 
 # ---------------------------------------------------------------------------
-# 1) Prerequisites: PowerShell 7 + Windows Terminal
+# 1) Prerequisites: PowerShell 7 + Windows Terminal + fzf + Nerd Font + Fastfetch
 # ---------------------------------------------------------------------------
 
 Write-Step 'Prerequisites'
 Install-WingetPackage -Id 'Microsoft.PowerShell'          -DisplayName 'PowerShell 7'
 Install-WingetPackage -Id 'Microsoft.WindowsTerminal'     -DisplayName 'Windows Terminal'
 Install-WingetPackage -Id 'junegunn.fzf'                  -DisplayName 'fzf'
-Install-WingetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont'  -DisplayName 'JetBrains Mono Nerd Font'
+Install-WingetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont'  -DisplayName 'JetBrainsMono Nerd Font'
 Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
 
 # ---------------------------------------------------------------------------
@@ -394,27 +178,17 @@ if (-not (Test-Path $wtDir)) {
 }
 
 # ---------------------------------------------------------------------------
-# 5) Fastfetch config + custom ASCII logo (~/.config/fastfetch/)
+# 5) Fastfetch config (~/.config/fastfetch/config.jsonc)
 # ---------------------------------------------------------------------------
 
 Write-Step 'Fastfetch config'
 $ffDir        = Join-Path $env:USERPROFILE '.config\fastfetch'
 $ffConfigPath = Join-Path $ffDir 'config.jsonc'
-$ffAsciiPath  = Join-Path $ffDir 'ascii.txt'
-
-# Deploy the ASCII logo first so the JSON path is valid before Fastfetch runs.
-Write-Utf8File -Path $ffAsciiPath -Content $fastfetchAscii -WithBom $false
-Write-Ok $ffAsciiPath
-
-# Resolve the placeholder in the JSONC template. Forward slashes work on
-# Windows and avoid JSON-escaping every backslash.
-$asciiPathForJson = $ffAsciiPath.Replace('\', '/')
-$resolvedConfig   = $fastfetchConfig.Replace('__ASCII_PATH__', $asciiPathForJson)
-Write-Utf8File -Path $ffConfigPath -Content $resolvedConfig -WithBom $false
+Write-Utf8File -Path $ffConfigPath -Content $fastfetchConfig -WithBom $false
 Write-Ok $ffConfigPath
 
 # ---------------------------------------------------------------------------
-# 6) PowerShell 7 modules: CompletionPredictor + PSFzf
+# 6) PowerShell 7 modules: CompletionPredictor + PSFzf + Terminal-Icons
 # ---------------------------------------------------------------------------
 
 Write-Step 'PowerShell 7 modules'
@@ -454,7 +228,9 @@ Install-PS7Module -Name PSFzf
 Install-PS7Module -Name Terminal-Icons
 
 Write-Host ''
-Write-Host 'Done. CLOSE Windows Terminal and reopen it so the new PATH (fzf) and profiles take effect.' -ForegroundColor Green
+Write-Host 'Done. CLOSE Windows Terminal entirely and reopen it so the new PATH (fzf), fonts,' -ForegroundColor Green
+Write-Host 'profiles and `pwsh.exe -NoLogo -NoProfileLoadTime` flag all take effect.'         -ForegroundColor Green
+Write-Host ''
 Write-Host 'Keybindings in PS 7:' -ForegroundColor Green
 Write-Host '  - F2          : toggle inline / list prediction view' -ForegroundColor Green
 Write-Host '  - Tab / Right : accept the grey suggestion (or open the completion menu)' -ForegroundColor Green
