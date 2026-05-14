@@ -9,15 +9,9 @@ fish-like inline predictions, Terminal-Icons in `ls` output and PSFzf for
 fuzzy `Ctrl+R` / `Ctrl+T`. The native PowerShell prompt is kept
 (`PS C:\Users\Ahmed>`). **Windows only.**
 
-## Install
+## Install / Update
 
-```powershell
-iwr https://raw.githubusercontent.com/ahmed-mili/windows-pwsh-config/main/install.ps1 -UseBasicParsing | iex
-```
-
-## Update
-
-Re-run the same one-liner. The installer is idempotent: it backs up any
+Same one-liner for both. The installer is idempotent: it backs up any
 existing config to `<name>.bak-<timestamp>` before overwriting, skips winget
 packages and PSGallery modules that are already present, and re-runs the
 chassis detection so the `Board` / `Laptop` label stays accurate if you
