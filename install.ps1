@@ -120,12 +120,21 @@ if ((Get-ExecutionPolicy -Scope Process) -notin 'Bypass','Unrestricted') {
     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 }
 
-$current = Get-ExecutionPolicy -Scope CurrentUser
-if ($current -notin 'RemoteSigned','Unrestricted','Bypass') {
-    Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
-    Write-Ok "CurrentUser execution policy: $current -> RemoteSigned"
+# Prefer the *effective* policy: a machine/user GPO may already grant Bypass
+# even when CurrentUser is Undefined, in which case Set-ExecutionPolicy emits
+# a non-terminating warning that ErrorActionPreference=Stop would promote to
+# a hard failure for no real reason. So: skip when effectively permissive,
+# and ignore the override warning when we do set.
+$effective = Get-ExecutionPolicy
+if ($effective -in 'RemoteSigned','Unrestricted','Bypass') {
+    Write-Ok "Effective execution policy already permissive ($effective)"
 } else {
-    Write-Ok "CurrentUser execution policy already permissive ($current)"
+    try {
+        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop
+        Write-Ok "CurrentUser execution policy -> RemoteSigned"
+    } catch {
+        Write-Note "Could not set CurrentUser policy ($($_.Exception.Message.Split([Environment]::NewLine)[0])). Continuing anyway."
+    }
 }
 
 if ($PSCommandPath -and (Test-Path $PSCommandPath)) {
