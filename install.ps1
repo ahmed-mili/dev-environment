@@ -39,9 +39,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
-function Write-Ok($msg)   { Write-Host "    OK : $msg" -ForegroundColor Green }
-function Write-Note($msg) { Write-Host "    !! $msg" -ForegroundColor Yellow }
+function Write-Step($msg) { Write-Host "  ==> $msg" -ForegroundColor Blue }
+function Write-Ok($msg)   { Write-Host "      ✓ " -ForegroundColor Green -NoNewline; Write-Host $msg }
+function Write-Note($msg) { Write-Host "      ! " -ForegroundColor Yellow -NoNewline; Write-Host $msg }
+
+function Short-Path([string]$p) {
+    if ($p.StartsWith($env:USERPROFILE)) { "~" + $p.Substring($env:USERPROFILE.Length) }
+    else { $p }
+}
 
 # ---------------------------------------------------------------------------
 # Embedded payloads (base64 to neutralise quoting / control-char hazards)
@@ -104,10 +109,10 @@ function Install-WingetPackage {
     }
     $installed = winget list --id $Id --exact --source winget 2>$null | Select-String $Id
     if ($installed) {
-        Write-Ok "$DisplayName already installed."
+        Write-Ok $DisplayName
         return
     }
-    Write-Step "Installing $DisplayName via winget..."
+    Write-Step "Installing $DisplayName..."
     winget install --id $Id --exact --source winget --accept-source-agreements --accept-package-agreements
 }
 
@@ -128,11 +133,11 @@ if ((Get-ExecutionPolicy -Scope Process) -notin 'Bypass','Unrestricted') {
 # and ignore the override warning when we do set.
 $effective = Get-ExecutionPolicy
 if ($effective -in 'RemoteSigned','Unrestricted','Bypass') {
-    Write-Ok "Effective execution policy already permissive ($effective)"
+    Write-Ok "execution policy ($effective)"
 } else {
     try {
         Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop
-        Write-Ok "CurrentUser execution policy -> RemoteSigned"
+        Write-Ok "execution policy → RemoteSigned"
     } catch {
         Write-Note "Could not set CurrentUser policy ($($_.Exception.Message.Split([Environment]::NewLine)[0])). Continuing anyway."
     }
@@ -161,7 +166,7 @@ Write-Step 'PowerShell 7 profile'
 $ps7Path = Join-Path $env:USERPROFILE 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'
 Write-Utf8File -Path $ps7Path -Content $ps7Profile -WithBom $true
 Unblock-File $ps7Path
-Write-Ok $ps7Path
+Write-Ok (Short-Path $ps7Path)
 
 # ---------------------------------------------------------------------------
 # 3) Windows PowerShell 5 profile
@@ -171,7 +176,7 @@ Write-Step 'Windows PowerShell 5 profile'
 $ps5Path = Join-Path $env:USERPROFILE 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1'
 Write-Utf8File -Path $ps5Path -Content $ps5Profile -WithBom $true
 Unblock-File $ps5Path
-Write-Ok $ps5Path
+Write-Ok (Short-Path $ps5Path)
 
 # ---------------------------------------------------------------------------
 # 4) Windows Terminal settings.json
@@ -184,7 +189,7 @@ if (-not (Test-Path $wtDir)) {
     Write-Note "Windows Terminal LocalState not found -- launch WT once, then re-run with -SkipWinget."
 } else {
     Write-Utf8File -Path $wtTarget -Content $wtSettings -WithBom $false
-    Write-Ok $wtTarget
+    Write-Ok (Short-Path $wtTarget)
 }
 
 # ---------------------------------------------------------------------------
@@ -245,13 +250,13 @@ if ($isLaptop) {
     if ($fastfetchConfig -eq $before) {
         Write-Note "Laptop detected ($reason) but the board key was not found in the embedded config -- icon NOT swapped."
     } else {
-        Write-Ok "Chassis: laptop ($reason) -> swapped icon + label to ""Laptop"""
+        Write-Ok "laptop ($reason) → icon + label ""Laptop"""
     }
 } else {
-    Write-Ok 'Chassis: desktop -> keeping icon + label "Board"'
+    Write-Ok 'desktop → keeping "Board"'
 }
 Write-Utf8File -Path $ffConfigPath -Content $fastfetchConfig -WithBom $false
-Write-Ok $ffConfigPath
+Write-Ok (Short-Path $ffConfigPath)
 
 # ---------------------------------------------------------------------------
 # 6) PowerShell 7 modules: CompletionPredictor + PSFzf + Terminal-Icons
@@ -281,7 +286,7 @@ function Install-PS7Module {
     }
     $check = & $pwsh -NoProfile -NoLogo -Command "if (Get-Module -ListAvailable -Name '$Name') { 'yes' } else { 'no' }"
     if ($check -eq 'yes') {
-        Write-Ok "$Name already installed (PS7 module)."
+        Write-Ok $Name
         return
     }
     Write-Step "Installing PS7 module: $Name"
@@ -294,12 +299,11 @@ Install-PS7Module -Name PSFzf
 Install-PS7Module -Name Terminal-Icons
 
 Write-Host ''
-Write-Host 'Done.' -ForegroundColor Green -NoNewline
-Write-Host ' CLOSE Windows Terminal entirely and reopen it so the new PATH'
-Write-Host '       (fzf), fonts and profiles all take effect.'
+Write-Host '  Done.' -ForegroundColor Green
+Write-Host '  Restart Windows Terminal for all changes to take effect.'
 Write-Host ''
-Write-Host 'Keybindings in PS 7' -ForegroundColor Cyan
-Write-Host '  Tab / Right    accept the grey suggestion (or open the completion menu)'
-Write-Host '  F2             toggle inline / list prediction view'
-Write-Host '  Ctrl+R         fuzzy reverse history search (fzf)'
-Write-Host '  Ctrl+T         fuzzy file/directory picker (fzf)'
+Write-Host '  Keybindings' -ForegroundColor Blue
+Write-Host '    Tab / Right    accept suggestion (or completion menu)'
+Write-Host '    F2             toggle prediction view'
+Write-Host '    Ctrl+R         fuzzy history search (fzf)'
+Write-Host '    Ctrl+T         fuzzy file picker (fzf)'
