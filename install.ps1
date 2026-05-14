@@ -44,6 +44,22 @@ $ps7Profile = @'
 function isadmin {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
+
+# PSReadLine: Tab accepts the inline prediction if one is visible, otherwise
+# falls back to MenuComplete. Right Arrow also accepts (standard behavior).
+if (Get-Module -Name PSReadLine -ListAvailable) {
+    Set-PSReadLineOption -PredictionSource HistoryAndPlugin -PredictionViewStyle InlineView -ErrorAction SilentlyContinue
+    Set-PSReadLineKeyHandler -Key Tab -ScriptBlock {
+        $line = $null; $cursor = $null
+        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptSuggestion()
+        $newLine = $null; $newCursor = $null
+        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$newLine, [ref]$newCursor)
+        if ($line -eq $newLine) {
+            [Microsoft.PowerShell.PSConsoleReadLine]::MenuComplete()
+        }
+    }
+}
 '@
 
 $ps5Profile = @'
