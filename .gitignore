@@ -1,0 +1,9 @@
+# Backups created by install.ps1 on the target machine.
+*.bak-*
+
+# Windows / editor noise
+Thumbs.db
+.DS_Store
+*.swp
+.vscode/
+.idea/
