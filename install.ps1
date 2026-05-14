@@ -306,8 +306,8 @@ Install-PS7Module -Name CompletionPredictor
 Install-PS7Module -Name PSFzf
 
 Write-Host ''
-Write-Host 'Done. Open a new Windows Terminal to see the config applied.' -ForegroundColor Green
-Write-Host 'Tips:' -ForegroundColor Green
+Write-Host 'Done. CLOSE Windows Terminal and reopen it so the new PATH (fzf) and profiles take effect.' -ForegroundColor Green
+Write-Host 'Keybindings in PS 7:' -ForegroundColor Green
 Write-Host '  - F2          : toggle inline / list prediction view' -ForegroundColor Green
 Write-Host '  - Tab / Right : accept the grey suggestion (or open the completion menu)' -ForegroundColor Green
 Write-Host '  - Ctrl+R      : fuzzy reverse history search (fzf)' -ForegroundColor Green
