@@ -208,10 +208,16 @@ try {
 if ($isLaptop) {
     # The JSON file stores ESC as the 6-char escape ''; matching the
     # trailing one anchors the replacement to the right key field.
-    $fastfetchConfig = $fastfetchConfig.Replace('  Board\u001b', '  Laptop\u001b')
-    Write-Ok 'Chassis: laptop -> labelling row as "Laptop"'
+    # U+F0697 = nf-md-developer_board (desktops)
+    # U+F0322 = nf-md-laptop          (laptops)
+    $boardIcon  = [char]::ConvertFromUtf32(0xF0697)
+    $laptopIcon = [char]::ConvertFromUtf32(0xF0322)
+    $boardKey   = $boardIcon  + '  Board'
+    $laptopKey  = $laptopIcon + '  Laptop'
+    $fastfetchConfig = $fastfetchConfig.Replace($boardKey, $laptopKey)
+    Write-Ok 'Chassis: laptop -> swapping icon + label to "Laptop"'
 } else {
-    Write-Ok 'Chassis: desktop -> labelling row as "Board"'
+    Write-Ok 'Chassis: desktop -> keeping icon + label "Board"'
 }
 
 Write-Utf8File -Path $ffConfigPath -Content $fastfetchConfig -WithBom $false
