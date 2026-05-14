@@ -45,10 +45,13 @@ function isadmin {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# PSReadLine: Tab accepts the inline prediction if one is visible, otherwise
-# falls back to MenuComplete. Right Arrow also accepts (standard behavior).
+# ---- PSReadLine: modern predictions + smart Tab ----
+# - InlineView by default (grey ghost text). F2 toggles to ListView (dropdown).
+# - Tab accepts the inline prediction if one is visible, else MenuComplete.
+# - Right Arrow / Ctrl+RightArrow also accept (standard PSReadLine behavior).
 if (Get-Module -Name PSReadLine -ListAvailable) {
     Set-PSReadLineOption -PredictionSource HistoryAndPlugin -PredictionViewStyle InlineView -ErrorAction SilentlyContinue
+    Set-PSReadLineKeyHandler -Key F2 -Function SwitchPredictionView
     Set-PSReadLineKeyHandler -Key Tab -ScriptBlock {
         $line = $null; $cursor = $null
         [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
@@ -59,6 +62,19 @@ if (Get-Module -Name PSReadLine -ListAvailable) {
             [Microsoft.PowerShell.PSConsoleReadLine]::MenuComplete()
         }
     }
+}
+
+# ---- CompletionPredictor: smart predictions beyond shell history
+# (cmdlet parameters, git branches, file paths, etc.) ----
+if (Get-Module -ListAvailable -Name CompletionPredictor) {
+    Import-Module CompletionPredictor -ErrorAction SilentlyContinue
+}
+
+# ---- PSFzf: Ctrl+R fuzzy reverse-history, Ctrl+T fuzzy file/dir picker ----
+# Only loaded when fzf.exe is available on PATH.
+if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction SilentlyContinue)) {
+    Import-Module PSFzf -ErrorAction SilentlyContinue
+    Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r' -ErrorAction SilentlyContinue
 }
 '@
 
@@ -214,6 +230,7 @@ if ($PSCommandPath -and (Test-Path $PSCommandPath)) {
 Write-Step 'Prerequisites'
 Install-WingetPackage -Id 'Microsoft.PowerShell'      -DisplayName 'PowerShell 7'
 Install-WingetPackage -Id 'Microsoft.WindowsTerminal' -DisplayName 'Windows Terminal'
+Install-WingetPackage -Id 'junegunn.fzf'              -DisplayName 'fzf'
 
 # ---------------------------------------------------------------------------
 # 2) PowerShell 7 profile
@@ -249,5 +266,49 @@ if (-not (Test-Path $wtDir)) {
     Write-Ok $wtTarget
 }
 
+# ---------------------------------------------------------------------------
+# 5) PowerShell 7 modules: CompletionPredictor + PSFzf
+# ---------------------------------------------------------------------------
+
+Write-Step 'PowerShell 7 modules'
+
+function Get-PwshExe {
+    $cmd = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    foreach ($p in @(
+        "$env:ProgramFiles\PowerShell\7\pwsh.exe",
+        "${env:ProgramFiles(x86)}\PowerShell\7\pwsh.exe",
+        "$env:LOCALAPPDATA\Microsoft\WindowsApps\pwsh.exe"
+    )) {
+        if ($p -and (Test-Path $p)) { return $p }
+    }
+    return $null
+}
+
+function Install-PS7Module {
+    param([string]$Name)
+    $pwsh = Get-PwshExe
+    if (-not $pwsh) {
+        Write-Note "pwsh.exe not on PATH yet; skipping $Name. Re-run this script after a shell restart."
+        return
+    }
+    $check = & $pwsh -NoProfile -NoLogo -Command "if (Get-Module -ListAvailable -Name '$Name') { 'yes' } else { 'no' }"
+    if ($check -eq 'yes') {
+        Write-Ok "$Name already installed (PS7 module)."
+        return
+    }
+    Write-Step "Installing PS7 module: $Name"
+    & $pwsh -NoProfile -NoLogo -Command "if ((Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue).InstallationPolicy -ne 'Trusted') { Set-PSRepository -Name PSGallery -InstallationPolicy Trusted }; Install-Module -Name '$Name' -Scope CurrentUser -Force -AcceptLicense"
+    if ($LASTEXITCODE -eq 0) { Write-Ok $Name } else { Write-Note "$Name install failed (exit $LASTEXITCODE)" }
+}
+
+Install-PS7Module -Name CompletionPredictor
+Install-PS7Module -Name PSFzf
+
 Write-Host ''
 Write-Host 'Done. Open a new Windows Terminal to see the config applied.' -ForegroundColor Green
+Write-Host 'Tips:' -ForegroundColor Green
+Write-Host '  - F2          : toggle inline / list prediction view' -ForegroundColor Green
+Write-Host '  - Tab / Right : accept the grey suggestion (or open the completion menu)' -ForegroundColor Green
+Write-Host '  - Ctrl+R      : fuzzy reverse history search (fzf)' -ForegroundColor Green
+Write-Host '  - Ctrl+T      : fuzzy file/directory picker (fzf)' -ForegroundColor Green
