@@ -104,6 +104,12 @@ Specific modules:
   `PowerShell 7.6.1` or `Loading personal and system profiles took … ms.`
 - Keybindings: `Ctrl+C` copy, `Ctrl+V` paste, `Alt+Shift+D` duplicate pane.
 
+### Desktop shortcut
+
+A **Terminal Admin** shortcut is created on the Desktop with hotkey
+`Ctrl+Alt+T` and the "Run as administrator" flag set, so one keystroke opens
+an elevated Terminal. The taskbar icon opens a normal (non-elevated) session.
+
 > When `fzf`, the Nerd Font or Fastfetch are freshly installed, the new
 > `PATH` and fonts only apply to **new** shells. Close and reopen Windows
 > Terminal once after install.

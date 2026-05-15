@@ -298,6 +298,30 @@ Install-PS7Module -Name CompletionPredictor
 Install-PS7Module -Name PSFzf
 Install-PS7Module -Name Terminal-Icons
 
+# ---------------------------------------------------------------------------
+# 7) Desktop shortcut: Ctrl+Alt+T opens Windows Terminal as Administrator
+# ---------------------------------------------------------------------------
+
+Write-Step 'Desktop shortcut (Ctrl+Alt+T = Terminal Admin)'
+$wtExe = Get-Command wt.exe -ErrorAction SilentlyContinue
+if (-not $wtExe) {
+    Write-Note 'wt.exe not on PATH yet. Re-run after restarting the shell to create the shortcut.'
+} else {
+    $lnkPath  = [IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'Terminal Admin.lnk')
+    $shell    = New-Object -ComObject WScript.Shell
+    $lnk      = $shell.CreateShortcut($lnkPath)
+    $lnk.TargetPath = $wtExe.Source
+    $lnk.HotKey     = 'Ctrl+Alt+T'
+    $lnk.Save()
+
+    # Flip the "Run as administrator" bit (byte 21, bit 0x20) in the .lnk
+    $bytes = [IO.File]::ReadAllBytes($lnkPath)
+    $bytes[21] = $bytes[21] -bor 0x20
+    [IO.File]::WriteAllBytes($lnkPath, $bytes)
+
+    Write-Ok (Short-Path $lnkPath)
+}
+
 Write-Host ''
 Write-Host '  Done.' -ForegroundColor Green
 Write-Host '  Restart Windows Terminal for all changes to take effect.'
