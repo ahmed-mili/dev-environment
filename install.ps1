@@ -326,8 +326,5 @@ Write-Host ''
 Write-Host '  Done.' -ForegroundColor Green
 Write-Host '  Restart Windows Terminal for all changes to take effect.'
 Write-Host ''
-Write-Host '  Keybindings' -ForegroundColor Blue
-Write-Host '    Tab / Right    accept suggestion (or completion menu)'
-Write-Host '    F2             toggle prediction view'
-Write-Host '    Ctrl+R         fuzzy history search (fzf)'
-Write-Host '    Ctrl+T         fuzzy file picker (fzf)'
+Write-Host '  Keybindings & docs' -ForegroundColor Blue
+Write-Host '    https://github.com/ahmed-mili/windows-pwsh-config#keybindings'
