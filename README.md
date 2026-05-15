@@ -1,128 +1,63 @@
 # windows-pwsh-config
 
-Single-file installer for a clean Windows Terminal + PowerShell setup.
-**Catppuccin Mocha** scheme, **JetBrainsMono Nerd Font**, a portable
-**Fastfetch splash** with a per-character gradient `USER@HOST` header, a
-gradient divider, gradient-tinted module rows, dynamically-detected RAM and
-physical disk, plus PSReadLine with Catppuccin syntax colors,
-fish-like inline predictions, Terminal-Icons in `ls` output and PSFzf for
-fuzzy `Ctrl+R` / `Ctrl+T`. The native PowerShell prompt is kept
-(`PS C:\Users\Ahmed>`). **Windows only.**
+Single-file installer for a polished Windows Terminal + PowerShell 7 setup:
+**Catppuccin Mocha** theme, **JetBrainsMono Nerd Font**, **Fastfetch** splash
+with gradient header, plus PSReadLine predictions, Terminal-Icons and PSFzf.
+**Windows only.**
 
 ## Install / Update
-
-Same one-liner for both. The installer is idempotent: it backs up any
-existing config to `<name>.bak-<timestamp>` before overwriting, skips winget
-packages and PSGallery modules that are already present, and re-runs the
-chassis detection so the `Board` / `Laptop` label stays accurate if you
-move the config between machines.
 
 ```powershell
 iex (irm https://raw.githubusercontent.com/ahmed-mili/windows-pwsh-config/main/install.ps1).TrimStart([char]0xFEFF)
 ```
 
-`irm` (`Invoke-RestMethod`) returns the response body as a plain string —
-no `(iwr ...).Content` dance, no `-UseBasicParsing` flag. The trailing
-`.TrimStart([char]0xFEFF)` is a defensive guard: even if an editor accidentally
-saves `install.ps1` with a UTF-8 BOM, the one-liner still parses cleanly.
-A CI check on `main` (see `.github/workflows/no-bom.yml`) additionally
-rejects any commit that reintroduces a BOM.
+Idempotent — backs up existing configs, skips what's already installed, re-runs
+chassis detection if you move between machines.
 
-## What it does
+## What it installs
 
-Installs the following via `winget` (skipped if already present):
-**PowerShell 7**, **Windows Terminal**, **fzf**, **JetBrainsMono Nerd Font**,
-**Fastfetch**. Installs the `CompletionPredictor`, `PSFzf` and `Terminal-Icons`
-modules from the PSGallery into PowerShell 7's module path.
+**Winget packages:** PowerShell 7, Windows Terminal, fzf, JetBrainsMono Nerd
+Font, Fastfetch. **PSGallery modules:** CompletionPredictor, PSFzf,
+Terminal-Icons.
 
-Sets `CurrentUser` execution policy to `RemoteSigned`, marks the PSGallery repo
-as `Trusted`, and deploys these files (any existing config is backed up as
-`<name>.bak-<timestamp>` first):
+**Config files deployed** (existing ones backed up with `.bak-<timestamp>`):
 
 | File | Path |
 | --- | --- |
-| PowerShell 7 profile | `~\Documents\PowerShell\Microsoft.PowerShell_profile.ps1` |
-| Windows PowerShell 5 profile | `~\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` |
-| Windows Terminal settings | `~\AppData\Local\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json` |
+| PS 7 profile | `~\Documents\PowerShell\Microsoft.PowerShell_profile.ps1` |
+| PS 5 profile | `~\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` |
+| Terminal settings | `…\LocalState\settings.json` |
 | Fastfetch config | `~\.config\fastfetch\config.jsonc` |
 
-All payloads are embedded as base64 inside `install.ps1` to keep it a true
-single-file installer and avoid quoting issues with ANSI escapes, Nerd Font
-glyphs and embedded single quotes.
+All payloads are base64-encoded inside `install.ps1` to avoid quoting issues
+with ANSI escapes and Nerd Font glyphs.
 
-### PowerShell 7 profile highlights
+## Highlights
 
-- Forces the console to UTF-8 (`InputEncoding`, `OutputEncoding`,
-  `$OutputEncoding`) so accents and Nerd Font glyphs render correctly.
-- **PSReadLine**: `HistoryAndPlugin` predictions in `InlineView`, syntax
-  colors aligned with the Catppuccin Mocha palette. `F2` toggles between
-  inline ghost text and the list dropdown. `Tab` accepts the inline
-  suggestion when one is visible, falls back to `MenuComplete` otherwise.
-- **CompletionPredictor**: extends predictions beyond shell history to
-  cmdlet parameters, git branches, file paths and so on.
-- **Terminal-Icons**: Nerd Font icons in `Get-ChildItem` / `ls` output.
-- **PSFzf**: `Ctrl+R` for fuzzy reverse-history search, `Ctrl+T` for
-  fuzzy file/directory picker (only loaded if `fzf.exe` is on `PATH`).
-- **Fastfetch splash** on every interactive shell, with two pieces of
-  dynamic information computed in the profile so the splash is portable
-  across PCs without rewriting the JSONC file:
-  - `$env:FF_RAM` — RAM summary built from `Win32_PhysicalMemory` WMI
-    (counts identical sticks → `2 × 16 GiB DDR4-3600 (Corsair)`; mixed
-    sticks → `4 sticks, 64 GiB DDR5 (mixed)`).
-  - A per-character gradient `USER@HOST` header (`%USERNAME%@%COMPUTERNAME%`)
-    printed just before fastfetch runs, sharing the cool-tone Catppuccin
-    palette of the splash's divider and module rows.
+- **Fastfetch splash** — mauve→sapphire gradient on divider, module icons and
+  `USER@HOST` header. RAM auto-detected from WMI (`2 × 16 GiB DDR4-3600`);
+  physical disk shows model + interconnect. GPU ignores virtual adapters.
+- **PSReadLine** — inline predictions (history + CompletionPredictor), Catppuccin
+  syntax colors. `F2` toggles inline ↔ dropdown. `Tab` accepts suggestion or
+  opens menu.
+- **PSFzf** — `Ctrl+R` fuzzy history, `Ctrl+T` fuzzy file picker.
+- **Terminal** — acrylic at 85 %, `pwsh -NoLogo -NoProfileLoadTime` as default,
+  `Ctrl+C`/`Ctrl+V`/`Alt+Shift+D` keybindings.
+- **Desktop shortcut** — `Ctrl+Alt+T` opens Terminal as Administrator.
 
-### Fastfetch config highlights
+> New `PATH` entries and fonts only apply to **new** shells. Reopen Terminal
+> once after install.
 
-A cool-tone Catppuccin gradient (a mauve→lavender→sapphire trio) is applied
-consistently to:
-
-- the divider (`─` × 46, one ANSI color per dash),
-- every module key/icon (`Shell`, `OS`, `Board`, `CPU`, `GPU`, `RAM`, `Drive`,
-  `Display`, `Uptime`), each sampled at its position in the 9-step gradient,
-- the `USER@HOST` header rendered by the profile (per-character lerp through
-  the same trio).
-
-Specific modules:
-
-- `gpu` uses `detectionMethod: "vulkan"` to ignore virtual GPUs (Parsec
-  virtual display, etc.) and report only the real device.
-- `physicaldisk` shows the physical drive's model + interconnect + size
-  (e.g. `Samsung SSD 980 PRO 1TB — NVMe 931.51 GiB`).
-- `command` reads `%FF_RAM%` from the env so the RAM line is detection-driven
-  rather than hard-coded.
-- No Linux-style 8-color palette footer (irrelevant on Windows where there's
-  no ANSI scheme to advertise).
-
-### Windows Terminal settings
-
-- **Catppuccin Mocha** color scheme.
-- **JetBrainsMono Nerd Font** at 11 pt, acrylic background at 85 % opacity.
-- **PowerShell 7** as the default profile, launched with
-  `pwsh.exe -NoLogo -NoProfileLoadTime` so the splash isn't preceded by
-  `PowerShell 7.6.1` or `Loading personal and system profiles took … ms.`
-- Keybindings: `Ctrl+C` copy, `Ctrl+V` paste, `Alt+Shift+D` duplicate pane.
-
-### Desktop shortcut
-
-A **Terminal Admin** shortcut is created on the Desktop with hotkey
-`Ctrl+Alt+T` and the "Run as administrator" flag set, so one keystroke opens
-an elevated Terminal. The taskbar icon opens a normal (non-elevated) session.
-
-> When `fzf`, the Nerd Font or Fastfetch are freshly installed, the new
-> `PATH` and fonts only apply to **new** shells. Close and reopen Windows
-> Terminal once after install.
-
-## Keybindings in PS 7
+## Keybindings
 
 | Key | Action |
 | --- | --- |
-| `Tab` | Accept the grey suggestion; otherwise open the completion menu |
-| `→` / `Ctrl+→` | Accept the suggestion (full / word-by-word) |
-| `F2` | Toggle between inline ghost text and dropdown list view |
-| `Ctrl+R` | Fuzzy reverse history search (fzf) |
-| `Ctrl+T` | Fuzzy file / directory picker (fzf) |
+| `Tab` | Accept suggestion / open completion menu |
+| `→` / `Ctrl+→` | Accept suggestion (full / word-by-word) |
+| `F2` | Toggle inline ↔ dropdown predictions |
+| `Ctrl+R` | Fuzzy history search (fzf) |
+| `Ctrl+T` | Fuzzy file picker (fzf) |
+| `Ctrl+Alt+T` | Open elevated Terminal (desktop shortcut) |
 
 ## License
 
