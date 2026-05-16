@@ -1,0 +1,27 @@
+// Remplacer les lignes 221-241 dans src/editor.js avec ce code :
+
+// Rafraîchir le titre de l'onglet
+if (this.leaf && this.sourceFile) {
+	// Mettre à jour le titre de l'onglet avec le nom du fichier
+	const fileName = this.sourceFile.basename;
+
+	// Utiliser setViewState pour mettre à jour le titre de manière persistante
+	this.leaf.setViewState({
+		type: VIEW_TYPE,
+		state: { ...this.leaf.getViewState().state, fileName: fileName },
+		active: true
+	});
+
+	// Mettre à jour directement le DOM comme solution de secours
+	setTimeout(() => {
+		if (this.leaf.tabHeaderEl) {
+			const innerTextEl = this.leaf.tabHeaderEl.querySelector('.workspace-tab-header-inner-text');
+			if (innerTextEl) {
+				innerTextEl.textContent = fileName;
+			}
+
+			// Mettre à jour l'attribut title pour l'infobulle
+			this.leaf.tabHeaderEl.setAttribute('aria-label', fileName);
+		}
+	}, 0);
+}
