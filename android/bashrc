@@ -1,0 +1,118 @@
+# ~/.bashrc — Termux, Catppuccin Mocha, mirrors the Windows PowerShell 7
+# profile installed by https://github.com/ahmed-mili/windows-pwsh-config
+# (UTF-8 console, gradient USER@HOST header, fastfetch splash, fzf bindings,
+#  predictions via shell history + starship prompt).
+
+# Skip non-interactive (scripted pipes, scp, sftp, Claude Code subshells).
+case $- in
+    *i*) ;;
+      *) return ;;
+esac
+
+# ---- UTF-8 console — accents in paths + Nerd Font glyphs ----
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+export LESSCHARSET=utf-8
+
+# ---- Editor / pager defaults aligned with the Windows side ----
+export EDITOR="${EDITOR:-nano}"
+export PAGER="less -R"
+
+# ---- History — large, deduped, shared across panes ----
+export HISTSIZE=50000
+export HISTFILESIZE=100000
+export HISTCONTROL=ignoredups:erasedups
+export HISTTIMEFORMAT="%F %T "
+shopt -s histappend
+shopt -s checkwinsize
+shopt -s globstar 2>/dev/null
+shopt -s autocd 2>/dev/null
+PROMPT_COMMAND="history -a; history -n; ${PROMPT_COMMAND:-}"
+
+# ---- `dev` jump alias — mirrors `function dev { Set-Location C:\dev }` ----
+dev() { cd "$HOME/dev" || return; }
+
+# ---- ls / cat / find replacements when available (eza/bat/fd/ripgrep) ----
+if command -v eza >/dev/null 2>&1; then
+    alias ls='eza --icons --group-directories-first'
+    alias ll='eza -l --icons --git --group-directories-first'
+    alias la='eza -la --icons --git --group-directories-first'
+    alias tree='eza --tree --icons --level=3'
+else
+    alias ls='ls --color=auto'
+    alias ll='ls -lh --color=auto'
+    alias la='ls -lah --color=auto'
+fi
+command -v bat       >/dev/null 2>&1 && alias cat='bat --paging=never --style=plain'
+command -v rg        >/dev/null 2>&1 && alias grep='rg'
+alias gs='git status'
+alias gd='git diff'
+alias gl='git log --oneline --graph --decorate -20'
+
+# ---- isadmin helper (returns 0 if running as root — root rarely needed on Termux) ----
+isadmin() { [ "$(id -u)" -eq 0 ]; }
+
+# ---- Starship prompt — Catppuccin Mocha, two-line, see starship.toml ----
+if command -v starship >/dev/null 2>&1; then
+    export STARSHIP_CONFIG="$HOME/.config/starship.toml"
+    eval "$(starship init bash)"
+fi
+
+# ---- fzf — Ctrl+R (history), Ctrl+T (file picker), Alt+C (cd into dir) ----
+# Mirrors the PSFzf keybindings on the Windows side.
+if command -v fzf >/dev/null 2>&1; then
+    # Termux ships fzf without the keybindings shipped on Linux distros, so we
+    # source the upstream snippets shipped under share/ when present.
+    [ -f "$PREFIX/share/fzf/key-bindings.bash" ] && source "$PREFIX/share/fzf/key-bindings.bash"
+    [ -f "$PREFIX/share/fzf/completion.bash"   ] && source "$PREFIX/share/fzf/completion.bash"
+    export FZF_DEFAULT_OPTS="
+        --height 40% --layout=reverse --border
+        --color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8
+        --color=fg:#cdd6f4,header:#f38ba8,info:#cba6f7,pointer:#f5e0dc
+        --color=marker:#b4befe,fg+:#cdd6f4,prompt:#cba6f7,hl+:#f38ba8
+        --color=selected-bg:#45475a"
+    command -v fd >/dev/null 2>&1 && export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+fi
+
+# ---- Gradient USER@HOST header + fastfetch (interactive shells only) ----
+# Renders the same five Catppuccin stops as the Windows splash (Mauve →
+# Lavender → Sapphire) so the header is a continuous palette ribbon.
+if [ -t 1 ] && command -v fastfetch >/dev/null 2>&1; then
+    _gradient_header() {
+        local text="${USER}@$(hostname 2>/dev/null || echo termux)"
+        local n=${#text}
+        # Three RGB stops: Mauve→Lavender, Lavender, Lavender→Sapphire.
+        local r=(192 180 148)
+        local g=(178 190 194)
+        local b=(250 254 245)
+        local seg_count=2
+        local out=""
+        local i u seg t ra ga ba rb gb bb rr gg bbv ch
+        for (( i=0; i<n; i++ )); do
+            if (( n > 1 )); then
+                u=$(awk -v i="$i" -v n="$n" -v s="$seg_count" 'BEGIN { printf "%.6f", (i/(n-1))*s }')
+            else
+                u=0
+            fi
+            seg=${u%.*}
+            (( seg >= seg_count )) && seg=$((seg_count - 1))
+            t=$(awk -v u="$u" -v seg="$seg" 'BEGIN { printf "%.6f", u-seg }')
+            ra=${r[$seg]}; ga=${g[$seg]}; ba=${b[$seg]}
+            rb=${r[$((seg+1))]}; gb=${g[$((seg+1))]}; bb=${b[$((seg+1))]}
+            rr=$(awk -v a="$ra" -v b="$rb" -v t="$t" 'BEGIN { printf "%d", a+(b-a)*t+0.5 }')
+            gg=$(awk -v a="$ga" -v b="$gb" -v t="$t" 'BEGIN { printf "%d", a+(b-a)*t+0.5 }')
+            bbv=$(awk -v a="$ba" -v b="$bb" -v t="$t" 'BEGIN { printf "%d", a+(b-a)*t+0.5 }')
+            ch="${text:$i:1}"
+            out+=$'\033'"[1;38;2;${rr};${gg};${bbv}m${ch}"
+        done
+        printf '\n%s\033[0m\n' "$out"
+    }
+    _gradient_header
+    fastfetch
+fi
+
+# ---- Termux-specific: refresh PATH for ~/.local/bin and npm-global ----
+export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
+
+# ---- Local overrides — keep machine-specific tweaks out of git ----
+[ -f "$HOME/.bashrc.local" ] && source "$HOME/.bashrc.local"

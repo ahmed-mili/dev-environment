@@ -22,11 +22,11 @@
     Skip the winget installation step.
 
 .LINK
-    https://github.com/ahmed-mili/windows-pwsh-config
+    https://github.com/ahmed-mili/dev-environment
 
 .EXAMPLE
     # One-liner (no clone required):
-    iex (irm https://raw.githubusercontent.com/ahmed-mili/windows-pwsh-config/main/install.ps1).TrimStart([char]0xFEFF)
+    iex (irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/windows/install.ps1).TrimStart([char]0xFEFF)
 
 .EXAMPLE
     # From a local clone:
@@ -327,4 +327,4 @@ Write-Host '  Done.' -ForegroundColor Green
 Write-Host '  Restart Windows Terminal for all changes to take effect.'
 Write-Host ''
 Write-Host '  Keybindings & docs' -ForegroundColor Blue
-Write-Host '    https://github.com/ahmed-mili/windows-pwsh-config#keybindings'
+Write-Host '    https://github.com/ahmed-mili/dev-environment/blob/main/windows/README.md#keybindings'
