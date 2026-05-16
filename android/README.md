@@ -2,8 +2,6 @@
 
 Config Termux (Android) : bash, starship, fastfetch, hooks Claude Code, intégration SSH PC ↔ téléphone.
 
-Migré depuis l'ancien repo [termux-config](https://github.com/ahmed-mili/termux-config) (archivé après cette fusion).
-
 ## Fichiers
 
 | Fichier | Cible |
