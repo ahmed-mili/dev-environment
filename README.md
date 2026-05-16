@@ -1,63 +1,72 @@
-# windows-pwsh-config
+# dev-environment
 
-Single-file installer for a polished Windows Terminal + PowerShell 7 setup:
-**Catppuccin Mocha** theme, **JetBrainsMono Nerd Font**, **Fastfetch** splash
-with gradient header, plus PSReadLine predictions, Terminal-Icons and PSFzf.
-**Windows only.**
+Configuration multi-plateforme pour mon flow Claude Code + Ollama sur **Windows** (PC) et **Android** (Termux). Un seul repo, un dossier par OS, plus un dossier pour les outils transverses.
 
-## Install / Update
+## Structure
 
-```powershell
-iex (irm https://raw.githubusercontent.com/ahmed-mili/windows-pwsh-config/main/install.ps1).TrimStart([char]0xFEFF)
+```
+dev-environment/
+├── windows/          # PC Windows : PowerShell 7, Windows Terminal, Fastfetch
+│   ├── install.ps1   # one-liner installer
+│   └── README.md
+├── android/          # Android via Termux : bash, starship, fastfetch
+│   ├── setup.sh
+│   ├── bashrc, starship.toml, termux.properties, ...
+│   └── README.md
+├── claude-code/      # Config Claude Code (statusline + settings + hooks)
+│   ├── statusline.ps1
+│   ├── settings.json
+│   ├── hooks/
+│   └── README.md
+├── ollama/           # Config Ollama (intégrations modèles cloud)
+│   ├── config.json
+│   └── README.md
+└── LICENSE
 ```
 
-Idempotent — backs up existing configs, skips what's already installed, re-runs
-chassis detection if you move between machines.
+## Installation rapide
 
-## What it installs
+### Windows
+```powershell
+iex (irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/windows/install.ps1).TrimStart([char]0xFEFF)
+```
 
-**Winget packages:** PowerShell 7, Windows Terminal, fzf, JetBrainsMono Nerd
-Font, Fastfetch. **PSGallery modules:** CompletionPredictor, PSFzf,
-Terminal-Icons.
+### Android (Termux)
+```bash
+curl -fsSL https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh | bash
+```
 
-**Config files deployed** (existing ones backed up with `.bak-<timestamp>`):
+### Claude Code (post-install après Windows ou Android)
+```powershell
+# Windows
+Copy-Item .\claude-code\statusline.ps1 "$env:USERPROFILE\.claude\statusline.ps1"
+Copy-Item .\claude-code\settings.json   "$env:USERPROFILE\.claude\settings.json"
+Copy-Item .\claude-code\hooks\*.ps1     "$env:USERPROFILE\.claude\hooks\"
+```
 
-| File | Path |
-| --- | --- |
-| PS 7 profile | `~\Documents\PowerShell\Microsoft.PowerShell_profile.ps1` |
-| PS 5 profile | `~\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` |
-| Terminal settings | `…\LocalState\settings.json` |
-| Fastfetch config | `~\.config\fastfetch\config.jsonc` |
+```bash
+# Android (Termux)
+mkdir -p ~/.claude/hooks
+cp claude-code/settings.json   ~/.claude/settings.json
+cp claude-code/hooks/*.sh      ~/.claude/hooks/  2>/dev/null || true
+```
 
-All payloads are base64-encoded inside `install.ps1` to avoid quoting issues
-with ANSI escapes and Nerd Font glyphs.
+## Statusline Claude Code (highlight)
 
-## Highlights
+`claude-code/statusline.ps1` affiche :
+- **Path coloré** dynamiquement selon le mode permission (rose pour bypass, cyan pour plan, vert pour acceptEdits, violet pour dontAsk, orange pour auto)
+- **Branche git** auto-détectée
+- **Usage 5h + 7j** avec barre de progression, %, et reset time (cache 60s pour ne pas spammer l'API)
+- **Plan + email** lus depuis `~/.claude/.credentials.json` et `~/.claude.json`
 
-- **Fastfetch splash** — mauve→sapphire gradient on divider, module icons and
-  `USER@HOST` header. RAM auto-detected from WMI (`2 × 16 GiB DDR4-3600`);
-  physical disk shows model + interconnect. GPU ignores virtual adapters.
-- **PSReadLine** — inline predictions (history + CompletionPredictor), Catppuccin
-  syntax colors. `F2` toggles inline ↔ dropdown. `Tab` accepts suggestion or
-  opens menu.
-- **PSFzf** — `Ctrl+R` fuzzy history, `Ctrl+T` fuzzy file picker.
-- **Terminal** — acrylic at 85 %, `pwsh -NoLogo -NoProfileLoadTime` as default,
-  `Ctrl+C`/`Ctrl+V`/`Alt+Shift+D` keybindings.
-- **Desktop shortcut** — `Ctrl+Alt+T` opens Terminal as Administrator.
+Endpoint utilisé pour `/usage` : `GET https://api.anthropic.com/api/oauth/usage` (privé, découvert via [codelynx.dev](https://codelynx.dev/posts/claude-code-usage-limits-statusline)).
 
-> New `PATH` entries and fonts only apply to **new** shells. Reopen Terminal
-> once after install.
+## Sécurité
 
-## Keybindings
-
-| Key | Action |
-| --- | --- |
-| `Tab` | Accept suggestion / open completion menu |
-| `→` / `Ctrl+→` | Accept suggestion (full / word-by-word) |
-| `F2` | Toggle inline ↔ dropdown predictions |
-| `Ctrl+R` | Fuzzy history search (fzf) |
-| `Ctrl+T` | Fuzzy file picker (fzf) |
-| `Ctrl+Alt+T` | Open elevated Terminal (desktop shortcut) |
+`.gitignore` exclut :
+- `.credentials.json`, `auth-status-cache.json`, `usage-cache.json` (tokens / data sensibles Claude)
+- `id_ed25519`, `id_ed25519.pub`, `*.pem`, `*.key` (clés SSH / privées)
+- `sessions/`, `history.jsonl`, `projects/`, `stats-cache.json` (data perso Claude)
 
 ## License
 

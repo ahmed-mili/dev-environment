@@ -1,0 +1,71 @@
+{
+  "model": "opus",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:/Users/Ahmed/.claude/hooks/auto-pull.ps1"
+            ],
+            "timeout": 30,
+            "statusMessage": "auto-pull..."
+          },
+          {
+            "type": "command",
+            "command": "pwsh",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:/Users/Ahmed/.claude/hooks/resolve-sync-conflicts.ps1"
+            ],
+            "timeout": 15,
+            "statusMessage": "resolve sync conflicts..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:/Users/Ahmed/.claude/hooks/auto-push.ps1"
+            ],
+            "timeout": 30,
+            "statusMessage": "auto-push..."
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true
+  },
+  "language": "French",
+  "effortLevel": "xhigh",
+  "autoUpdatesChannel": "latest",
+  "autoDreamEnabled": true,
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark-ansi",
+  "statusLine": {
+    "type": "command",
+    "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/Ahmed/.claude/statusline.ps1"
+  }
+}

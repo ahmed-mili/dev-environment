@@ -1,0 +1,27 @@
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+
+  "logo": { "type": "none" },
+
+  "display": {
+    "separator": "  ",
+    "key": { "width": 14 },
+    "color": { "separator": "#6C7086" }
+  },
+
+  "modules": [
+    { "type": "custom", "format": "\u001b[38;2;192;178;250m─\u001b[38;2;191;179;250m─\u001b[38;2;190;180;251m─\u001b[38;2;189;181;251m─\u001b[38;2;188;182;251m─\u001b[38;2;187;183;252m─\u001b[38;2;186;184;252m─\u001b[38;2;185;185;252m─\u001b[38;2;184;186;253m─\u001b[38;2;183;187;253m─\u001b[38;2;182;188;253m─\u001b[38;2;181;189;254m─\u001b[38;2;180;190;254m─\u001b[38;2;178;190;253m─\u001b[38;2;175;191;253m─\u001b[38;2;172;191;252m─\u001b[38;2;169;191;251m─\u001b[38;2;166;192;251m─\u001b[38;2;163;192;250m─\u001b[38;2;160;192;249m─\u001b[38;2;157;193;248m─\u001b[38;2;154;193;247m─\u001b[38;2;151;194;246m─\u001b[38;2;148;194;245m─\u001b[0m" },
+
+    { "type": "shell",   "key": "\u001b[38;2;192;178;250m󰊻  Shell\u001b[0m",   "format": "{pretty-name} {version}" },
+    { "type": "os",      "key": "\u001b[38;2;189;181;251m󰀲  OS\u001b[0m" },
+    { "type": "host",    "key": "\u001b[38;2;186;184;252m󰄜  Device\u001b[0m" },
+    { "type": "kernel",  "key": "\u001b[38;2;183;187;253m󰒋  Kernel\u001b[0m" },
+    { "type": "cpu",     "key": "\u001b[38;2;180;190;254m󰻟  CPU\u001b[0m",     "format": "{name}" },
+    { "type": "gpu",     "key": "\u001b[38;2;172;191;252m󰂮  GPU\u001b[0m",     "format": "{name}" },
+    { "type": "memory",  "key": "\u001b[38;2;164;192;250m󰆘  RAM\u001b[0m" },
+    { "type": "disk",    "key": "\u001b[38;2;156;193;247m󰋊  Disk\u001b[0m" },
+    { "type": "battery", "key": "\u001b[38;2;148;194;245m󰂄  Battery\u001b[0m" },
+    "break",
+    "break"
+  ]
+}

@@ -1,9 +1,25 @@
-# Backups created by install.ps1 on the target machine.
+# Backups
 *.bak-*
+*.backup
 
-# Windows / editor noise
-Thumbs.db
+# Logs / cache
+*.log
 .DS_Store
-*.swp
-.vscode/
-.idea/
+
+# Secrets — Ollama / SSH (NE JAMAIS COMMIT)
+id_ed25519
+id_ed25519.pub
+*.pem
+*.key
+
+# Claude credentials (NE JAMAIS COMMIT)
+.credentials.json
+auth-status-cache.json
+usage-cache.json
+statusline-last-input.json
+
+# Données perso Claude (sessions, history)
+sessions/
+history.jsonl
+projects/
+stats-cache.json
