@@ -13,6 +13,23 @@
   "language": "French",
   "effortLevel": "xhigh",
   "autoUpdatesChannel": "latest",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/Ahmed/.claude/hooks/patch-claude-exe.ps1" },
+          { "type": "command", "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/Ahmed/.claude/hooks/auto-pull.ps1" }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/Ahmed/.claude/hooks/auto-push.ps1" }
+        ]
+      }
+    ]
+  },
   "autoDreamEnabled": true,
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark-ansi"
