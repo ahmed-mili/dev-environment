@@ -179,6 +179,38 @@ while ($probe -and -not (Test-Path -LiteralPath (Join-Path $probe '.git'))) {
 if ($probe) {
     $branch = & git -C $dir rev-parse --abbrev-ref HEAD 2>$null
     if ($branch) {
+        # ----- Background fetch (cooldown 3 min) -----
+        # Sans ça, `↓N` ne reflète que l'état git LOCAL (dernier fetch en date),
+        # donc un push depuis une autre machine reste invisible jusqu'à la
+        # prochaine session (hook auto-pull). Avec ce fetch périodique, l'indicateur
+        # se rafraîchit ~3 min après chaque push remote.
+        #
+        # Marker timestamp dans .git/ : créé AVANT le spawn pour éviter qu'une
+        # rafale d'invocations de la statusline (typing rapide) ne lance des fetch
+        # parallèles. Trade-off : si fetch échoue (offline), on ne réessaie pas avant
+        # 3 min — acceptable.
+        $fetchMarker = Join-Path $probe '.git\statusline-last-fetch'
+        $needsFetch = $true
+        if (Test-Path $fetchMarker) {
+            $age = (Get-Date) - (Get-Item $fetchMarker).LastWriteTime
+            if ($age.TotalSeconds -lt 180) { $needsFetch = $false }
+        }
+        if ($needsFetch) {
+            New-Item -ItemType File -Force -Path $fetchMarker | Out-Null
+            # Process detached, sans console : .NET ProcessStartInfo plutôt que
+            # Start-Process qui blink une fenêtre console sur Windows 10/11.
+            try {
+                $psi = New-Object System.Diagnostics.ProcessStartInfo
+                $psi.FileName = 'git'
+                $psi.Arguments = "-C `"$dir`" fetch --quiet"
+                $psi.CreateNoWindow = $true
+                $psi.UseShellExecute = $false
+                $psi.WindowStyle = 'Hidden'
+                [System.Diagnostics.Process]::Start($psi) | Out-Null
+            } catch {}
+        }
+
+
         # `--porcelain=v2 --branch` regroupe ahead/behind ET working tree en un seul
         # appel git -> minimise le coût (la status bar est refresh à chaque keystroke).
         # ahead/behind sont basés sur l'état git LOCAL : pas de fetch implicite —
