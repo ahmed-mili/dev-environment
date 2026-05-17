@@ -14,24 +14,16 @@ dev-environment/
 
 ## Install
 
-### Windows
+### Windows (one-liner)
 ```powershell
-git clone https://github.com/ahmed-mili/dev-environment.git C:\dev\dev-environment
-cd C:\dev\dev-environment
-.\windows\install.ps1
-.\claude-code\deploy.ps1 -Pull
+iex (irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.ps1).TrimStart([char]0xFEFF)
 ```
 
-Then in Claude Code, run `/plugin` and install `frontend-design`, `code-review`, `superpowers` from `claude-plugins-official`.
+Clones the repo to `C:\dev\dev-environment`, installs winget packages + PS7 profile + Terminal + Fastfetch, deploys Claude Code statusline/settings/hooks/skills. Optionally run `/plugin` inside Claude Code afterward to add `frontend-design`, `code-review`, `superpowers` from `claude-plugins-official`.
 
 ### Android (Termux)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh | bash
-```
-
-### Windows bootstrap (no clone)
-```powershell
-iex (irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/windows/install.ps1).TrimStart([char]0xFEFF)
 ```
 
 ## License
