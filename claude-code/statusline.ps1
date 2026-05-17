@@ -166,6 +166,7 @@ $pathBG = BG  $pR $pG $pB
 # ============================== BRANCHE GIT ==============================
 
 $branch = $null
+$gitShortSha = $null  # SHA court (7 chars) du HEAD, extrait de branch.oid
 $gitAhead = 0     # commits locaux pas encore push vers upstream
 $gitBehind = 0    # commits upstream pas encore pull en local
 $gitDirty = $false  # working tree contient des modifs non commit (tracked ou untracked)
@@ -184,7 +185,11 @@ if ($probe) {
         # c'est le hook auto-pull qui rafraîchit la ref upstream au démarrage de session.
         $statusLines = & git -C $dir status --porcelain=v2 --branch 2>$null
         foreach ($line in $statusLines) {
-            if ($line -match '^# branch\.ab \+(\d+) -(\d+)') {
+            if ($line -match '^# branch\.oid ([0-9a-f]{7,})') {
+                # 7 chars : taille standard `git log --oneline` et `--short`
+                $gitShortSha = $matches[1].Substring(0, 7)
+            }
+            elseif ($line -match '^# branch\.ab \+(\d+) -(\d+)') {
                 $gitAhead  = [int]$matches[1]
                 $gitBehind = [int]$matches[2]
             }
@@ -347,6 +352,7 @@ if ($branch) {
     #   *  = working tree dirty (modifs / untracked / unmerged non commit)
     # Apparaissent seulement si > 0 — sinon la branche s'affiche normalement.
     $branchText = " ($branch"
+    if ($gitShortSha)     { $branchText += " $gitShortSha" }
     if ($gitAhead -gt 0)  { $branchText += " ↑$gitAhead" }
     if ($gitBehind -gt 0) { $branchText += " ↓$gitBehind" }
     if ($gitDirty)        { $branchText += ' *' }
