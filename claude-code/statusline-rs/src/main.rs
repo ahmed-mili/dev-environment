@@ -162,8 +162,10 @@ fn get_effort_display(level: Option<&str>) -> String {
             let mut pos = phase % period;
             if pos < 0.0 { pos += period; }
             let sigma2 = 0.81_f64; // (0.9)^2
-            let base = (170u8, 0u8, 170u8);       // magenta dim (fond)
-            let hi = (208u8, 180u8, 255u8);       // #d0b4ff (lumiere)
+            // Couleurs du theme terminal (Catppuccin Mocha) pour matcher exactement
+            // ce que la console rendait avec les ANSI codes bruts \x1b[95m + #d0b4ff.
+            let base = (245u8, 194u8, 231u8);     // magentaBright Catppuccin (#F5C2E7)
+            let hi = (208u8, 180u8, 255u8);       // #d0b4ff (lumiere shimmer)
             let mut s = String::new();
             for (i, c) in chars.iter().enumerate() {
                 // Distance wraparound : on prend la plus courte distance
@@ -180,17 +182,19 @@ fn get_effort_display(level: Option<&str>) -> String {
             s
         }
         "max" => {
-            // Rainbow continu : palette ANSI dim convertie en RGB approx.
-            // Chaque char prend une couleur lerp entre 2 stops adjacents
-            // selon la partie fractionnaire de la phase.
+            // Rainbow continu. Palette identique a celle que le terminal rendait
+            // pour les ANSI codes \x1b[31m, [91m, [33m, [32m, [36m, [34m, [35m
+            // sous le theme Catppuccin Mocha. red == redBright en Catppuccin
+            // (palette flat), donc 2 stops adjacents identiques = micro-pause
+            // sur rouge dans le cycle, comportement attendu vs version d'avant.
             let palette: [(u8, u8, u8); 7] = [
-                (170, 0, 0),       // red
-                (255, 85, 85),     // redBright
-                (170, 170, 0),     // yellow
-                (0, 170, 0),       // green
-                (0, 170, 170),     // cyan
-                (0, 0, 170),       // blue
-                (170, 0, 170),     // magenta
+                (243, 139, 168),   // red          \x1b[31m  -> #F38BA8
+                (243, 139, 168),   // redBright    \x1b[91m  -> #F38BA8
+                (249, 226, 175),   // yellow       \x1b[33m  -> #F9E2AF
+                (166, 227, 161),   // green        \x1b[32m  -> #A6E3A1
+                (148, 226, 213),   // cyan         \x1b[36m  -> #94E2D5
+                (137, 180, 250),   // blue         \x1b[34m  -> #89B4FA
+                (245, 194, 231),   // magenta      \x1b[35m  -> #F5C2E7
             ];
             let plen = palette.len() as f64;
             let chars: Vec<char> = label.chars().collect();
