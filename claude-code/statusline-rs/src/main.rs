@@ -25,6 +25,16 @@ const RESET: &str = "\x1b[0m";
 fn rgb(r: u8, g: u8, b: u8) -> String {
     format!("\x1b[38;2;{};{};{}m", r, g, b)
 }
+
+fn lerp_u8(a: u8, b: u8, t: f64) -> u8 {
+    (a as f64 + (b as f64 - a as f64) * t)
+        .round()
+        .clamp(0.0, 255.0) as u8
+}
+fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f64) -> (u8, u8, u8) {
+    (lerp_u8(a.0, b.0, t), lerp_u8(a.1, b.1, t), lerp_u8(a.2, b.2, t))
+}
+
 fn bg(r: u8, g: u8, b: u8) -> String {
     format!("\x1b[48;2;{};{};{}m", r, g, b)
 }
@@ -126,55 +136,73 @@ fn get_effort_display(level: Option<&str>) -> String {
     let rst = "\x1b[0m";
     let label = level;
 
-    // Frame avance toutes les 120 ms (~8.3 Hz) -- calibre empiriquement.
-    // refreshInterval=0.12 dans settings.json est ALIGNE sur ce divider :
-    // chaque refresh advance d'exactement 1 frame -> pace uniforme, pas de
-    // duplicate frames qui causaient un micro-stutter audible visuellement.
-    // Si on revient a refresh=0.1 avec divider=/120, 1 refresh sur 6 montre
-    // la meme frame que la precedente -> stutter regulier toutes les ~600ms.
+    // Phase = float continu mesure en "frames de 120 ms".
+    // refreshInterval=0.12 dans settings.json fait que chaque refresh advance
+    // la phase d'exactement +1.0 -> pace uniforme.
+    // Au lieu de calculer un entier `frame = now/120` qui saute d'un cran a
+    // chaque tick (transitions dures), on lerp en RGB 24-bit entre couleurs
+    // adjacentes en utilisant la partie fractionnaire -> meme cycle visuel
+    // mais transitions douces, perception de fluidite plus haute meme a 8.3 Hz.
     let now = now_ms();
+    let phase = (now as f64) / 120.0;
 
     match level {
         "low" => format!("\x1b[93m{}{}{}", bold, label, rst),
         "medium" => format!("\x1b[92m{}{}{}", bold, label, rst),
         "high" => format!("\x1b[94m{}{}{}", bold, label, rst),
         "xhigh" => {
+            // Curseur lumineux qui glisse en continu. Couleur de chaque char =
+            // lerp entre magentaBright "fond" et #d0b4ff "lumiere", facteur =
+            // intensite Gaussienne fonction de la distance au curseur.
+            // sigma = 0.9 -> glow tres serre, on sent le point lumineux qui
+            // se deplace. Distance wraparound pour matcher la periodicite
+            // (= label.len() + 4) du picker original.
             let chars: Vec<char> = label.chars().collect();
-            let period = (chars.len() as i64) + 4;
-            let mut frame = (now / 120) % period;
-            if frame < 0 { frame += period; }
+            let period = (chars.len() + 4) as f64;
+            let mut pos = phase % period;
+            if pos < 0.0 { pos += period; }
+            let sigma2 = 0.81_f64; // (0.9)^2
+            let base = (170u8, 0u8, 170u8);       // magenta dim (fond)
+            let hi = (208u8, 180u8, 255u8);       // #d0b4ff (lumiere)
             let mut s = String::new();
             for (i, c) in chars.iter().enumerate() {
-                let i = i as i64;
-                if i == frame {
-                    s.push_str(&rgb(208, 180, 255));
-                    s.push_str(bold);
-                } else if i == frame - 1 || i == frame + 1 {
-                    s.push_str("\x1b[95m");
-                    s.push_str(bold);
-                } else {
-                    s.push_str("\x1b[95m");
-                    s.push_str(nobold);
-                }
+                // Distance wraparound : on prend la plus courte distance
+                // sur l'anneau [0..period).
+                let raw = (i as f64 - pos).abs();
+                let dist = raw.min(period - raw);
+                let intensity = (-dist * dist / sigma2).exp();
+                let (r, g, b) = lerp_rgb(base, hi, intensity);
+                s.push_str(&rgb(r, g, b));
+                if intensity > 0.5 { s.push_str(bold); } else { s.push_str(nobold); }
                 s.push(*c);
             }
             s.push_str(rst);
             s
         }
         "max" => {
-            let palette = [
-                "\x1b[31m", "\x1b[91m", "\x1b[33m", "\x1b[32m", "\x1b[36m", "\x1b[34m",
-                "\x1b[35m",
+            // Rainbow continu : palette ANSI dim convertie en RGB approx.
+            // Chaque char prend une couleur lerp entre 2 stops adjacents
+            // selon la partie fractionnaire de la phase.
+            let palette: [(u8, u8, u8); 7] = [
+                (170, 0, 0),       // red
+                (255, 85, 85),     // redBright
+                (170, 170, 0),     // yellow
+                (0, 170, 0),       // green
+                (0, 170, 170),     // cyan
+                (0, 0, 170),       // blue
+                (170, 0, 170),     // magenta
             ];
+            let plen = palette.len() as f64;
             let chars: Vec<char> = label.chars().collect();
-            let frame = now / 120;
-            let palette_len = palette.len() as i64;
             let mut s = String::new();
             for (i, c) in chars.iter().enumerate() {
-                let i = i as i64;
-                let mut idx = (i + frame) % palette_len;
-                if idx < 0 { idx += palette_len; }
-                s.push_str(palette[idx as usize]);
+                let mut target = ((i as f64) + phase) % plen;
+                if target < 0.0 { target += plen; }
+                let lo_idx = target.floor() as usize % palette.len();
+                let hi_idx = (lo_idx + 1) % palette.len();
+                let t = target - target.floor();
+                let (r, g, b) = lerp_rgb(palette[lo_idx], palette[hi_idx], t);
+                s.push_str(&rgb(r, g, b));
                 s.push_str(bold);
                 s.push(*c);
             }
