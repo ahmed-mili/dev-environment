@@ -169,7 +169,7 @@ $branch = $null
 $gitShortSha = $null  # SHA court (7 chars) du HEAD, extrait de branch.oid
 $gitAhead = 0     # commits locaux pas encore push vers upstream
 $gitBehind = 0    # commits upstream pas encore pull en local
-$gitDirty = $false  # working tree contient des modifs non commit (tracked ou untracked)
+$gitDirtyCount = 0  # nombre de fichiers modifiés / untracked / unmerged non commit
 $probe = $dir
 while ($probe -and -not (Test-Path -LiteralPath (Join-Path $probe '.git'))) {
     $parent = Split-Path -Parent $probe
@@ -195,7 +195,7 @@ if ($probe) {
             }
             elseif ($line -match '^[12?u] ') {
                 # Premier char : 1=changé, 2=renommé/copié, ?=untracked, u=unmerged
-                $gitDirty = $true
+                $gitDirtyCount++
             }
         }
     }
@@ -352,10 +352,10 @@ if ($branch) {
     #   *  = working tree dirty (modifs / untracked / unmerged non commit)
     # Apparaissent seulement si > 0 — sinon la branche s'affiche normalement.
     $branchText = " ($branch"
-    if ($gitShortSha)     { $branchText += " $gitShortSha" }
-    if ($gitAhead -gt 0)  { $branchText += " ↑$gitAhead" }
-    if ($gitBehind -gt 0) { $branchText += " ↓$gitBehind" }
-    if ($gitDirty)        { $branchText += ' *' }
+    if ($gitShortSha)         { $branchText += " $gitShortSha" }
+    if ($gitAhead -gt 0)      { $branchText += " ↑$gitAhead" }
+    if ($gitBehind -gt 0)     { $branchText += " ↓$gitBehind" }
+    if ($gitDirtyCount -gt 0) { $branchText += " *$gitDirtyCount" }
     $branchText += ')'
     $bannerSegs += @{ text = $branchText; fg = (RGB 60 65 80) }
 }
