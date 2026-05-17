@@ -276,13 +276,47 @@ fn compute_git(dir: &str) -> GitInfo {
     let mut info = GitInfo::default();
     let Some(root) = find_git_root(dir) else { return info; };
 
-    let Some(branch) = run_git(dir, &["rev-parse", "--abbrev-ref", "HEAD"]) else {
+    // Single git call: status --porcelain=v2 --branch returns branch, oid, ab, AND dirty.
+    // Saves ~30-50ms vs an extra `git rev-parse --abbrev-ref HEAD` spawn on Windows,
+    // which used to push total time over CC's ~100ms abort threshold in git repos.
+    let Some(out) = run_git(dir, &["status", "--porcelain=v2", "--branch"]) else {
         return info;
     };
-    if branch.is_empty() {
+
+    for line in out.lines() {
+        if let Some(rest) = line.strip_prefix("# branch.head ") {
+            let head = rest.trim();
+            if !head.is_empty() {
+                // Detached HEAD -> "(detached)" ; aligne sur ce que `rev-parse --abbrev-ref HEAD` renvoyait ("HEAD")
+                info.branch = Some(if head == "(detached)" { "HEAD".to_string() } else { head.to_string() });
+            }
+        } else if let Some(rest) = line.strip_prefix("# branch.oid ") {
+            let oid = rest.trim();
+            if oid.len() >= 7 && oid != "(initial)" {
+                info.sha = Some(oid[..7].to_string());
+            }
+        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+            // format: +N -M
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            if parts.len() == 2 {
+                if let Some(a) = parts[0].strip_prefix('+') {
+                    info.ahead = a.parse().unwrap_or(0);
+                }
+                if let Some(b) = parts[1].strip_prefix('-') {
+                    info.behind = b.parse().unwrap_or(0);
+                }
+            }
+        } else if let Some(first) = line.chars().next() {
+            // Premier char : 1=change, 2=renomme, ?=untracked, u=unmerged
+            if matches!(first, '1' | '2' | '?' | 'u') && line.chars().nth(1) == Some(' ') {
+                info.dirty += 1;
+            }
+        }
+    }
+
+    if info.branch.is_none() {
         return info;
     }
-    info.branch = Some(branch);
 
     // Background fetch cooldown 30s
     let marker = root.join(".git").join("statusline-last-fetch");
@@ -291,41 +325,21 @@ fn compute_git(dir: &str) -> GitInfo {
         None => true,
     };
     if needs_fetch {
+        // Touch d'abord pour empecher d'autres ticks de re-spawn pendant que celui-ci demarre.
         touch(&marker);
-        let mut cmd = Command::new("git");
-        cmd.args(["-C", dir, "fetch", "--quiet"]);
-        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        #[cfg(windows)]
-        cmd.creation_flags(CREATE_NO_WINDOW | 0x00000008 /* DETACHED_PROCESS */);
-        let _ = cmd.spawn();
-    }
-
-    // Status porcelain v2
-    if let Some(out) = run_git(dir, &["status", "--porcelain=v2", "--branch"]) {
-        for line in out.lines() {
-            if let Some(rest) = line.strip_prefix("# branch.oid ") {
-                let oid = rest.trim();
-                if oid.len() >= 7 {
-                    info.sha = Some(oid[..7].to_string());
-                }
-            } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
-                // format: +N -M
-                let parts: Vec<&str> = rest.split_whitespace().collect();
-                if parts.len() == 2 {
-                    if let Some(a) = parts[0].strip_prefix('+') {
-                        info.ahead = a.parse().unwrap_or(0);
-                    }
-                    if let Some(b) = parts[1].strip_prefix('-') {
-                        info.behind = b.parse().unwrap_or(0);
-                    }
-                }
-            } else if let Some(first) = line.chars().next() {
-                // Premier char : 1=change, 2=renomme, ?=untracked, u=unmerged
-                if matches!(first, '1' | '2' | '?' | 'u') && line.chars().nth(1) == Some(' ') {
-                    info.dirty += 1;
-                }
-            }
-        }
+        // Le spawn lui-meme coute ~300 ms sur Windows quand Defender realtime est actif :
+        // chaque creation de process git est scannee. DETACHED_PROCESS ne sauve pas ce cout,
+        // il rend juste le process enfant detache une fois cree. On detache donc aussi LA CREATION
+        // elle-meme dans un thread daemon, pour que la main thread retourne immediatement.
+        let dir_owned = dir.to_string();
+        std::thread::spawn(move || {
+            let mut cmd = Command::new("git");
+            cmd.args(["-C", &dir_owned, "fetch", "--quiet"]);
+            cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+            #[cfg(windows)]
+            cmd.creation_flags(CREATE_NO_WINDOW | 0x00000008 /* DETACHED_PROCESS */);
+            let _ = cmd.spawn();
+        });
     }
 
     // FETCH_HEAD staleness check
