@@ -1,5 +1,10 @@
 {
   "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "C:/Users/Ahmed/.claude/statusline.exe",
+    "refreshInterval": 0.1
+  },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
@@ -10,9 +15,5 @@
   "autoUpdatesChannel": "latest",
   "autoDreamEnabled": true,
   "skipDangerousModePermissionPrompt": true,
-  "theme": "dark-ansi",
-  "statusLine": {
-    "type": "command",
-    "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/Ahmed/.claude/statusline.ps1"
-  }
+  "theme": "dark-ansi"
 }

@@ -75,9 +75,19 @@ function Get-EffortDisplay([string]$level) {
     #   high   -> permission = ansi:blueBright,   bold, statique
     #   xhigh  -> autoAccept-shimmer = curseur lumineux #d0b4ff qui traverse,
     #             reste en magentaBright bold (chars adjacents bold, autres normaux),
-    #             periode = label.Length + 4, frame change toutes les 100 ms
+    #             periode = label.Length + 4
     #   max    -> rainbow-animated = chaque char prend la couleur palette[(i+frame) % 7],
     #             palette dark-ansi : red, redBright, yellow, green, cyan, blue, magenta, tous bold
+    # PLAFOND ARCHITECTURAL : la fonction I() dans claude.exe abort le statusline
+    # command precedent a chaque appel (`_.current?.abort()`). PowerShell met ~420 ms
+    # a se lancer/finir. Donc refreshInterval < 0.5s = PS jamais le temps de produire
+    # son output = statusline disparait. Le picker /effort tourne a 10 Hz parce qu'il
+    # est rendu DANS le binaire (Ink/React) sans spawn externe -- on ne peut pas
+    # repliquer cette cadence sans reecrire statusline.ps1 en binaire natif rapide.
+    # Compromis retenu : frame avance toutes les 500 ms = synchro avec refreshInterval=0.5
+    # = 2 Hz smooth (1 increment par refresh, pas de saut). Le binaire impose
+    # normalement refreshInterval >= 1 s ; on a patche ce minimum dans claude.exe
+    # (cf. claude-exe-statusline-patch.md en memoire) pour autoriser 0.5.
     # Source : function Ybq/e4_/jSA/wSA dans claude.exe, palette LC9/Rz1.
     if (-not $level) { return '' }
     $label = $level
@@ -91,7 +101,7 @@ function Get-EffortDisplay([string]$level) {
         'xhigh'  {
             $chars  = $label.ToCharArray()
             $period = $chars.Length + 4
-            $frame  = [int]([Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 100.0) % $period)
+            $frame  = [int]([Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 500.0) % $period)
             $sb = [System.Text.StringBuilder]::new()
             for ($i = 0; $i -lt $chars.Length; $i++) {
                 if ($i -eq $frame) {
@@ -109,7 +119,7 @@ function Get-EffortDisplay([string]$level) {
         'max'    {
             $palette = @("$esc[31m","$esc[91m","$esc[33m","$esc[32m","$esc[36m","$esc[34m","$esc[35m")
             $chars = $label.ToCharArray()
-            $frame = [int][Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 100.0)
+            $frame = [int][Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 500.0)
             $sb = [System.Text.StringBuilder]::new()
             for ($i = 0; $i -lt $chars.Length; $i++) {
                 $cIdx = (($i + $frame) % $palette.Count + $palette.Count) % $palette.Count
