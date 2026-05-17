@@ -24,32 +24,50 @@ dev-environment/
 └── LICENSE
 ```
 
-## Installation rapide
+## Installation
 
-### Windows
+### Reproduire l'environnement complet sur une nouvelle machine
+
+#### Windows
+```powershell
+# 1. Clone
+git clone https://github.com/ahmed-mili/dev-environment.git C:\dev\dev-environment
+cd C:\dev\dev-environment
+
+# 2. Bundle Windows : winget (PowerShell 7, Terminal, fzf, zoxide, Nerd Font,
+#    Fastfetch) + profil PS7 (PSReadLine, zoxide init, cd autocomplete C:\dev)
+.\windows\install.ps1
+
+# 3. Claude Code : statusline, settings, hooks auto-sync, 9 skills custom
+.\claude-code\deploy.ps1 -Pull
+
+# 4. Plugins marketplace : ouvrir Claude Code, lancer `/plugin`,
+#    installer depuis `claude-plugins-official` :
+#      - frontend-design
+#      - code-review
+#      - superpowers
+```
+
+Après ça, `git pull` à l'arrivée sur une machine + `git push` au départ (automatisé via les hooks auto-sync) maintient la sync entre tes machines.
+
+#### Android (Termux)
+```bash
+curl -fsSL https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh | bash
+
+# Config Claude Code (équivalents bash des hooks PS à produire — TODO)
+mkdir -p ~/.claude/hooks
+cp claude-code/settings.json ~/.claude/settings.json
+```
+
+### Bootstrap one-liner (Windows, sans clone)
+
+Pour un PC où tu veux juste les paquets winget + profil PS7 sans cloner le repo :
+
 ```powershell
 iex (irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/windows/install.ps1).TrimStart([char]0xFEFF)
 ```
 
-### Android (Termux)
-```bash
-curl -fsSL https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh | bash
-```
-
-### Claude Code (post-install après Windows ou Android)
-```powershell
-# Windows
-Copy-Item .\claude-code\statusline.ps1 "$env:USERPROFILE\.claude\statusline.ps1"
-Copy-Item .\claude-code\settings.json   "$env:USERPROFILE\.claude\settings.json"
-Copy-Item .\claude-code\hooks\*.ps1     "$env:USERPROFILE\.claude\hooks\"
-```
-
-```bash
-# Android (Termux)
-mkdir -p ~/.claude/hooks
-cp claude-code/settings.json   ~/.claude/settings.json
-cp claude-code/hooks/*.sh      ~/.claude/hooks/  2>/dev/null || true
-```
+Pas de config Claude Code dans ce mode — pour ça il faut cloner.
 
 ## Statusline Claude Code (highlight)
 
