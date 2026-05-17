@@ -126,9 +126,11 @@ fn get_effort_display(level: Option<&str>) -> String {
     let rst = "\x1b[0m";
     let label = level;
 
-    // Frame avance toutes les 100 ms (cadence native du picker /effort de Claude Code).
-    // Avec refreshInterval=0.1 (10 Hz) et binaire Rust qui demarre en ~10 ms, on
-    // produit 10 frames/sec = parite parfaite avec l'animation interne du picker.
+    // Frame avance toutes les 200 ms (~5 Hz) -- vitesse perceptuelle qui matche
+    // le picker /effort. Le refreshInterval reste a 0.1 (10 Hz) pour avoir un
+    // statusline qui reagit instantanement aux state changes (model, ctx tokens,
+    // git status), mais l'animation effort ne progresse que d'une frame toutes
+    // les 200 ms (= 2 refreshes successifs montrent la meme frame).
     let now = now_ms();
 
     match level {
@@ -138,7 +140,7 @@ fn get_effort_display(level: Option<&str>) -> String {
         "xhigh" => {
             let chars: Vec<char> = label.chars().collect();
             let period = (chars.len() as i64) + 4;
-            let mut frame = (now / 100) % period;
+            let mut frame = (now / 200) % period;
             if frame < 0 { frame += period; }
             let mut s = String::new();
             for (i, c) in chars.iter().enumerate() {
@@ -164,7 +166,7 @@ fn get_effort_display(level: Option<&str>) -> String {
                 "\x1b[35m",
             ];
             let chars: Vec<char> = label.chars().collect();
-            let frame = now / 100;
+            let frame = now / 200;
             let palette_len = palette.len() as i64;
             let mut s = String::new();
             for (i, c) in chars.iter().enumerate() {

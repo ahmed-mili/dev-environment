@@ -10,10 +10,21 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TargetDir   = Join-Path $env:LOCALAPPDATA 'statusline-build\target'
 $Dest        = Join-Path $env:USERPROFILE '.claude\statusline.exe'
+$CargoBin    = Join-Path $env:USERPROFILE '.cargo\bin'
+
+# Resolve cargo : prefer the rustup-installed user-local one,
+# fall back to whatever's in PATH already.
+$Cargo = Join-Path $CargoBin 'cargo.exe'
+if (-not (Test-Path -LiteralPath $Cargo)) {
+    $Cargo = (Get-Command cargo -ErrorAction SilentlyContinue).Source
+}
+if (-not $Cargo -or -not (Test-Path -LiteralPath $Cargo)) {
+    throw "cargo introuvable. Installer Rust : winget install Rustlang.Rustup, puis relancer."
+}
 
 Write-Host "==> Building (target=$TargetDir)..."
 $env:CARGO_TARGET_DIR = $TargetDir
-& cargo build --release --manifest-path (Join-Path $ProjectRoot 'Cargo.toml')
+& $Cargo build --release --manifest-path (Join-Path $ProjectRoot 'Cargo.toml')
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
 $BuiltExe = Join-Path $TargetDir 'release\statusline.exe'
