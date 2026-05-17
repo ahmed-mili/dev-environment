@@ -170,6 +170,7 @@ $gitShortSha = $null  # SHA court (7 chars) du HEAD, extrait de branch.oid
 $gitAhead = 0     # commits locaux pas encore push vers upstream
 $gitBehind = 0    # commits upstream pas encore pull en local
 $gitDirtyCount = 0  # nombre de fichiers modifiés / untracked / unmerged non commit
+$gitFetchStale = $false  # FETCH_HEAD > 2.5 min -> les compteurs ahead/behind peuvent etre perimes
 $probe = $dir
 while ($probe -and -not (Test-Path -LiteralPath (Join-Path $probe '.git'))) {
     $parent = Split-Path -Parent $probe
@@ -179,21 +180,25 @@ while ($probe -and -not (Test-Path -LiteralPath (Join-Path $probe '.git'))) {
 if ($probe) {
     $branch = & git -C $dir rev-parse --abbrev-ref HEAD 2>$null
     if ($branch) {
-        # ----- Background fetch (cooldown 3 min) -----
+        # ----- Background fetch (cooldown 30 s) -----
         # Sans ça, `↓N` ne reflète que l'état git LOCAL (dernier fetch en date),
         # donc un push depuis une autre machine reste invisible jusqu'à la
         # prochaine session (hook auto-pull). Avec ce fetch périodique, l'indicateur
-        # se rafraîchit ~3 min après chaque push remote.
+        # se rafraîchit dans les 30s après chaque push remote.
+        #
+        # Coût : ~200ms de git.exe + ~5KB réseau toutes les 30s sur repo idle.
+        # GitHub rate-limit (5000 req/h authenticated) = on consomme <3% par repo.
+        # Le CPU n'est pas le bottleneck — c'est juste un compromis fraîcheur/trafic.
         #
         # Marker timestamp dans .git/ : créé AVANT le spawn pour éviter qu'une
         # rafale d'invocations de la statusline (typing rapide) ne lance des fetch
         # parallèles. Trade-off : si fetch échoue (offline), on ne réessaie pas avant
-        # 3 min — acceptable.
+        # 30 s — le compteur ahead/behind passe alors en ambre (voir $gitFetchStale).
         $fetchMarker = Join-Path $probe '.git\statusline-last-fetch'
         $needsFetch = $true
         if (Test-Path $fetchMarker) {
             $age = (Get-Date) - (Get-Item $fetchMarker).LastWriteTime
-            if ($age.TotalSeconds -lt 180) { $needsFetch = $false }
+            if ($age.TotalSeconds -lt 30) { $needsFetch = $false }
         }
         if ($needsFetch) {
             New-Item -ItemType File -Force -Path $fetchMarker | Out-Null
@@ -228,6 +233,19 @@ if ($probe) {
             elseif ($line -match '^[12?u] ') {
                 # Premier char : 1=changé, 2=renommé/copié, ?=untracked, u=unmerged
                 $gitDirtyCount++
+            }
+        }
+
+        # Mesure la fraicheur du dernier fetch reussi via FETCH_HEAD (git met a jour
+        # son mtime sur chaque fetch reussi, fire-and-forget ou pas). Si > 2.5 min
+        # alors que le cooldown est a 30s, c'est qu'on a rate 5 fetches d'affilee
+        # -> reseau down, auth cassee, ou repo offline. On marque les compteurs
+        # ahead/behind comme stales -> couleur d'alerte pour signaler que le ↓N
+        # affiche peut etre base sur des refs upstream perimees.
+        $fetchHeadPath = Join-Path $probe '.git\FETCH_HEAD'
+        if (Test-Path $fetchHeadPath) {
+            if (((Get-Date) - (Get-Item $fetchHeadPath).LastWriteTime).TotalSeconds -gt 150) {
+                $gitFetchStale = $true
             }
         }
     }
@@ -383,13 +401,24 @@ if ($branch) {
     #   ↓N = N commits upstream pas encore pull (à `git pull`)
     #   *  = working tree dirty (modifs / untracked / unmerged non commit)
     # Apparaissent seulement si > 0 — sinon la branche s'affiche normalement.
-    $branchText = " ($branch"
-    if ($gitShortSha)         { $branchText += " $gitShortSha" }
-    if ($gitAhead -gt 0)      { $branchText += " ↑$gitAhead" }
-    if ($gitBehind -gt 0)     { $branchText += " ↓$gitBehind" }
-    if ($gitDirtyCount -gt 0) { $branchText += " *$gitDirtyCount" }
-    $branchText += ')'
-    $bannerSegs += @{ text = $branchText; fg = (RGB 60 65 80) }
+    #
+    # Split en plusieurs segments (vs un seul $branchText) pour pouvoir colorier
+    # ↑/↓ en ambre quand $gitFetchStale est vrai : les compteurs sont basés sur
+    # le ref upstream local, donc si le fetch background échoue depuis > 2.5 min,
+    # ces nombres peuvent être périmés. * (dirty) reste en couleur normale car
+    # 100% local.
+    $branchFG = RGB 60 65 80
+    $branchSyncFG = if ($gitFetchStale) { RGB 200 170 100 } else { $branchFG }
+
+    $branchPrefix = " ($branch"
+    if ($gitShortSha) { $branchPrefix += " $gitShortSha" }
+    $bannerSegs += @{ text = $branchPrefix; fg = $branchFG }
+
+    if ($gitAhead -gt 0)      { $bannerSegs += @{ text = " ↑$gitAhead";  fg = $branchSyncFG } }
+    if ($gitBehind -gt 0)     { $bannerSegs += @{ text = " ↓$gitBehind"; fg = $branchSyncFG } }
+    if ($gitDirtyCount -gt 0) { $bannerSegs += @{ text = " *$gitDirtyCount"; fg = $branchFG } }
+
+    $bannerSegs += @{ text = ')'; fg = $branchFG }
 }
 $bannerSegs += @{ text = ' '; fg = $pathTextFG }
 
