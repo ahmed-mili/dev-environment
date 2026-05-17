@@ -68,6 +68,60 @@ function Format-Bar([double]$pct, [string]$col, [int]$width = 14) {
     return "${col}$('▬' * $filled)${colRail}$('▬' * $empty)${reset}"
 }
 
+function Get-EffortDisplay([string]$level) {
+    # Reproduit a l'identique le rendu du picker /effort de Claude Code (extrait du binaire) :
+    #   low    -> warning    = ansi:yellowBright, bold, statique
+    #   medium -> success    = ansi:greenBright,  bold, statique
+    #   high   -> permission = ansi:blueBright,   bold, statique
+    #   xhigh  -> autoAccept-shimmer = curseur lumineux #d0b4ff qui traverse,
+    #             reste en magentaBright bold (chars adjacents bold, autres normaux),
+    #             periode = label.Length + 4, frame change toutes les 100 ms
+    #   max    -> rainbow-animated = chaque char prend la couleur palette[(i+frame) % 7],
+    #             palette dark-ansi : red, redBright, yellow, green, cyan, blue, magenta, tous bold
+    # Source : function Ybq/e4_/jSA/wSA dans claude.exe, palette LC9/Rz1.
+    if (-not $level) { return '' }
+    $label = $level
+    $bold  = "$esc[1m"
+    $nobold = "$esc[22m"
+    $rst   = "$esc[0m"
+    switch ($level) {
+        'low'    { return "$esc[93m$bold$label$rst" }
+        'medium' { return "$esc[92m$bold$label$rst" }
+        'high'   { return "$esc[94m$bold$label$rst" }
+        'xhigh'  {
+            $chars  = $label.ToCharArray()
+            $period = $chars.Length + 4
+            $frame  = [int]([Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 100.0) % $period)
+            $sb = [System.Text.StringBuilder]::new()
+            for ($i = 0; $i -lt $chars.Length; $i++) {
+                if ($i -eq $frame) {
+                    [void]$sb.Append((RGB 208 180 255)); [void]$sb.Append($bold)
+                } elseif ($i -eq ($frame - 1) -or $i -eq ($frame + 1)) {
+                    [void]$sb.Append("$esc[95m"); [void]$sb.Append($bold)
+                } else {
+                    [void]$sb.Append("$esc[95m"); [void]$sb.Append($nobold)
+                }
+                [void]$sb.Append($chars[$i])
+            }
+            [void]$sb.Append($rst)
+            return $sb.ToString()
+        }
+        'max'    {
+            $palette = @("$esc[31m","$esc[91m","$esc[33m","$esc[32m","$esc[36m","$esc[34m","$esc[35m")
+            $chars = $label.ToCharArray()
+            $frame = [int][Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 100.0)
+            $sb = [System.Text.StringBuilder]::new()
+            for ($i = 0; $i -lt $chars.Length; $i++) {
+                $cIdx = (($i + $frame) % $palette.Count + $palette.Count) % $palette.Count
+                [void]$sb.Append($palette[$cIdx]); [void]$sb.Append($bold); [void]$sb.Append($chars[$i])
+            }
+            [void]$sb.Append($rst)
+            return $sb.ToString()
+        }
+    }
+    return ''
+}
+
 function Format-Reset($resetAt, $referenceTime = $null) {
     # Convention identique au dashboard Claude.ai :
     #   < 1h         → "Xm"          (ex. 47m)
@@ -133,6 +187,10 @@ if ($data -and $data.model) {
     if ($data.model.display_name) { $modelName = $data.model.display_name }
     elseif ($data.model.id) { $modelName = $data.model.id }
 }
+
+# Effort level (low/medium/high/xhigh/max) — affichage anime cote Claude Code
+$effortLevel = $null
+if ($data -and $data.effort -and $data.effort.level) { $effortLevel = [string]$data.effort.level }
 
 # ============================== COULEURS PATH ==============================
 
@@ -480,6 +538,12 @@ if ($costStr) {
 $line1 += "$s2_fg "
 if ($modelName) {
     $line1 += "$modelName  "
+}
+
+# Effort level (xhigh shimmer / max rainbow) — apres reset on restaure bg+fg de la section
+$effortStr = Get-EffortDisplay $effortLevel
+if ($effortStr) {
+    $line1 += "$effortStr$reset$s2_bg$s2_fg  "
 }
 
 # Contexte affiche en permanence : sert de repere pour anticiper /clear.
