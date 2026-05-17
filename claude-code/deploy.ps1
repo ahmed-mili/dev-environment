@@ -25,9 +25,9 @@ $HomeClaude = "$env:USERPROFILE\.claude"
 
 # Custom skills tracked dans le repo (whitelist explicite)
 $CustomSkills = @(
-    'copy-edit', 'css-layout-check', 'edit-block', 'lucide-icons',
-    'release', 'root-cause-fix', 'smart-edit', 'sticky-column-bleed-fix',
-    'webapp-deploy'
+    'claude-file-recovery', 'copy-edit', 'css-layout-check', 'deploy-safety',
+    'edit-block', 'lucide-icons', 'release', 'root-cause-fix', 'smart-edit',
+    'sticky-column-bleed-fix', 'webapp-deploy'
 )
 
 function Copy-One($from, $to) {
@@ -37,6 +37,12 @@ function Copy-One($from, $to) {
     }
     $parent = Split-Path -Parent $to
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force $parent | Out-Null }
+    # Gotcha PowerShell : `Copy-Item <dir> <dir-existant> -Recurse` copie À
+    # L'INTÉRIEUR au lieu de remplacer, créant skills/X/X/ parasite. On efface
+    # donc le target dir d'abord. Pour les fichiers, -Force suffit.
+    if ((Test-Path $from -PathType Container) -and (Test-Path $to)) {
+        Remove-Item $to -Recurse -Force
+    }
     Copy-Item $from $to -Force -Recurse
     Write-Host "  ✓ $(Split-Path -Leaf $from)" -ForegroundColor Green
 }
