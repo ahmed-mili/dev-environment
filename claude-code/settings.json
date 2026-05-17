@@ -3,7 +3,7 @@
   "statusLine": {
     "type": "command",
     "command": "C:/Users/Ahmed/.claude/statusline.exe",
-    "refreshInterval": 0.1
+    "refreshInterval": 0.12
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,
