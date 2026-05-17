@@ -126,11 +126,12 @@ fn get_effort_display(level: Option<&str>) -> String {
     let rst = "\x1b[0m";
     let label = level;
 
-    // Frame avance toutes les 200 ms (~5 Hz) -- vitesse perceptuelle qui matche
-    // le picker /effort. Le refreshInterval reste a 0.1 (10 Hz) pour avoir un
-    // statusline qui reagit instantanement aux state changes (model, ctx tokens,
-    // git status), mais l'animation effort ne progresse que d'une frame toutes
-    // les 200 ms (= 2 refreshes successifs montrent la meme frame).
+    // Frame avance toutes les 120 ms (~8.3 Hz) -- calibre empiriquement.
+    // refreshInterval=0.12 dans settings.json est ALIGNE sur ce divider :
+    // chaque refresh advance d'exactement 1 frame -> pace uniforme, pas de
+    // duplicate frames qui causaient un micro-stutter audible visuellement.
+    // Si on revient a refresh=0.1 avec divider=/120, 1 refresh sur 6 montre
+    // la meme frame que la precedente -> stutter regulier toutes les ~600ms.
     let now = now_ms();
 
     match level {
@@ -140,7 +141,7 @@ fn get_effort_display(level: Option<&str>) -> String {
         "xhigh" => {
             let chars: Vec<char> = label.chars().collect();
             let period = (chars.len() as i64) + 4;
-            let mut frame = (now / 200) % period;
+            let mut frame = (now / 120) % period;
             if frame < 0 { frame += period; }
             let mut s = String::new();
             for (i, c) in chars.iter().enumerate() {
@@ -166,7 +167,7 @@ fn get_effort_display(level: Option<&str>) -> String {
                 "\x1b[35m",
             ];
             let chars: Vec<char> = label.chars().collect();
-            let frame = now / 200;
+            let frame = now / 120;
             let palette_len = palette.len() as i64;
             let mut s = String::new();
             for (i, c) in chars.iter().enumerate() {
