@@ -166,13 +166,35 @@ $pathBG = BG  $pR $pG $pB
 # ============================== BRANCHE GIT ==============================
 
 $branch = $null
+$gitAhead = 0     # commits locaux pas encore push vers upstream
+$gitBehind = 0    # commits upstream pas encore pull en local
+$gitDirty = $false  # working tree contient des modifs non commit (tracked ou untracked)
 $probe = $dir
 while ($probe -and -not (Test-Path -LiteralPath (Join-Path $probe '.git'))) {
     $parent = Split-Path -Parent $probe
     if (-not $parent -or $parent -eq $probe) { $probe = $null; break }
     $probe = $parent
 }
-if ($probe) { $branch = & git -C $dir rev-parse --abbrev-ref HEAD 2>$null }
+if ($probe) {
+    $branch = & git -C $dir rev-parse --abbrev-ref HEAD 2>$null
+    if ($branch) {
+        # `--porcelain=v2 --branch` regroupe ahead/behind ET working tree en un seul
+        # appel git -> minimise le coût (la status bar est refresh à chaque keystroke).
+        # ahead/behind sont basés sur l'état git LOCAL : pas de fetch implicite —
+        # c'est le hook auto-pull qui rafraîchit la ref upstream au démarrage de session.
+        $statusLines = & git -C $dir status --porcelain=v2 --branch 2>$null
+        foreach ($line in $statusLines) {
+            if ($line -match '^# branch\.ab \+(\d+) -(\d+)') {
+                $gitAhead  = [int]$matches[1]
+                $gitBehind = [int]$matches[2]
+            }
+            elseif ($line -match '^[12?u] ') {
+                # Premier char : 1=changé, 2=renommé/copié, ?=untracked, u=unmerged
+                $gitDirty = $true
+            }
+        }
+    }
+}
 
 # ============================== COMPTE (email) ==============================
 
@@ -319,7 +341,17 @@ $bannerSegs = @(
     @{ text = " $dir";       fg = $pathTextFG }
 )
 if ($branch) {
-    $bannerSegs += @{ text = " ($branch)"; fg = (RGB 60 65 80) }
+    # Indicateurs de sync vs upstream :
+    #   ↑N = N commits locaux pas encore push (à `git push`)
+    #   ↓N = N commits upstream pas encore pull (à `git pull`)
+    #   *  = working tree dirty (modifs / untracked / unmerged non commit)
+    # Apparaissent seulement si > 0 — sinon la branche s'affiche normalement.
+    $branchText = " ($branch"
+    if ($gitAhead -gt 0)  { $branchText += " ↑$gitAhead" }
+    if ($gitBehind -gt 0) { $branchText += " ↓$gitBehind" }
+    if ($gitDirty)        { $branchText += ' *' }
+    $branchText += ')'
+    $bannerSegs += @{ text = $branchText; fg = (RGB 60 65 80) }
 }
 $bannerSegs += @{ text = ' '; fg = $pathTextFG }
 
