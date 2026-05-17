@@ -29,3 +29,5 @@ curl -fsSL https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/and
 ## License
 
 [MIT](./LICENSE)
+
+<!-- sync test 2026-05-17 from desktop -->
