@@ -182,7 +182,21 @@ if [ "${#to_install[@]}" -gt 0 ]; then
     note "installing: ${to_install[*]}"
     pkg install -y "${to_install[@]}" || note "some packages failed; continuing"
 fi
-ok "packages ready"
+
+# Verify the critical packages individually. `pkg install` can return 0 even
+# when one of the requested packages silently fell back to a broken state
+# (typical on Termux when an ABI mismatch in a dep prevents a binary from
+# loading). nodejs-lts is non-negotiable: if `node` can't run, the Claude
+# Code install later will hard-fail with no useful diagnostic.
+if ! node --version >/dev/null 2>&1; then
+    note "node binary not functional after pkg install — reinstalling nodejs-lts"
+    pkg reinstall -y nodejs-lts || pkg install -y nodejs || fail "nodejs install kept failing — Claude Code install will not work"
+fi
+if node --version >/dev/null 2>&1; then
+    ok "node $(node --version) / npm $(npm --version)"
+else
+    fail "no working node — fix `pkg install nodejs-lts` manually before re-running"
+fi
 
 # ---------------------------------------------------------------------------
 # 3) JetBrainsMono Nerd Font for the Termux terminal view
@@ -419,19 +433,43 @@ export PATH="\$NPM_PREFIX/bin:\$PATH"
 EOF
 fi
 
+# Try the install up to twice: a fresh attempt, then a retry after clearing
+# the npm cache (handles partial-download poisoning that survives reruns).
+# npm's stdout/stderr is NOT redirected — claude is the entire point of the
+# script, so if it fails the user needs to see the real error.
+install_claude_native() {
+    local attempt=1
+    while [ "$attempt" -le 2 ]; do
+        [ "$attempt" -eq 2 ] && {
+            note "first install failed — clearing npm cache and retrying"
+            npm cache clean --force >/dev/null 2>&1 || true
+        }
+        if npm install -g @anthropic-ai/claude-code; then
+            # Post-install verification: `npm install` can return 0 even when
+            # the binary isn't actually wired up (broken symlink, wrong prefix
+            # at install time, etc.). Re-resolve via the configured prefix.
+            local bin
+            bin=$(npm bin -g 2>/dev/null)/claude
+            if [ -x "$bin" ] || command -v claude >/dev/null 2>&1; then
+                return 0
+            fi
+            note "npm reported success but claude binary not found at $bin"
+        fi
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
 if ! command -v claude >/dev/null 2>&1; then
-    note "installing @anthropic-ai/claude-code (this can take a minute — output below is npm's own)"
-    # Do NOT redirect to /dev/null: claude is the entire point of the script,
-    # and if npm fails (network, ABI, peer dep, libc mismatch...) the user
-    # needs to see why. Capturing exit code via the if statement still works
-    # — npm just prints to its real stdout/stderr.
-    if npm install -g @anthropic-ai/claude-code; then
-        ok "claude installed at $(command -v claude || echo '~/.npm-global/bin/claude')"
+    note "installing @anthropic-ai/claude-code (can take a minute — npm output follows)"
+    if install_claude_native; then
+        ok "claude installed at $(command -v claude || printf '%s/claude' "$NPM_PREFIX/bin")"
     else
-        fail "npm install failed — read the error above. Common fixes:"
-        note "  pkg install -y nodejs-lts        # if node/npm itself was broken"
-        note "  pkg upgrade && pkg install -y python make clang  # for native deps"
-        note "  npm cache clean --force          # if a partial download is poisoned"
+        fail "Claude Code install failed after retry. Diagnostic:"
+        note "  Run manually: npm install -g @anthropic-ai/claude-code"
+        note "  Check node:   node --version  (should be v20+)"
+        note "  Check space:  df -h \$HOME"
+        note "  If \"EACCES\" or permission error: rm -rf ~/.npm-global && rerun setup.sh"
     fi
 else
     ok "claude already installed ($(command -v claude))"
@@ -522,6 +560,32 @@ WRAPPER
         chmod +x "$PREFIX/bin/ollama"
         ok "ollama wrapper installed (proot-distro ubuntu backend)"
         ollama_mode=proot
+    fi
+
+    # When ollama runs inside the Ubuntu proot, `ollama launch claude ...`
+    # spawns `claude` from the proot's $PATH — NOT from Termux's. The native
+    # claude install above is invisible to it. Install Claude Code inside
+    # the proot too so the wrapper actually works.
+    if [ "$ollama_mode" = proot ]; then
+        note "installing Claude Code inside the proot Ubuntu so \`ollama launch claude\` can find it"
+        proot-distro login ubuntu -- bash -c '
+            set -e
+            if command -v claude >/dev/null 2>&1; then
+                echo "claude already present in proot"
+                exit 0
+            fi
+            apt-get update -y >/dev/null 2>&1
+            apt-get install -y curl ca-certificates >/dev/null 2>&1
+            # NodeSource keeps a current Node 22 LTS for arm64. The apt
+            # nodejs package on Ubuntu 22.04 is too old (v12) and would
+            # fail to install the modern Claude Code CLI.
+            if ! command -v node >/dev/null 2>&1 || [ "$(node -v 2>/dev/null | sed s/v// | cut -d. -f1)" -lt 20 ]; then
+                curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
+                apt-get install -y nodejs >/dev/null 2>&1
+            fi
+            npm install -g @anthropic-ai/claude-code
+        ' && ok "claude installed inside proot Ubuntu" \
+          || fail "claude install inside proot failed — run manually: proot-distro login ubuntu, then npm install -g @anthropic-ai/claude-code"
     fi
 
     # Autostart `ollama serve` in the background whenever Termux opens, so
