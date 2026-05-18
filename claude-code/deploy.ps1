@@ -30,6 +30,13 @@ $CustomSkills = @(
     'sticky-column-bleed-fix', 'webapp-deploy'
 )
 
+# Hooks local-only : présents dans ~/.claude/hooks/ mais qu'on ne veut JAMAIS
+# push sur le repo public (déclenchent Defender, cf. commit a674338).
+# Defense layer 1 : skip explicite ici. Layer 2 : .gitignore.
+$LocalOnlyHooks = @(
+    'patch-claude-exe.ps1'
+)
+
 function Copy-One($from, $to) {
     if (-not (Test-Path $from)) {
         Write-Host "  ✗ skip $from (absent)" -ForegroundColor DarkGray
@@ -77,6 +84,10 @@ if ($Push) {
     if (Test-Path "$HomeClaude\hooks") {
         New-Item -ItemType Directory -Force "$RepoClaude\hooks" | Out-Null
         Get-ChildItem "$HomeClaude\hooks" -File | ForEach-Object {
+            if ($LocalOnlyHooks -contains $_.Name) {
+                Write-Host "  ⊘ skip $($_.Name) (local-only)" -ForegroundColor DarkYellow
+                return
+            }
             Copy-One $_.FullName "$RepoClaude\hooks\$($_.Name)"
         }
     }
