@@ -420,11 +420,18 @@ EOF
 fi
 
 if ! command -v claude >/dev/null 2>&1; then
-    note "installing @anthropic-ai/claude-code (may take a minute)"
-    if npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
-        ok "claude installed at $(command -v claude)"
+    note "installing @anthropic-ai/claude-code (this can take a minute — output below is npm's own)"
+    # Do NOT redirect to /dev/null: claude is the entire point of the script,
+    # and if npm fails (network, ABI, peer dep, libc mismatch...) the user
+    # needs to see why. Capturing exit code via the if statement still works
+    # — npm just prints to its real stdout/stderr.
+    if npm install -g @anthropic-ai/claude-code; then
+        ok "claude installed at $(command -v claude || echo '~/.npm-global/bin/claude')"
     else
-        fail "npm install failed — run manually: npm install -g @anthropic-ai/claude-code"
+        fail "npm install failed — read the error above. Common fixes:"
+        note "  pkg install -y nodejs-lts        # if node/npm itself was broken"
+        note "  pkg upgrade && pkg install -y python make clang  # for native deps"
+        note "  npm cache clean --force          # if a partial download is poisoned"
     fi
 else
     ok "claude already installed ($(command -v claude))"
