@@ -2,8 +2,8 @@
   "model": "opus",
   "statusLine": {
     "type": "command",
-    "command": "C:/Users/Ahmed/.claude/statusline.exe",
-    "refreshInterval": 0.12
+    "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/Ahmed/.claude/statusline.ps1",
+    "refreshInterval": 1
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,
@@ -14,15 +14,6 @@
   "language": "French",
   "effortLevel": "xhigh",
   "autoUpdatesChannel": "latest",
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          { "type": "command", "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/Ahmed/.claude/hooks/patch-claude-exe.ps1" }
-        ]
-      }
-    ]
-  },
   "autoDreamEnabled": true,
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark-ansi"
