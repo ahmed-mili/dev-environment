@@ -9,9 +9,13 @@
 #     Font, starship prompt, gradient USER@HOST + fastfetch splash)
 #   - generates an ed25519 SSH key and prints the public part for GitHub
 #   - installs Claude Code via npm (global, ~/.npm-global)
-#   - clones the five dev repos under ~/dev/ (kebab-case mirrors)
+#   - prompts (optional) for Ollama, sshd, Tailscale
 #   - drops auto-pull / auto-push hooks scoped to ~/dev and patches
 #     ~/.claude/settings.json so SessionStart pulls and SessionEnd pushes
+#
+# The installer is personal-repo agnostic: it sets up the Termux + Claude
+# Code environment, then leaves ~/dev/ empty for you to `git clone` your
+# own repos into.
 #
 # Idempotent: re-running picks up where the previous run stopped, skips
 # anything already in place, and never overwrites without a timestamped
@@ -36,14 +40,6 @@ set -u
 # so individual blocks below decide whether to fail-fast on their own.
 
 REPO_RAW="https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android"
-REPO_OWNER="ahmed-mili"
-REPOS=(
-    "droid-detector"
-    "droid-tycoon-rebirth-guide"
-    "efrei-projet-web"
-    "obsidian-neo-calendar"
-    "obsidian-quiz-blocks"
-)
 
 DEV_DIR="$HOME/dev"
 CLAUDE_DIR="$HOME/.claude"
@@ -236,7 +232,12 @@ mkdir -p "$SSH_DIR"
 chmod 700 "$SSH_DIR"
 KEY="$SSH_DIR/id_ed25519"
 if [ ! -f "$KEY" ]; then
-    ssh-keygen -t ed25519 -C "ahmedmili435@gmail.com (termux)" -f "$KEY" -N "" >/dev/null
+    # Comment uses git config email if set, else a neutral fallback. Generic
+    # so anyone forking and running this gets a key that doesn't impersonate
+    # the maintainer.
+    keygen_comment="$(git config --global user.email 2>/dev/null)"
+    [ -z "$keygen_comment" ] && keygen_comment="$(whoami)@termux"
+    ssh-keygen -t ed25519 -C "$keygen_comment" -f "$KEY" -N "" >/dev/null
     ok "generated $(short_path "$KEY")"
 else
     ok "$(short_path "$KEY") already present"
@@ -345,7 +346,7 @@ if [ "$SSH_AUTH_OK" = no ] && [ -t 0 ]; then
                 ;;
             *)
                 note "SSH still failing. Output: $ssh_test"
-                note "Repo clones will be skipped; re-run setup.sh after fixing SSH."
+                note "git push/pull over SSH won't work until this is fixed."
                 ;;
         esac
     fi
@@ -355,81 +356,50 @@ fi
 # 7) Git identity
 # ---------------------------------------------------------------------------
 step "Git identity"
-if [ -z "$(git config --global user.name)" ]; then
-    git config --global user.name  "Ahmed MILI"
-fi
-if [ -z "$(git config --global user.email)" ]; then
-    git config --global user.email "ahmedmili435@gmail.com"
-fi
-# pull --ff-only by default — matches the auto-pull hook policy.
+# pull --ff-only and main default are safe for everyone — set unconditionally.
 git config --global pull.ff only
 git config --global init.defaultBranch main
-ok "$(git config --global user.name) <$(git config --global user.email)>"
-
-# ---------------------------------------------------------------------------
-# 8) Clone the five dev repos
-# ---------------------------------------------------------------------------
-step "Clone repos under $(short_path "$DEV_DIR")"
-mkdir -p "$DEV_DIR"
-# If SSH auth didn't confirm, skip all clones. The HTTPS fallback would
-# prompt for a username/password on private repos and lock up the install
-# in an interactive loop the user can't escape cleanly — exactly the
-# "Username for 'https://github.com':" trap. Idempotent re-run is the
-# right escape hatch instead: fix SSH, run setup.sh again, clones resume.
-SKIPPED_REPOS=()
-if [ "$SSH_AUTH_OK" != yes ]; then
-    note "Skipping repo clones (SSH to github.com not authenticated)."
-    note "After adding the pubkey to GitHub, re-run setup.sh to clone."
-    for r in "${REPOS[@]}"; do
-        [ -d "$DEV_DIR/$r/.git" ] && continue
-        SKIPPED_REPOS+=("$r")
-    done
+# Name/email are personal — prompt only if missing AND we have a TTY.
+# If non-interactive and missing, leave unset (git will fail loudly on first
+# commit, which is the right signal).
+gn=$(git config --global user.name 2>/dev/null)
+ge=$(git config --global user.email 2>/dev/null)
+if [ -z "$gn" ] && [ -t 0 ]; then
+    printf '  git user.name (e.g. "Jane Doe"): '
+    read -r gn
+    [ -n "$gn" ] && git config --global user.name "$gn"
+fi
+if [ -z "$ge" ] && [ -t 0 ]; then
+    printf '  git user.email: '
+    read -r ge
+    [ -n "$ge" ] && git config --global user.email "$ge"
+fi
+if [ -n "$gn" ] && [ -n "$ge" ]; then
+    ok "$gn <$ge>"
 else
-    for r in "${REPOS[@]}"; do
-        target="$DEV_DIR/$r"
-        if [ -d "$target/.git" ]; then
-            ok "$r (already cloned)"
-            continue
-        fi
-        if [ -e "$target" ] && [ ! -d "$target/.git" ]; then
-            note "$r exists but is not a git repo — skipping"
-            continue
-        fi
-        # GIT_TERMINAL_PROMPT=0 belt-and-suspenders: if SSH unexpectedly
-        # fails for a single repo (e.g. archived, access revoked), git
-        # will NOT fall back to an HTTPS credential prompt.
-        if GIT_TERMINAL_PROMPT=0 git clone "git@github.com:$REPO_OWNER/$r.git" "$target" 2>/tmp/.clone-err; then
-            ok "$r"
-        else
-            err_short=$(head -1 /tmp/.clone-err 2>/dev/null | tr -d '\r')
-            fail "$r clone failed (${err_short:-unknown})"
-            SKIPPED_REPOS+=("$r")
-        fi
-    done
-    rm -f /tmp/.clone-err
+    note "git identity not fully set — \`git config --global user.{name,email}\` later"
 fi
 
-# ---------------------------------------------------------------------------
-# 9) Optional dev tools: Claude Code CLI + Ollama
-# ---------------------------------------------------------------------------
-# Both prompts default to "claude=yes, ollama=no" because Claude Code is the
-# point of this whole bundle, while Ollama models eat several GB each — let
-# the user opt in when they have the storage and want local inference.
-# Either way the npm prefix is configured first so any later global install
-# (yarn, pnpm, another CLI...) drops into the same user-scoped tree.
+# Ensure $DEV_DIR exists so hooks targeting ~/dev have something to walk.
+# Cloning specific repos into it is the user's job — this installer is
+# personal-repo agnostic.
+mkdir -p "$DEV_DIR"
 
-step "Dev tools (optional)"
-install_claude=yes
+# ---------------------------------------------------------------------------
+# 8) Dev tools: Claude Code CLI (always) + Ollama (opt-in)
+# ---------------------------------------------------------------------------
+# Claude Code is the entire point of the bundle — install unconditionally,
+# no prompt. Ollama is opt-in because each model is multi-GB and not
+# everyone wants local inference. The npm prefix is configured first so
+# any later global install (yarn, pnpm, another CLI...) drops into the
+# same user-scoped tree.
+
+step "Dev tools"
 install_ollama=no
 if [ -t 0 ]; then
-    printf '  Install Claude Code CLI (claude, claude --dangerously-skip-permissions)? [Y/n] '
-    read -r _ans
-    case "$_ans" in [nN]*) install_claude=no ;; esac
     printf '  Install Ollama (ollama run <model>, etc.)? [y/N] '
     read -r _ans
     case "$_ans" in [yY]*) install_ollama=yes ;; esac
-else
-    note "non-interactive — defaulting to claude=yes, ollama=no"
 fi
 
 # Pin npm prefix to ~/.npm-global so global installs don't touch $PREFIX.
@@ -448,17 +418,15 @@ export PATH="\$NPM_PREFIX/bin:\$PATH"
 EOF
 fi
 
-if [ "$install_claude" = yes ]; then
-    if ! command -v claude >/dev/null 2>&1; then
-        note "installing @anthropic-ai/claude-code (may take a minute)"
-        if npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
-            ok "claude installed at $(command -v claude)"
-        else
-            fail "npm install failed — run manually: npm install -g @anthropic-ai/claude-code"
-        fi
+if ! command -v claude >/dev/null 2>&1; then
+    note "installing @anthropic-ai/claude-code (may take a minute)"
+    if npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
+        ok "claude installed at $(command -v claude)"
     else
-        ok "claude already installed ($(command -v claude))"
+        fail "npm install failed — run manually: npm install -g @anthropic-ai/claude-code"
     fi
+else
+    ok "claude already installed ($(command -v claude))"
 fi
 
 if [ "$install_ollama" = yes ]; then
@@ -572,25 +540,17 @@ EOF
 
     # Cloud models (`glm-5.1:cloud`, `kimi-k2.5:cloud`, etc.) are proxied
     # through ollama.com and need either `ollama signin` or an OLLAMA_API_KEY
-    # env var. Offer signin interactively; users who prefer the API key path
-    # can set OLLAMA_API_KEY in ~/.bashrc.local manually.
-    if [ -t 0 ]; then
-        printf '\n  Sign in to ollama.com now (needed for :cloud models like glm-5.1:cloud)? [Y/n] '
-        read -r _ans
-        case "$_ans" in
-            [nN]*)
-                note "skipped — run \`ollama signin\` later, or set OLLAMA_API_KEY in ~/.bashrc.local"
-                ;;
-            *)
-                # signin needs the daemon up; we just started it, give it a beat.
-                sleep 1
-                if ollama signin; then
-                    ok "signed in to ollama.com — :cloud models now available"
-                else
-                    note "signin did not complete — re-run \`ollama signin\` whenever you want cloud models"
-                fi
-                ;;
-        esac
+    # env var. Run signin straight away — if the user installed Ollama they
+    # almost certainly want cloud models, and the signin flow itself is
+    # interactive (browser device-code), so refusing it just means an extra
+    # command later. Skip silently if non-TTY or daemon not up.
+    if [ -t 0 ] && pgrep -f 'ollama serve' >/dev/null 2>&1; then
+        sleep 1
+        if ollama signin; then
+            ok "signed in to ollama.com — :cloud models now available"
+        else
+            note "ollama signin not completed — re-run \`ollama signin\` later for :cloud models"
+        fi
     fi
 
     if [ "$ollama_mode" = proot ]; then
@@ -702,30 +662,13 @@ if [ "$install_sshd" = yes ]; then
     touch "$SSH_DIR/authorized_keys"
     chmod 600 "$SSH_DIR/authorized_keys"
 
-    # Prefer the pubkey bundled in the repo (files/pc-authorized_keys) — that's
-    # the maintainer's PC keys, committed because pubkeys are public-by-design
-    # and committing them turns this into a true one-command install. Fall back
-    # to prompting if the file is missing (e.g. someone forked and removed it).
-    pc_keys=""
-    if pc_keys=$(read_file "files/pc-authorized_keys" 2>/dev/null) && [ -n "$pc_keys" ]; then
-        added=0
-        while IFS= read -r line; do
-            # Skip blank lines and comments.
-            case "$line" in ''|'#'*) continue ;; esac
-            if ! grep -qxF "$line" "$SSH_DIR/authorized_keys" 2>/dev/null; then
-                printf '%s\n' "$line" >> "$SSH_DIR/authorized_keys"
-                added=$((added + 1))
-            fi
-        done <<EOF
-$pc_keys
-EOF
-        if [ "$added" -gt 0 ]; then
-            ok "$added PC key(s) added to authorized_keys from files/pc-authorized_keys"
-        else
-            ok "PC key(s) already present in authorized_keys"
-        fi
-    elif [ -t 0 ]; then
-        printf '\n  No bundled PC pubkey found. Paste yours now (from ~/.ssh/id_ed25519.pub on Windows).\n'
+    # Ask the user for their PC pubkey. We deliberately do NOT bundle any
+    # key in the repo: this is a public installer, and a bundled pubkey
+    # would silently grant the maintainer SSH access into every forker's
+    # phone. The right authorization model is "the person installing
+    # decides whose key gets in".
+    if [ -t 0 ]; then
+        printf '\n  Paste your PC pubkey (from ~/.ssh/id_ed25519.pub on the PC).\n'
         printf '  Leave empty to skip — append later to ~/.ssh/authorized_keys.\n'
         printf '  PC pubkey > '
         read -r pc_pubkey
@@ -740,7 +683,7 @@ EOF
             note "no PC key added — append it later or run \`passwd\` for password auth"
         fi
     else
-        note "no bundled key and no TTY — skipping authorized_keys setup"
+        note "no TTY — skipping authorized_keys prompt. Append your PC pubkey to ~/.ssh/authorized_keys manually."
     fi
 
     # Autostart sshd whenever Termux opens. Lives in bashrc.local (gitignored)
@@ -787,13 +730,6 @@ fi
 # ---------------------------------------------------------------------------
 printf '\n  %sDone.%s\n' "$_green" "$_reset"
 printf '  Restart Termux (or run %ssource ~/.bashrc%s) for the look + prompt to take effect.\n' "$_dim" "$_reset"
-printf '  Then launch %sclaude%s inside any repo under %s~/dev/%s — SessionStart will auto-pull.\n\n' "$_dim" "$_reset" "$_dim" "$_reset"
-
-if [ "${#SKIPPED_REPOS[@]}" -gt 0 ]; then
-    printf '  %s%d repo(s) still to clone:%s %s\n' "$_yellow" "${#SKIPPED_REPOS[@]}" "$_reset" "${SKIPPED_REPOS[*]}"
-    printf '  Fix SSH (add %s~/.ssh/id_ed25519.pub%s to https://github.com/settings/keys),\n' "$_dim" "$_reset"
-    printf '  verify with %sssh -T git@github.com%s, then re-run this setup.sh — it is idempotent\n' "$_dim" "$_reset"
-    printf '  and will resume at the clone step.\n\n'
-fi
-
+printf '  Clone your repos into %s~/dev/%s, then launch %sclaude%s inside any of them —\n' "$_dim" "$_reset" "$_dim" "$_reset"
+printf '  the SessionStart hook will auto-pull on every Claude Code session.\n\n'
 printf '  Docs: %shttps://github.com/ahmed-mili/dev-environment%s\n\n' "$_dim" "$_reset"
