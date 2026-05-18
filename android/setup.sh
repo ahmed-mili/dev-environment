@@ -315,16 +315,41 @@ fi
 
 # Verify connectivity. ssh -T github.com always exits 1 even on success
 # (GitHub never grants a shell), so we grep the welcome line instead.
-ssh_test=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1 || true)
+# Retry once if the user pressed ENTER too early — GitHub's edge takes a few
+# seconds to propagate a newly-added key, and people commonly forget to add
+# it at all the first time round.
+SSH_AUTH_OK=no
+check_ssh_github() {
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1 || true
+}
+ssh_test=$(check_ssh_github)
 case "$ssh_test" in
     *"successfully authenticated"*)
+        SSH_AUTH_OK=yes
         ok "SSH auth OK ($(printf '%s' "$ssh_test" | awk -F'Hi ' '{print $2}' | awk -F'!' '{print $1}'))"
         ;;
-    *)
-        note "SSH auth not confirmed yet. Output: $ssh_test"
-        note "You can still continue — clones below will fall back to HTTPS if SSH fails."
-        ;;
 esac
+
+if [ "$SSH_AUTH_OK" = no ] && [ -t 0 ]; then
+    note "SSH auth to github.com failed. Most common cause: pubkey not yet"
+    note "added to https://github.com/settings/keys (or added <10s ago — GitHub"
+    note "edge takes a moment to propagate)."
+    printf '\n  Re-check now? Add the key (printed above) then press ENTER, or type s to skip: '
+    read -r _retry
+    if [ "$_retry" != "s" ] && [ "$_retry" != "S" ]; then
+        ssh_test=$(check_ssh_github)
+        case "$ssh_test" in
+            *"successfully authenticated"*)
+                SSH_AUTH_OK=yes
+                ok "SSH auth OK on retry ($(printf '%s' "$ssh_test" | awk -F'Hi ' '{print $2}' | awk -F'!' '{print $1}'))"
+                ;;
+            *)
+                note "SSH still failing. Output: $ssh_test"
+                note "Repo clones will be skipped; re-run setup.sh after fixing SSH."
+                ;;
+        esac
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # 7) Git identity
@@ -346,24 +371,43 @@ ok "$(git config --global user.name) <$(git config --global user.email)>"
 # ---------------------------------------------------------------------------
 step "Clone repos under $(short_path "$DEV_DIR")"
 mkdir -p "$DEV_DIR"
-for r in "${REPOS[@]}"; do
-    target="$DEV_DIR/$r"
-    if [ -d "$target/.git" ]; then
-        ok "$r (already cloned)"
-        continue
-    fi
-    if [ -e "$target" ] && [ ! -d "$target/.git" ]; then
-        note "$r exists but is not a git repo — skipping"
-        continue
-    fi
-    if git clone "git@github.com:$REPO_OWNER/$r.git" "$target" >/dev/null 2>&1; then
-        ok "$r (via SSH)"
-    elif git clone "https://github.com/$REPO_OWNER/$r.git" "$target" >/dev/null 2>&1; then
-        ok "$r (via HTTPS — consider fixing SSH)"
-    else
-        fail "$r clone failed"
-    fi
-done
+# If SSH auth didn't confirm, skip all clones. The HTTPS fallback would
+# prompt for a username/password on private repos and lock up the install
+# in an interactive loop the user can't escape cleanly — exactly the
+# "Username for 'https://github.com':" trap. Idempotent re-run is the
+# right escape hatch instead: fix SSH, run setup.sh again, clones resume.
+SKIPPED_REPOS=()
+if [ "$SSH_AUTH_OK" != yes ]; then
+    note "Skipping repo clones (SSH to github.com not authenticated)."
+    note "After adding the pubkey to GitHub, re-run setup.sh to clone."
+    for r in "${REPOS[@]}"; do
+        [ -d "$DEV_DIR/$r/.git" ] && continue
+        SKIPPED_REPOS+=("$r")
+    done
+else
+    for r in "${REPOS[@]}"; do
+        target="$DEV_DIR/$r"
+        if [ -d "$target/.git" ]; then
+            ok "$r (already cloned)"
+            continue
+        fi
+        if [ -e "$target" ] && [ ! -d "$target/.git" ]; then
+            note "$r exists but is not a git repo — skipping"
+            continue
+        fi
+        # GIT_TERMINAL_PROMPT=0 belt-and-suspenders: if SSH unexpectedly
+        # fails for a single repo (e.g. archived, access revoked), git
+        # will NOT fall back to an HTTPS credential prompt.
+        if GIT_TERMINAL_PROMPT=0 git clone "git@github.com:$REPO_OWNER/$r.git" "$target" 2>/tmp/.clone-err; then
+            ok "$r"
+        else
+            err_short=$(head -1 /tmp/.clone-err 2>/dev/null | tr -d '\r')
+            fail "$r clone failed (${err_short:-unknown})"
+            SKIPPED_REPOS+=("$r")
+        fi
+    done
+    rm -f /tmp/.clone-err
+fi
 
 # ---------------------------------------------------------------------------
 # 9) Optional dev tools: Claude Code CLI + Ollama
@@ -744,4 +788,12 @@ fi
 printf '\n  %sDone.%s\n' "$_green" "$_reset"
 printf '  Restart Termux (or run %ssource ~/.bashrc%s) for the look + prompt to take effect.\n' "$_dim" "$_reset"
 printf '  Then launch %sclaude%s inside any repo under %s~/dev/%s — SessionStart will auto-pull.\n\n' "$_dim" "$_reset" "$_dim" "$_reset"
+
+if [ "${#SKIPPED_REPOS[@]}" -gt 0 ]; then
+    printf '  %s%d repo(s) still to clone:%s %s\n' "$_yellow" "${#SKIPPED_REPOS[@]}" "$_reset" "${SKIPPED_REPOS[*]}"
+    printf '  Fix SSH (add %s~/.ssh/id_ed25519.pub%s to https://github.com/settings/keys),\n' "$_dim" "$_reset"
+    printf '  verify with %sssh -T git@github.com%s, then re-run this setup.sh — it is idempotent\n' "$_dim" "$_reset"
+    printf '  and will resume at the clone step.\n\n'
+fi
+
 printf '  Docs: %shttps://github.com/ahmed-mili/dev-environment%s\n\n' "$_dim" "$_reset"
