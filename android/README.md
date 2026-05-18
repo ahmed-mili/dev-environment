@@ -44,3 +44,54 @@ done
 # Si tu utilises sshd : ajouter ta pubkey PC
 echo "ssh-ed25519 AAAA... ton-pc-comment" >> ~/.ssh/authorized_keys
 ```
+
+## Workflow recommandé pour Claude Code
+
+```bash
+tmain                          # attache la session tmux "main" (la crée si absente)
+cd ~/dev/mon-repo
+claude                         # SessionStart hook auto-pull avant de te rendre la main
+# travaille...
+# Ctrl+B puis D                # detach — session continue en background
+# ferme Termux, change d'app, verrouille l'écran : la session survit
+# plus tard :
+tmain                          # tu retrouves Claude exactement où tu l'as laissé
+```
+
+Le wake-lock est acquis automatiquement par `~/.bashrc.local` (libère avec `termux-wake-unlock` ou supprime la ligne).
+
+## Ollama cloud (modèles `:cloud` routés via Claude Code)
+
+Si tu as installé Ollama au prompt :
+```bash
+ollama signin                                                                # 1× par appareil
+ollama launch claude --model glm-5.1:cloud -y -- --dangerously-skip-permissions
+ollama launch claude --model kimi-k2.5:cloud -y -- --dangerously-skip-permissions
+```
+
+## Maximiser les perfs sur Xiaomi / MIUI
+
+Android tue agressivement les processus en background — surtout MIUI. Trois actions manuelles (1× par téléphone) qui rendent la différence visible :
+
+**1. Exempter Termux de l'optim batterie**
+Paramètres Android → Apps → Termux → Battery → "Sans restriction" / "Unrestricted".
+
+**2. Désactiver le phantom process killer** (Xiaomi/Android 12+ tue tout enfant qui dépasse 32 processes)
+Depuis un PC avec ADB :
+```bash
+adb shell "settings put global settings_enable_monitor_phantom_procs false"
+adb shell "device_config put activity_manager max_phantom_processes 2147483647"
+```
+(Ces deux settings se remettent à zéro à chaque MAJ Android — re-appliquer si tmux/claude meurent.)
+
+**3. Termux:Boot** (optionnel) — autostart tmux + sshd au démarrage du téléphone
+Installer le APK Termux:Boot depuis F-Droid, puis :
+```bash
+mkdir -p ~/.termux/boot
+cat > ~/.termux/boot/start.sh <<'EOF'
+#!/data/data/com.termux/files/usr/bin/sh
+termux-wake-lock
+tmux new-session -d -s main
+EOF
+chmod +x ~/.termux/boot/start.sh
+```

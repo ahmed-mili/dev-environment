@@ -168,6 +168,7 @@ PKGS=(
     nodejs-lts
     fzf fastfetch starship
     eza bat fd ripgrep
+    tmux
     termux-api
     coreutils gawk grep sed
 )
@@ -625,6 +626,31 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 10b) Termux UX: auto-acquire wake lock on shell start
+# ---------------------------------------------------------------------------
+# Without a wake lock, Android (especially MIUI on Xiaomi) will throttle
+# or kill Termux as soon as the screen turns off — destroying any tmux
+# session, sshd, or long-running Claude Code prompt. termux-wake-lock
+# requests a partial wake lock from Android: CPU keeps running, screen
+# can still turn off (battery cost is small in practice).
+# Release manually with `termux-wake-unlock` or remove the line from
+# ~/.bashrc.local. The pgrep guard makes this a no-op if already held.
+step "Wake lock (keep Claude Code alive in background)"
+if ! grep -q '^# termux-config: wake lock' "$HOME/.bashrc.local" 2>/dev/null; then
+    cat >> "$HOME/.bashrc.local" <<'EOF'
+
+# termux-config: wake lock — prevents Android from suspending Termux while
+# tmux/sshd/claude are running. Remove this line if you'd rather conserve
+# battery and don't run long-running sessions.
+command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock 2>/dev/null
+EOF
+    ok "auto-acquire on shell start (release with termux-wake-unlock)"
+else
+    ok "already configured in ~/.bashrc.local"
+fi
+command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock 2>/dev/null
+
+# ---------------------------------------------------------------------------
 # 11) Optional: SSH server (control Termux from your PC) + Tailscale
 # ---------------------------------------------------------------------------
 # Termux's sshd listens on port 8022 (Android blocks <1024 without root) and
@@ -729,7 +755,12 @@ fi
 # Done.
 # ---------------------------------------------------------------------------
 printf '\n  %sDone.%s\n' "$_green" "$_reset"
-printf '  Restart Termux (or run %ssource ~/.bashrc%s) for the look + prompt to take effect.\n' "$_dim" "$_reset"
-printf '  Clone your repos into %s~/dev/%s, then launch %sclaude%s inside any of them —\n' "$_dim" "$_reset" "$_dim" "$_reset"
-printf '  the SessionStart hook will auto-pull on every Claude Code session.\n\n'
+printf '  Restart Termux (or run %ssource ~/.bashrc%s) for the look + prompt to take effect.\n\n' "$_dim" "$_reset"
+printf '  %sRecommended workflow:%s\n' "$_yellow" "$_reset"
+printf '    %s1.%s  git clone git@github.com:YOUR/REPO.git ~/dev/REPO\n' "$_dim" "$_reset"
+printf '    %s2.%s  tmain                       %s# attach the persistent tmux session%s\n' "$_dim" "$_reset" "$_dim" "$_reset"
+printf '    %s3.%s  cd ~/dev/REPO && claude     %s# SessionStart auto-pulls%s\n' "$_dim" "$_reset" "$_dim" "$_reset"
+printf '    %s4.%s  Ctrl+B then D               %s# detach; close Termux; come back later with tmain%s\n\n' "$_dim" "$_reset" "$_dim" "$_reset"
+printf '  Ollama cloud (if you installed Ollama and signed in):\n'
+printf '    %sollama launch claude --model glm-5.1:cloud -y -- --dangerously-skip-permissions%s\n\n' "$_dim" "$_reset"
 printf '  Docs: %shttps://github.com/ahmed-mili/dev-environment%s\n\n' "$_dim" "$_reset"

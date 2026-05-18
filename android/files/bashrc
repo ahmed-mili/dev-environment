@@ -49,6 +49,19 @@ alias gs='git status'
 alias gd='git diff'
 alias gl='git log --oneline --graph --decorate -20'
 
+# ---- tmux helpers — survive screen-off / app-switch on Android ----
+# Android kills background processes aggressively (especially MIUI). Run
+# Claude Code inside a tmux session and your work survives across phone
+# locks, app switches, and even Termux force-stops as long as Termux
+# itself is restarted before the OOM killer reaps the session.
+#   tmain        attach the "main" session, creating it if missing
+#   tls          list sessions
+#   Inside tmux: Ctrl+B then D to detach (session keeps running)
+#                Ctrl+B then C to create a new window
+#                Ctrl+B then 0/1/2 to switch windows
+alias tmain='tmux new-session -A -s main'
+alias tls='tmux ls'
+
 # ---- isadmin helper (returns 0 if running as root — root rarely needed on Termux) ----
 isadmin() { [ "$(id -u)" -eq 0 ]; }
 
