@@ -64,6 +64,20 @@ anthropic-beta: oauth-2025-04-20
 
 Caches : usage 60s (`~/.claude/usage-cache.json`), auth 1h (`~/.claude/auth-status-cache.json`).
 
+## Effort level — rendu statique
+
+Les 5 niveaux d'effort (`low`, `medium`, `high`, `xhigh`, `max`) sont rendus dans la statusline avec ces palettes (cf. `statusline.ps1` `Get-EffortDisplay`) :
+
+| Niveau | Rendu |
+| --- | --- |
+| `low` | yellowBright bold, statique |
+| `medium` | greenBright bold, statique |
+| `high` | blueBright bold, statique |
+| `xhigh` | halo magenta gaussien centré (base `#F5C2E7` ↔ highlight `#d0b4ff`, sigma=0.9) |
+| `max` | palette 7-stops Catppuccin étirée sur la largeur du label (`#F38BA8` → `#A6E3A1` → `#F5C2E7` pour `max`) |
+
+Le picker `/effort` interne de Claude Code anime `xhigh` et `max` à 10 Hz (Ink/React dans le binaire), mais reproduire cette cadence dans la statusline nécessiterait un `refreshInterval < 1` qui est clamp par le binaire — la seule façon de lever ce clamp serait de patcher `claude.exe`, ce qui déclenche Microsoft Defender (`Trojan:Win32/FileFix.BBA!MTB`). Donc on garde un rendu statique propre qui reprend exactement les mêmes couleurs que l'animation (halo gaussien figé pour `xhigh`, palette étirée pour `max`) — zéro friction Defender pour les utilisateurs externes.
+
 ## Crédit
 
 Endpoint `/usage` découvert par [Melvynx (codelynx.dev)](https://codelynx.dev/posts/claude-code-usage-limits-statusline) via Proxyman.

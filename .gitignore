@@ -26,3 +26,6 @@ stats-cache.json
 
 # Config Claude Code locale au repo (settings par machine, permissions, etc.)
 .claude/
+
+# Archive locale (code mort gardé pour historique, pas dans le repo public)
+.archive/

@@ -73,33 +73,14 @@ function Get-EffortDisplay([string]$level) {
     #   low    -> warning    = ansi:yellowBright, bold, statique
     #   medium -> success    = ansi:greenBright,  bold, statique
     #   high   -> permission = ansi:blueBright,   bold, statique
-    #   xhigh  -> autoAccept-shimmer = curseur lumineux #d0b4ff qui traverse en magentaBright
-    #   max    -> rainbow-animated = chaque char prend la couleur palette[(i+frame) % 7],
-    #             palette dark-ansi : red, redBright, yellow, green, cyan, blue, magenta
+    #   xhigh  -> halo magenta gaussien fige au milieu du label (figeage de
+    #             l'ancien shimmer anime, parite avec statusline-rs)
+    #   max    -> palette 7-stops Catppuccin etiree sur la largeur du label
+    #             (figeage de l'ancien rainbow anime, parite avec statusline-rs)
     # CRUCIAL : le binaire emet `[1m` UNE SEULE FOIS au debut (via <Text bold> wrapper Ink)
-    # puis les changements de couleur per-char (`[91m`, `[33m`, ...) sans re-emettre `[1m`.
-    # Bold reste actif dans la state machine ANSI jusqu'au `[22m` final.
-    # Test empirique avec ink/React : `<Text bold><Text color=X>c</Text>...</Text>` produit
-    # `\e[1m\e[31mm\e[91ma\e[33mx\e[39m\e[22m` -- un seul bold ON, un seul bold OFF.
-    # Egalement : Ink IGNORE les `bold` props sur les <Text> enfants quand un wrapper
-    # exterieur a deja bold:true (verifie empiriquement avec test-mixed.mjs). Donc le
-    # shimmer xhigh dans le binaire (qui specifie bold per-char) est aussi rendu
-    # uniformement bold dans Ink -- on fait pareil ici.
-    # Avant : on re-emit `[1m` apres chaque changement de couleur et on reset avec `[0m`
-    # a la fin. `[0m` reset TOUT y compris le background -> casse la bannière s2_bg et
-    # rend le texte visuellement plus "lourd" face au reste de la statusline.
-    # Maintenant : `[1m` une fois, `[22m` (bold off) + `[39m` (fg default) a la fin.
-    # PLAFOND ARCHITECTURAL : la fonction I() dans claude.exe abort le statusline
-    # command precedent a chaque appel (`_.current?.abort()`). PowerShell met ~420 ms
-    # a se lancer/finir. Donc refreshInterval < 0.5s = PS jamais le temps de produire
-    # son output = statusline disparait. Le picker /effort tourne a 10 Hz parce qu'il
-    # est rendu DANS le binaire (Ink/React) sans spawn externe -- on ne peut pas
-    # repliquer cette cadence sans reecrire statusline.ps1 en binaire natif rapide.
-    # Compromis retenu : frame avance toutes les 500 ms = synchro avec refreshInterval=0.5
-    # = 2 Hz smooth (1 increment par refresh, pas de saut). Le binaire impose
-    # normalement refreshInterval >= 1 s ; on a patche ce minimum dans claude.exe
-    # (cf. claude-exe-statusline-patch.md en memoire) pour autoriser 0.5.
-    # Source : function Ybq/e4_/jSA/wSA dans claude.exe, palette LC9/Rz1.
+    # puis les changements de couleur per-char sans re-emettre `[1m`. Bold reste actif
+    # dans la state machine ANSI jusqu'au `[22m` final. `[0m` reset TOUT y compris le
+    # background -> on utilise `[22m[39m` qui n'ecrase pas le BG de la banniere s2_bg.
     if (-not $level) { return '' }
     $label = $level
     $bold     = "$esc[1m"
@@ -111,31 +92,62 @@ function Get-EffortDisplay([string]$level) {
         'medium' { return "$bold$esc[92m$label$endStyle" }
         'high'   { return "$bold$esc[94m$label$endStyle" }
         'xhigh'  {
-            $chars  = $label.ToCharArray()
-            $period = $chars.Length + 4
-            $frame  = [int]([Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 500.0) % $period)
+            # Halo gaussien centre, fige au milieu du label. Meme algo que
+            # statusline-rs : pos = (n-1)/2, sigma=0.9, lerp RGB entre base
+            # #F5C2E7 (magentaBright Catppuccin) et hi #d0b4ff (lumiere shimmer).
+            $chars = $label.ToCharArray()
+            $n = $chars.Length
+            if ($n -eq 0) { return '' }
+            $pos = ($n - 1) / 2.0
+            $sigma2 = 0.81   # (0.9)^2
+            $baseR = 245; $baseG = 194; $baseB = 231
+            $hiR = 208;   $hiG = 180;   $hiB = 255
             $sb = [System.Text.StringBuilder]::new()
-            [void]$sb.Append($bold)   # bold ON une seule fois (Ink ignore les bold per-char enfants)
-            for ($i = 0; $i -lt $chars.Length; $i++) {
-                if ($i -eq $frame) {
-                    [void]$sb.Append((RGB 208 180 255))    # curseur lumineux
-                } else {
-                    [void]$sb.Append("$esc[95m")           # magentaBright
-                }
+            [void]$sb.Append($bold)
+            for ($i = 0; $i -lt $n; $i++) {
+                $dist = [Math]::Abs($i - $pos)
+                $intensity = [Math]::Exp(-$dist * $dist / $sigma2)
+                $r = [int][Math]::Round($baseR + ($hiR - $baseR) * $intensity)
+                $g = [int][Math]::Round($baseG + ($hiG - $baseG) * $intensity)
+                $b = [int][Math]::Round($baseB + ($hiB - $baseB) * $intensity)
+                [void]$sb.Append((RGB $r $g $b))
                 [void]$sb.Append($chars[$i])
             }
             [void]$sb.Append($endStyle)
             return $sb.ToString()
         }
         'max'    {
-            $palette = @("$esc[31m","$esc[91m","$esc[33m","$esc[32m","$esc[36m","$esc[34m","$esc[35m")
+            # Stretch palette 7-stops Catppuccin sur la largeur du label. Pour
+            # "max" (3 chars) : palette[0]=red, palette[3]=green, palette[6]=magenta.
+            # RGB explicite (au lieu des codes ANSI shortcuts) pour matcher
+            # exactement le rendu Rust et eviter les variations cross-theme.
+            $palette = @(
+                @(243, 139, 168),   # red          #F38BA8
+                @(243, 139, 168),   # redBright    #F38BA8 (palette flat Catppuccin)
+                @(249, 226, 175),   # yellow       #F9E2AF
+                @(166, 227, 161),   # green        #A6E3A1
+                @(148, 226, 213),   # cyan         #94E2D5
+                @(137, 180, 250),   # blue         #89B4FA
+                @(245, 194, 231)    # magenta      #F5C2E7
+            )
             $chars = $label.ToCharArray()
-            $frame = [int][Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 500.0)
+            $n = $chars.Length
+            if ($n -eq 0) { return '' }
+            $denom = [Math]::Max($n - 1, 1)
+            $pmax = $palette.Count - 1
             $sb = [System.Text.StringBuilder]::new()
-            [void]$sb.Append($bold)   # bold ON une seule fois (cf. comment + test empirique)
-            for ($i = 0; $i -lt $chars.Length; $i++) {
-                $cIdx = (($i + $frame) % $palette.Count + $palette.Count) % $palette.Count
-                [void]$sb.Append($palette[$cIdx]); [void]$sb.Append($chars[$i])
+            [void]$sb.Append($bold)
+            for ($i = 0; $i -lt $n; $i++) {
+                $target = $i / $denom * $pmax
+                $lo = [int][Math]::Floor($target)
+                $hi = [Math]::Min($lo + 1, $palette.Count - 1)
+                $t = $target - $lo
+                $a = $palette[$lo]; $b = $palette[$hi]
+                $r = [int][Math]::Round($a[0] + ($b[0] - $a[0]) * $t)
+                $g = [int][Math]::Round($a[1] + ($b[1] - $a[1]) * $t)
+                $bb = [int][Math]::Round($a[2] + ($b[2] - $a[2]) * $t)
+                [void]$sb.Append((RGB $r $g $bb))
+                [void]$sb.Append($chars[$i])
             }
             [void]$sb.Append($endStyle)
             return $sb.ToString()
@@ -210,7 +222,7 @@ if ($data -and $data.model) {
     elseif ($data.model.id) { $modelName = $data.model.id }
 }
 
-# Effort level (low/medium/high/xhigh/max) — affichage anime cote Claude Code
+# Effort level (low/medium/high/xhigh/max) — affichage statique cote statusline
 $effortLevel = $null
 if ($data -and $data.effort -and $data.effort.level) { $effortLevel = [string]$data.effort.level }
 
@@ -562,7 +574,7 @@ if ($modelName) {
     $line1 += "$modelName  "
 }
 
-# Effort level (xhigh shimmer / max rainbow) — Get-EffortDisplay finit par [22m[39m
+# Effort level (xhigh halo / max stretch palette) — Get-EffortDisplay finit par [22m[39m
 # (bold off + fg default) qui preserve le BG de la bannière. On restaure juste le fg.
 $effortStr = Get-EffortDisplay $effortLevel
 if ($effortStr) {
