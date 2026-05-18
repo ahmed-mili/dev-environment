@@ -23,7 +23,8 @@ Clones the repo to `C:\dev\dev-environment`, installs winget packages + PS7 prof
 
 ### Android (Termux)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh | bash
+curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 2>/dev/null; \
+pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh)
 ```
 
 ## License
