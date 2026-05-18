@@ -1,6 +1,6 @@
 # android/
 
-Config Termux (Android) : bash, starship, fastfetch, hooks Claude Code, intégration SSH PC ↔ téléphone.
+Installer Termux générique : bash + Catppuccin Mocha, starship, fastfetch, Claude Code CLI, hooks auto-pull / auto-push sur `~/dev/`.
 
 ## Fichiers
 
@@ -12,7 +12,6 @@ Config Termux (Android) : bash, starship, fastfetch, hooks Claude Code, intégra
 | `files/fastfetch-config.jsonc` | `~/.config/fastfetch/config.jsonc` |
 | `files/termux.properties` | `~/.termux/termux.properties` |
 | `files/colors.properties` | `~/.termux/colors.properties` |
-| `files/pc-authorized_keys` | Clé publique SSH du PC à ajouter dans `~/.ssh/authorized_keys` |
 | `files/auto-pull.sh` | Hook Claude Code SessionStart |
 | `files/auto-push.sh` | Hook Claude Code SessionEnd |
 
@@ -23,6 +22,25 @@ curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 
 pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh)
 ```
 
-> Le `setup.sh` clone le repo, copie les fichiers à leurs emplacements, installe les paquets Termux requis (bash, starship, fastfetch, git, openssh, etc.).
->
-> Le préambule `dpkg -r libngtcp2-crypto-ossl` est un no-op sur un Termux sain — il ne se déclenche que sur les builds où la lib HTTP/3 a une ABI mismatch avec OpenSSL et casse `curl` (et `pkg install` au passage). Process-substitution `bash <(...)` plutôt que `curl ... | bash` parce que les prompts SSH/sshd/ollama du script ont besoin d'un stdin TTY.
+Le script installe les paquets requis, déploie les configs Catppuccin, génère une clé SSH ed25519, installe Claude Code via npm. Trois prompts opt-in : Ollama (gros download, par défaut non), sshd, Tailscale. Tout le reste est non-interactif.
+
+À la fin tu te retrouves avec un `~/dev/` vide et Claude Code dispo : il ne te reste qu'à cloner les repos que tu veux.
+
+> Le préambule `dpkg -r libngtcp2-crypto-ossl` est un no-op sur un Termux sain — il ne se déclenche que sur les builds où la lib HTTP/3 a une ABI mismatch avec OpenSSL et casse `curl` (et `pkg install` au passage). Process-substitution `bash <(...)` plutôt que `curl ... | bash` parce que les prompts sshd/Ollama et l'ajout de la clé SSH GitHub ont besoin d'un stdin TTY.
+
+## Personnaliser après install
+
+```bash
+# Identité git (le script prompt aussi si manquante)
+git config --global user.name  "Ton Nom"
+git config --global user.email "ton@email"
+
+# Cloner tes propres repos
+mkdir -p ~/dev
+for r in repo1 repo2 repo3; do
+  git clone git@github.com:TON_USER/$r.git ~/dev/$r
+done
+
+# Si tu utilises sshd : ajouter ta pubkey PC
+echo "ssh-ed25519 AAAA... ton-pc-comment" >> ~/.ssh/authorized_keys
+```
