@@ -73,11 +73,22 @@ function Get-EffortDisplay([string]$level) {
     #   low    -> warning    = ansi:yellowBright, bold, statique
     #   medium -> success    = ansi:greenBright,  bold, statique
     #   high   -> permission = ansi:blueBright,   bold, statique
-    #   xhigh  -> autoAccept-shimmer = curseur lumineux #d0b4ff qui traverse,
-    #             reste en magentaBright bold (chars adjacents bold, autres normaux),
-    #             periode = label.Length + 4
+    #   xhigh  -> autoAccept-shimmer = curseur lumineux #d0b4ff qui traverse en magentaBright
     #   max    -> rainbow-animated = chaque char prend la couleur palette[(i+frame) % 7],
-    #             palette dark-ansi : red, redBright, yellow, green, cyan, blue, magenta, tous bold
+    #             palette dark-ansi : red, redBright, yellow, green, cyan, blue, magenta
+    # CRUCIAL : le binaire emet `[1m` UNE SEULE FOIS au debut (via <Text bold> wrapper Ink)
+    # puis les changements de couleur per-char (`[91m`, `[33m`, ...) sans re-emettre `[1m`.
+    # Bold reste actif dans la state machine ANSI jusqu'au `[22m` final.
+    # Test empirique avec ink/React : `<Text bold><Text color=X>c</Text>...</Text>` produit
+    # `\e[1m\e[31mm\e[91ma\e[33mx\e[39m\e[22m` -- un seul bold ON, un seul bold OFF.
+    # Egalement : Ink IGNORE les `bold` props sur les <Text> enfants quand un wrapper
+    # exterieur a deja bold:true (verifie empiriquement avec test-mixed.mjs). Donc le
+    # shimmer xhigh dans le binaire (qui specifie bold per-char) est aussi rendu
+    # uniformement bold dans Ink -- on fait pareil ici.
+    # Avant : on re-emit `[1m` apres chaque changement de couleur et on reset avec `[0m`
+    # a la fin. `[0m` reset TOUT y compris le background -> casse la bannière s2_bg et
+    # rend le texte visuellement plus "lourd" face au reste de la statusline.
+    # Maintenant : `[1m` une fois, `[22m` (bold off) + `[39m` (fg default) a la fin.
     # PLAFOND ARCHITECTURAL : la fonction I() dans claude.exe abort le statusline
     # command precedent a chaque appel (`_.current?.abort()`). PowerShell met ~420 ms
     # a se lancer/finir. Donc refreshInterval < 0.5s = PS jamais le temps de produire
@@ -91,29 +102,29 @@ function Get-EffortDisplay([string]$level) {
     # Source : function Ybq/e4_/jSA/wSA dans claude.exe, palette LC9/Rz1.
     if (-not $level) { return '' }
     $label = $level
-    $bold  = "$esc[1m"
-    $nobold = "$esc[22m"
-    $rst   = "$esc[0m"
+    $bold     = "$esc[1m"
+    $boldOff  = "$esc[22m"
+    $fgReset  = "$esc[39m"
+    $endStyle = "$boldOff$fgReset"   # equivalent strict de la sortie Ink (n'ecrase pas le BG)
     switch ($level) {
-        'low'    { return "$esc[93m$bold$label$rst" }
-        'medium' { return "$esc[92m$bold$label$rst" }
-        'high'   { return "$esc[94m$bold$label$rst" }
+        'low'    { return "$bold$esc[93m$label$endStyle" }
+        'medium' { return "$bold$esc[92m$label$endStyle" }
+        'high'   { return "$bold$esc[94m$label$endStyle" }
         'xhigh'  {
             $chars  = $label.ToCharArray()
             $period = $chars.Length + 4
             $frame  = [int]([Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 500.0) % $period)
             $sb = [System.Text.StringBuilder]::new()
+            [void]$sb.Append($bold)   # bold ON une seule fois (Ink ignore les bold per-char enfants)
             for ($i = 0; $i -lt $chars.Length; $i++) {
                 if ($i -eq $frame) {
-                    [void]$sb.Append((RGB 208 180 255)); [void]$sb.Append($bold)
-                } elseif ($i -eq ($frame - 1) -or $i -eq ($frame + 1)) {
-                    [void]$sb.Append("$esc[95m"); [void]$sb.Append($bold)
+                    [void]$sb.Append((RGB 208 180 255))    # curseur lumineux
                 } else {
-                    [void]$sb.Append("$esc[95m"); [void]$sb.Append($nobold)
+                    [void]$sb.Append("$esc[95m")           # magentaBright
                 }
                 [void]$sb.Append($chars[$i])
             }
-            [void]$sb.Append($rst)
+            [void]$sb.Append($endStyle)
             return $sb.ToString()
         }
         'max'    {
@@ -121,11 +132,12 @@ function Get-EffortDisplay([string]$level) {
             $chars = $label.ToCharArray()
             $frame = [int][Math]::Floor([DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 500.0)
             $sb = [System.Text.StringBuilder]::new()
+            [void]$sb.Append($bold)   # bold ON une seule fois (cf. comment + test empirique)
             for ($i = 0; $i -lt $chars.Length; $i++) {
                 $cIdx = (($i + $frame) % $palette.Count + $palette.Count) % $palette.Count
-                [void]$sb.Append($palette[$cIdx]); [void]$sb.Append($bold); [void]$sb.Append($chars[$i])
+                [void]$sb.Append($palette[$cIdx]); [void]$sb.Append($chars[$i])
             }
-            [void]$sb.Append($rst)
+            [void]$sb.Append($endStyle)
             return $sb.ToString()
         }
     }
@@ -550,10 +562,11 @@ if ($modelName) {
     $line1 += "$modelName  "
 }
 
-# Effort level (xhigh shimmer / max rainbow) — apres reset on restaure bg+fg de la section
+# Effort level (xhigh shimmer / max rainbow) — Get-EffortDisplay finit par [22m[39m
+# (bold off + fg default) qui preserve le BG de la bannière. On restaure juste le fg.
 $effortStr = Get-EffortDisplay $effortLevel
 if ($effortStr) {
-    $line1 += "$effortStr$reset$s2_bg$s2_fg  "
+    $line1 += "$effortStr$s2_fg  "
 }
 
 # Contexte affiche en permanence : sert de repere pour anticiper /clear.
