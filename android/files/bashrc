@@ -9,6 +9,14 @@ case $- in
       *) return ;;
 esac
 
+# ---- UTF-8 console — MUST come before ble.sh source ----
+# Termux ships with a broken `C` locale (see termux-packages#23010); ble.sh
+# refuses to load if LC_CTYPE=C. C.UTF-8 fixes both that and accent/glyph
+# rendering in paths + Nerd Font.
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+export LESSCHARSET=utf-8
+
 # ---- ble.sh — autosuggestions + syntax highlighting (bash PSReadLine) ----
 # Source with --attach=none here, then ble-attach at the very end of this file
 # so starship/fzf/etc. configure cleanly first. ble.sh is optional — if the
@@ -22,11 +30,6 @@ if [ -f "$HOME/.local/share/blesh/ble.sh" ]; then
     ble-face -s syntax_command 'fg=#89b4fa' 2>/dev/null
     ble-face -s syntax_error 'fg=#f38ba8,bold' 2>/dev/null
 fi
-
-# ---- UTF-8 console — accents in paths + Nerd Font glyphs ----
-export LANG=C.UTF-8
-export LC_ALL=C.UTF-8
-export LESSCHARSET=utf-8
 
 # ---- Editor / pager defaults aligned with the Windows side ----
 export EDITOR="${EDITOR:-nano}"
