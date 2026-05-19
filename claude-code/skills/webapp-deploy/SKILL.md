@@ -5,7 +5,7 @@ description: Règles obligatoires pour tout projet web/app déployé (Firebase H
 
 # Règles obligatoires — Web App / Site Web déployé
 
-Ce skill s'applique à TOUT projet déployé sur un hébergeur statique (Firebase Hosting, GitHub Pages, Netlify, Vercel, Cloudflare Pages, etc.). Il est NON NÉGOCIABLE et s'impose à tout modèle IA (Claude, Ollama, GPT, etc.) travaillant sur le projet.
+Ce skill s'applique à TOUT projet déployé sur un hébergeur statique (Firebase Hosting, GitHub Pages, Netlify, Vercel, Cloudflare Pages, etc.). Il est NON NÉGOCIABLE et s'impose à tout modèle IA (Claude, GPT, etc.) travaillant sur le projet.
 
 ## 1. Cache-Control — Règle absolue
 

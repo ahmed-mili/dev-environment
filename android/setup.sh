@@ -9,7 +9,7 @@
 #     Font, starship prompt, gradient USER@HOST + fastfetch splash)
 #   - generates an ed25519 SSH key and prints the public part for GitHub
 #   - installs Claude Code via npm (global, ~/.npm-global)
-#   - prompts (optional) for Ollama, sshd, Tailscale
+#   - prompts (optional) for sshd, Tailscale
 #   - drops auto-pull / auto-push hooks scoped to /storage/emulated/0/dev
 #     and patches ~/.claude/settings.json so SessionStart pulls and
 #     SessionEnd pushes
@@ -35,7 +35,7 @@
 # the broken-libngtcp2 builds where curl is dynamically dead, which also
 # breaks `pkg install` itself (pkg shells out to curl for mirror selection).
 # Process-substitution `bash <(...)` instead of `curl ... | bash` because
-# the GitHub-SSH / sshd / ollama prompts in this script need stdin attached
+# the GitHub-SSH / sshd prompts in this script need stdin attached
 # to a TTY (see `[ -t 0 ]` checks below).
 # ---------------------------------------------------------------------------
 
@@ -150,7 +150,7 @@ step "Termux packages"
 # curl invocation explodes with `cannot locate symbol
 # "SSL_set_quic_tls_transport_params"`. The shim is a Recommends, not
 # a hard Depends — removing it restores curl, just without HTTP/3
-# (irrelevant for GitHub, npm, ollama.com — all serve HTTP/2).
+# (irrelevant for GitHub, npm — all serve HTTP/2).
 if dpkg -s libngtcp2-crypto-ossl >/dev/null 2>&1 \
     && command -v curl >/dev/null 2>&1 \
     && ! curl --version >/dev/null 2>&1; then
@@ -425,21 +425,13 @@ fi
 mkdir -p "$DEV_DIR"
 
 # ---------------------------------------------------------------------------
-# 8) Dev tools: Claude Code CLI (always) + Ollama (opt-in)
+# 8) Dev tools: Claude Code CLI
 # ---------------------------------------------------------------------------
 # Claude Code is the entire point of the bundle — install unconditionally,
-# no prompt. Ollama is opt-in because each model is multi-GB and not
-# everyone wants local inference. The npm prefix is configured first so
-# any later global install (yarn, pnpm, another CLI...) drops into the
-# same user-scoped tree.
+# no prompt. The npm prefix is configured first so any later global install
+# (yarn, pnpm, another CLI...) drops into the same user-scoped tree.
 
 step "Dev tools"
-install_ollama=no
-if [ -t 0 ]; then
-    printf '  Install Ollama (ollama run <model>, etc.)? [y/N] '
-    read -r _ans
-    case "$_ans" in [yY]*) install_ollama=yes ;; esac
-fi
 
 # Pin npm prefix to ~/.npm-global so global installs don't touch $PREFIX.
 NPM_PREFIX="$HOME/.npm-global"
@@ -499,169 +491,8 @@ else
     ok "claude already installed ($(command -v claude))"
 fi
 
-if [ "$install_ollama" = yes ]; then
-    # Strategy: prefer the Termux native `ollama` package when it provides the
-    # `launch` subcommand (Ollama v0.15+ — needed for `ollama launch claude
-    # --model X:cloud -y -- <flags>`). If the native package is missing or
-    # too old, fall back to proot-distro + Ubuntu + the official install.sh,
-    # which always pulls the latest release. A wrapper at $PREFIX/bin/ollama
-    # forwards calls into the proot so the CLI UX is unchanged.
-    #
-    # Sentinel ($PREFIX/bin/ollama.proot) distinguishes proot wrapper from
-    # native binary on re-runs.
-
-    # `ollama help launch` succeeds (exits 0) on v0.15+ and fails on older
-    # versions. Cheaper than parsing `ollama --version`.
-    ollama_has_launch() {
-        ollama help launch >/dev/null 2>&1
-    }
-
-    ollama_mode=""
-
-    # Path 1: previous proot install — keep it.
-    if [ -f "$PREFIX/bin/ollama.proot" ] && command -v ollama >/dev/null 2>&1; then
-        if ollama_has_launch; then
-            ok "ollama (proot-distro wrapper, supports launch) already installed"
-            ollama_mode=proot
-        else
-            note "existing proot Ollama is too old — refreshing inside the Ubuntu proot"
-            proot-distro login ubuntu -- bash -c '
-                curl -fsSL https://ollama.com/install.sh | sh >/dev/null 2>&1
-            ' && ok "proot Ollama upgraded"
-            ollama_mode=proot
-        fi
-    fi
-
-    # Path 2: native (existing or newly installed). Only accept it if it has
-    # `launch`; otherwise remove it and fall through to proot.
-    if [ -z "$ollama_mode" ]; then
-        native_present=no
-        if command -v ollama >/dev/null 2>&1; then
-            native_present=yes
-        elif pkg install -y ollama >/dev/null 2>&1 && command -v ollama >/dev/null 2>&1; then
-            native_present=yes
-        fi
-        if [ "$native_present" = yes ]; then
-            if ollama_has_launch; then
-                ok "ollama (native, v0.15+) at $(command -v ollama)"
-                ollama_mode=native
-            else
-                note "native ollama lacks the \`launch\` subcommand (needs v0.15+) — removing and switching to proot"
-                pkg uninstall -y ollama >/dev/null 2>&1 || rm -f "$PREFIX/bin/ollama"
-            fi
-        fi
-    fi
-
-    # Path 3: proot-distro fallback. install.sh always tracks the latest release.
-    if [ -z "$ollama_mode" ]; then
-        note "installing Ollama via proot-distro (gives latest v0.15+ with \`launch\` support)"
-        if ! command -v proot-distro >/dev/null 2>&1; then
-            pkg install -y proot-distro >/dev/null 2>&1 || fail "proot-distro install failed"
-        fi
-        if ! proot-distro list 2>/dev/null | grep -qiE 'ubuntu.*installed'; then
-            note "installing Ubuntu in proot (one-time ~150MB download)..."
-            proot-distro install ubuntu >/dev/null 2>&1 || fail "proot-distro install ubuntu failed"
-        fi
-        note "installing Ollama inside the Ubuntu proot (one-time ~1GB)..."
-        proot-distro login ubuntu -- bash -c '
-            command -v ollama >/dev/null 2>&1 || {
-                apt-get update -y >/dev/null 2>&1
-                apt-get install -y curl ca-certificates >/dev/null 2>&1
-                curl -fsSL https://ollama.com/install.sh | sh >/dev/null 2>&1
-            }
-        ' || fail "Ollama install inside proot failed"
-
-        : > "$PREFIX/bin/ollama.proot"
-        cat > "$PREFIX/bin/ollama" <<'WRAPPER'
-#!/data/data/com.termux/files/usr/bin/bash
-# Installed by termux-config: routes every `ollama` call into the Ubuntu
-# proot so the CLI UX matches a real PC — `ollama run llama3.2:1b`,
-# `ollama pull glm-5:cloud`, `ollama launch claude --model X:cloud -y -- ...`
-# all work unchanged. --shared-tmp keeps /tmp shared so model downloads
-# can be inspected from Termux too.
-exec proot-distro login ubuntu --shared-tmp -- ollama "$@"
-WRAPPER
-        chmod +x "$PREFIX/bin/ollama"
-        ok "ollama wrapper installed (proot-distro ubuntu backend)"
-        ollama_mode=proot
-    fi
-
-    # When ollama runs inside the Ubuntu proot, `ollama launch claude ...`
-    # spawns `claude` from the proot's $PATH — NOT from Termux's. The native
-    # claude install above is invisible to it. Install Claude Code inside
-    # the proot too so the wrapper actually works.
-    if [ "$ollama_mode" = proot ]; then
-        note "installing Claude Code inside the proot Ubuntu so \`ollama launch claude\` can find it"
-        proot-distro login ubuntu -- bash -c '
-            set -e
-            if command -v claude >/dev/null 2>&1; then
-                echo "claude already present in proot"
-                exit 0
-            fi
-            apt-get update -y >/dev/null 2>&1
-            apt-get install -y curl ca-certificates >/dev/null 2>&1
-            # NodeSource keeps a current Node 22 LTS for arm64. The apt
-            # nodejs package on Ubuntu 22.04 is too old (v12) and would
-            # fail to install the modern Claude Code CLI.
-            if ! command -v node >/dev/null 2>&1 || [ "$(node -v 2>/dev/null | sed s/v// | cut -d. -f1)" -lt 20 ]; then
-                curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
-                apt-get install -y nodejs >/dev/null 2>&1
-            fi
-            npm install -g @anthropic-ai/claude-code
-        ' && ok "claude installed inside proot Ubuntu" \
-          || fail "claude install inside proot failed — run manually: proot-distro login ubuntu, then npm install -g @anthropic-ai/claude-code"
-    fi
-
-    # Autostart `ollama serve` in the background whenever Termux opens, so
-    # `ollama run` calls connect to a ready daemon (same UX as the ollama
-    # systemd service on PC). pgrep guard makes the line a no-op on re-entry.
-    if ! grep -q '^# termux-config: ollama serve autostart' "$HOME/.bashrc.local" 2>/dev/null; then
-        cat >> "$HOME/.bashrc.local" <<'EOF'
-
-# termux-config: ollama serve autostart — listens on 127.0.0.1:11434.
-# No-op if a server is already running.
-if command -v ollama >/dev/null 2>&1 && ! pgrep -f 'ollama serve' >/dev/null 2>&1; then
-    nohup ollama serve >"$HOME/.ollama.log" 2>&1 &
-    disown
-fi
-EOF
-    fi
-    if command -v ollama >/dev/null 2>&1 && ! pgrep -f 'ollama serve' >/dev/null 2>&1; then
-        nohup ollama serve >"$HOME/.ollama.log" 2>&1 &
-        disown 2>/dev/null || true
-        ok "ollama serve started in the background (logs: ~/.ollama.log)"
-    else
-        ok "ollama serve already running"
-    fi
-
-    # Cloud models (`glm-5.1:cloud`, `kimi-k2.5:cloud`, etc.) are proxied
-    # through ollama.com and need either `ollama signin` or an OLLAMA_API_KEY
-    # env var. Run signin straight away — if the user installed Ollama they
-    # almost certainly want cloud models, and the signin flow itself is
-    # interactive (browser device-code), so refusing it just means an extra
-    # command later. Skip silently if non-TTY or daemon not up.
-    if [ -t 0 ] && pgrep -f 'ollama serve' >/dev/null 2>&1; then
-        sleep 1
-        if ollama signin; then
-            ok "signed in to ollama.com — :cloud models now available"
-        else
-            note "ollama signin not completed — re-run \`ollama signin\` later for :cloud models"
-        fi
-    fi
-
-    if [ "$ollama_mode" = proot ]; then
-        note "proot adds startup latency. Suggested first commands:"
-        note "  ollama run qwen2.5:0.5b                                          # local, ~400MB, snappy"
-        note "  ollama launch claude --model glm-5.1:cloud -y -- --dangerously-skip-permissions"
-    else
-        note "Suggested first commands:"
-        note "  ollama run qwen2.5:0.5b                                          # local, ~400MB, snappy"
-        note "  ollama launch claude --model glm-5.1:cloud -y -- --dangerously-skip-permissions"
-    fi
-fi
-
 # ---------------------------------------------------------------------------
-# 10) Auto-pull / auto-push hooks scoped to /storage/emulated/0/dev
+# 9) Auto-pull / auto-push hooks scoped to /storage/emulated/0/dev
 # ---------------------------------------------------------------------------
 step "Claude Code hooks"
 mkdir -p "$HOOKS_DIR"
@@ -746,7 +577,7 @@ fi
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock 2>/dev/null
 
 # ---------------------------------------------------------------------------
-# 11) Optional: SSH server (control Termux from your PC) + Tailscale
+# 10) Optional: SSH server (control Termux from your PC) + Tailscale
 # ---------------------------------------------------------------------------
 # Termux's sshd listens on port 8022 (Android blocks <1024 without root) and
 # uses the running uid for the username — i.e. whatever `whoami` returns.
@@ -856,6 +687,4 @@ printf '    %s1.%s  git clone git@github.com:YOUR/REPO.git %s/REPO\n' "$_dim" "$
 printf '    %s2.%s  tmain                       %s# attach the persistent tmux session%s\n' "$_dim" "$_reset" "$_dim" "$_reset"
 printf '    %s3.%s  cd %s/REPO && claude     %s# SessionStart auto-pulls%s\n' "$_dim" "$_reset" "$DEV_DIR" "$_dim" "$_reset"
 printf '    %s4.%s  Ctrl+B then D               %s# detach; close Termux; come back later with tmain%s\n\n' "$_dim" "$_reset" "$_dim" "$_reset"
-printf '  Ollama cloud (if you installed Ollama and signed in):\n'
-printf '    %sollama launch claude --model glm-5.1:cloud -y -- --dangerously-skip-permissions%s\n\n' "$_dim" "$_reset"
 printf '  Docs: %shttps://github.com/ahmed-mili/dev-environment%s\n\n' "$_dim" "$_reset"

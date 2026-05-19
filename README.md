@@ -1,6 +1,6 @@
 # dev-environment
 
-Cross-platform config for my Claude Code + Ollama setup on **Windows** and **Android** (Termux).
+Cross-platform config for my Claude Code setup on **Windows** and **Android** (Termux).
 
 ## Structure
 
@@ -8,8 +8,7 @@ Cross-platform config for my Claude Code + Ollama setup on **Windows** and **And
 dev-environment/
 ├── windows/        # PowerShell 7, Windows Terminal, Fastfetch
 ├── android/        # Termux: bash, starship, fastfetch
-├── claude-code/    # statusline, settings, hooks, skills
-└── ollama/         # cloud model integrations
+└── claude-code/    # statusline, settings, hooks, skills
 ```
 
 ## Install
