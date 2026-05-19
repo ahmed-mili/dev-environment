@@ -22,11 +22,12 @@ $b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahme
 
 Clones the repo to `C:\dev\dev-environment`, installs winget packages + PS7 profile + Terminal + Fastfetch, deploys Claude Code statusline/settings/hooks/skills. Optionally run `/plugin` inside Claude Code afterward to add `frontend-design`, `code-review`, `superpowers` from `claude-plugins-official`.
 
-### Android (Termux)
+### Android (Termux, one-liner)
 ```bash
-curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 2>/dev/null; \
-pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh)
+pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.sh)
 ```
+
+Le `bootstrap.sh` auto-détecte l'état : fresh install → `android/setup.sh`, ancien setup Ollama/proot détecté → `android/migrate-from-ollama.sh` (cleanup puis re-run de setup.sh). Idempotent dans les deux cas.
 
 ## License
 
