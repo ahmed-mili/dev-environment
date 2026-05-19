@@ -9,7 +9,7 @@
 #     Font, starship prompt, gradient USER@HOST + fastfetch splash)
 #   - generates an ed25519 SSH key and prints the public part for GitHub
 #   - installs Claude Code via npm (global, ~/.npm-global)
-#   - prompts (optional) for sshd, Tailscale
+#   - prompts (optional) for sshd
 #   - drops auto-pull / auto-push hooks scoped to /storage/emulated/0/dev
 #     and patches ~/.claude/settings.json so SessionStart pulls and
 #     SessionEnd pushes
@@ -627,26 +627,24 @@ fi
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock 2>/dev/null
 
 # ---------------------------------------------------------------------------
-# 10) Optional: SSH server (control Termux from your PC) + Tailscale
+# 10) Optional: SSH server (control Termux from your PC)
 # ---------------------------------------------------------------------------
 # Termux's sshd listens on port 8022 (Android blocks <1024 without root) and
 # uses the running uid for the username — i.e. whatever `whoami` returns.
 # State-aware: only prompt to install when missing. If sshd is already
 # installed, we just ensure autostart is wired up and print the connection
-# info so the user remembers how to connect. Same for Tailscale.
+# info so the user remembers how to connect.
 
 step "Remote access from PC (optional)"
 
 # --- Detect current state ---
 sshd_installed=no; dpkg -s openssh >/dev/null 2>&1 && sshd_installed=yes
 sshd_running=no;   pgrep -x sshd >/dev/null 2>&1   && sshd_running=yes
-tailscale_installed=no; dpkg -s tailscale >/dev/null 2>&1 && tailscale_installed=yes
 
 # --- Decide what to do ---
 # If already installed, treat as "yes" (so the post-install wiring still runs
 # idempotently — autostart line, info print). If absent, prompt only when TTY.
 setup_sshd=$sshd_installed
-setup_tailscale=$tailscale_installed
 
 if [ "$sshd_installed" = no ] && [ -t 0 ]; then
     printf '  Install OpenSSH server so you can ssh into Termux from your PC? [y/N] '
@@ -654,14 +652,6 @@ if [ "$sshd_installed" = no ] && [ -t 0 ]; then
     case "$_ans" in [yY]*) setup_sshd=yes ;; esac
 elif [ "$sshd_installed" = yes ]; then
     ok "openssh already installed (sshd $([ "$sshd_running" = yes ] && echo running || echo 'not running — will autostart'))"
-fi
-
-if [ "$setup_sshd" = yes ] && [ "$tailscale_installed" = no ] && [ -t 0 ]; then
-    printf '  Also install Tailscale CLI for access from any network (not just local Wi-Fi)? [y/N] '
-    read -r _ans
-    case "$_ans" in [yY]*) setup_tailscale=yes ;; esac
-elif [ "$tailscale_installed" = yes ]; then
-    ok "tailscale already installed"
 fi
 
 if [ "$sshd_installed" = no ] && [ ! -t 0 ]; then
@@ -750,28 +740,6 @@ EOF
     fi
 fi
 
-# --- Tailscale (install + first-run instructions only if newly installed) ---
-if [ "$setup_tailscale" = yes ] && [ "$tailscale_installed" = no ]; then
-    if pkg install -y tailscale >/dev/null 2>&1; then
-        ok "tailscale CLI installed"
-        tailscale_installed=yes
-    else
-        note "tailscale install failed (Termux community repo may need refresh)"
-    fi
-fi
-if [ "$setup_tailscale" = yes ] && [ "$tailscale_installed" = yes ]; then
-    # First-time wiring info — only when tailscale isn't yet authenticated.
-    # `tailscale status` exits non-zero before login; we use that as the gate.
-    if ! tailscale status >/dev/null 2>&1; then
-        printf '\n  Tailscale CLI needs a one-time setup. In two separate Termux tabs run:\n'
-        printf '    %sTab 1: tailscaled%s   (keep this tab open — it is the daemon)\n' "$_dim" "$_reset"
-        printf '    %sTab 2: tailscale up%s (open the URL it prints, log in to your tailnet)\n' "$_dim" "$_reset"
-        printf '  Then from your PC on any network:  %sssh -p 8022 %s@<phone-tailscale-ip>%s\n' "$_dim" "$(whoami)" "$_reset"
-        note "Easier alternative: install the official Tailscale Android app — same 100.x.x.x IP, no CLI dance."
-    else
-        ok "tailscale authenticated and running"
-    fi
-fi
 
 # ---------------------------------------------------------------------------
 # Done.

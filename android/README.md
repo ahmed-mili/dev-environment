@@ -22,11 +22,11 @@ curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 
 pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh)
 ```
 
-Le script installe les paquets requis, déploie les configs Catppuccin, génère une clé SSH ed25519, installe Claude Code via npm. Deux prompts opt-in : sshd, Tailscale. Tout le reste est non-interactif.
+Le script installe les paquets requis, déploie les configs Catppuccin, génère une clé SSH ed25519, installe Claude Code via npm. Un seul prompt opt-in : sshd (pour SSH PC→phone). Tout le reste est non-interactif.
 
 À la fin tu te retrouves avec un `~/dev/` vide et Claude Code dispo : il ne te reste qu'à cloner les repos que tu veux.
 
-> Le préambule `dpkg -r libngtcp2-crypto-ossl` est un no-op sur un Termux sain — il ne se déclenche que sur les builds où la lib HTTP/3 a une ABI mismatch avec OpenSSL et casse `curl` (et `pkg install` au passage). Process-substitution `bash <(...)` plutôt que `curl ... | bash` parce que les prompts sshd/Tailscale et l'ajout de la clé SSH GitHub ont besoin d'un stdin TTY.
+> Le préambule `dpkg -r libngtcp2-crypto-ossl` est un no-op sur un Termux sain — il ne se déclenche que sur les builds où la lib HTTP/3 a une ABI mismatch avec OpenSSL et casse `curl` (et `pkg install` au passage). Process-substitution `bash <(...)` plutôt que `curl ... | bash` parce que le prompt sshd et l'ajout de la clé SSH GitHub ont besoin d'un stdin TTY.
 
 ## Personnaliser après install
 
