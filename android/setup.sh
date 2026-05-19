@@ -624,61 +624,80 @@ command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock 2>/dev/null
 # ---------------------------------------------------------------------------
 # Termux's sshd listens on port 8022 (Android blocks <1024 without root) and
 # uses the running uid for the username — i.e. whatever `whoami` returns.
-# We ask before installing so users who only want the local setup don't get
-# an extra daemon and an open port for nothing.
+# State-aware: only prompt to install when missing. If sshd is already
+# installed, we just ensure autostart is wired up and print the connection
+# info so the user remembers how to connect. Same for Tailscale.
 
 step "Remote access from PC (optional)"
-install_sshd=no
-install_tailscale=no
-if [ -t 0 ]; then
+
+# --- Detect current state ---
+sshd_installed=no; dpkg -s openssh >/dev/null 2>&1 && sshd_installed=yes
+sshd_running=no;   pgrep -x sshd >/dev/null 2>&1   && sshd_running=yes
+tailscale_installed=no; dpkg -s tailscale >/dev/null 2>&1 && tailscale_installed=yes
+
+# --- Decide what to do ---
+# If already installed, treat as "yes" (so the post-install wiring still runs
+# idempotently — autostart line, info print). If absent, prompt only when TTY.
+setup_sshd=$sshd_installed
+setup_tailscale=$tailscale_installed
+
+if [ "$sshd_installed" = no ] && [ -t 0 ]; then
     printf '  Install OpenSSH server so you can ssh into Termux from your PC? [y/N] '
     read -r _ans
-    case "$_ans" in [yY]*) install_sshd=yes ;; esac
-    if [ "$install_sshd" = yes ]; then
-        printf '  Also install Tailscale CLI for access from any network (not just local Wi-Fi)? [y/N] '
-        read -r _ans
-        case "$_ans" in [yY]*) install_tailscale=yes ;; esac
-    fi
-else
-    note "non-interactive shell — skipping prompts. Re-run from a TTY to enable sshd."
+    case "$_ans" in [yY]*) setup_sshd=yes ;; esac
+elif [ "$sshd_installed" = yes ]; then
+    ok "openssh already installed (sshd $([ "$sshd_running" = yes ] && echo running || echo 'not running — will autostart'))"
 fi
 
-if [ "$install_sshd" = yes ]; then
-    if ! dpkg -s openssh >/dev/null 2>&1; then
-        pkg install -y openssh >/dev/null 2>&1 \
-            && ok "openssh installed" \
-            || { fail "openssh install failed"; install_sshd=no; }
-    else
-        ok "openssh already installed"
-    fi
+if [ "$setup_sshd" = yes ] && [ "$tailscale_installed" = no ] && [ -t 0 ]; then
+    printf '  Also install Tailscale CLI for access from any network (not just local Wi-Fi)? [y/N] '
+    read -r _ans
+    case "$_ans" in [yY]*) setup_tailscale=yes ;; esac
+elif [ "$tailscale_installed" = yes ]; then
+    ok "tailscale already installed"
 fi
 
-if [ "$install_sshd" = yes ]; then
+if [ "$sshd_installed" = no ] && [ ! -t 0 ]; then
+    note "non-interactive shell — skipping sshd prompt. Re-run from a TTY to enable it."
+fi
+
+# --- Install if needed ---
+if [ "$setup_sshd" = yes ] && [ "$sshd_installed" = no ]; then
+    pkg install -y openssh >/dev/null 2>&1 \
+        && ok "openssh installed" \
+        || { note "openssh install failed"; setup_sshd=no; }
+fi
+
+# --- Wire up sshd (autostart + authorized_keys + info), skipped if not setup ---
+if [ "$setup_sshd" = yes ]; then
     touch "$SSH_DIR/authorized_keys"
     chmod 600 "$SSH_DIR/authorized_keys"
 
-    # Ask the user for their PC pubkey. We deliberately do NOT bundle any
-    # key in the repo: this is a public installer, and a bundled pubkey
-    # would silently grant the maintainer SSH access into every forker's
-    # phone. The right authorization model is "the person installing
-    # decides whose key gets in".
-    if [ -t 0 ]; then
+    # PC pubkey prompt: only ask when authorized_keys is empty AND we have a
+    # TTY. Once at least one key is in there, we trust the user manages this
+    # file themselves (they may have multiple PCs, work laptops, etc.) and
+    # never bug them again. We deliberately do NOT bundle any key in the repo
+    # — a public installer that grants the maintainer ssh into every forker's
+    # phone would be a backdoor.
+    keys_present=no
+    if [ -s "$SSH_DIR/authorized_keys" ] && grep -q '^ssh-' "$SSH_DIR/authorized_keys" 2>/dev/null; then
+        keys_present=yes
+    fi
+    if [ "$keys_present" = no ] && [ -t 0 ]; then
         printf '\n  Paste your PC pubkey (from ~/.ssh/id_ed25519.pub on the PC).\n'
         printf '  Leave empty to skip — append later to ~/.ssh/authorized_keys.\n'
         printf '  PC pubkey > '
         read -r pc_pubkey
         if [ -n "$pc_pubkey" ]; then
-            if grep -qxF "$pc_pubkey" "$SSH_DIR/authorized_keys" 2>/dev/null; then
-                ok "PC key already in authorized_keys"
-            else
-                printf '%s\n' "$pc_pubkey" >> "$SSH_DIR/authorized_keys"
-                ok "PC key added to authorized_keys"
-            fi
+            printf '%s\n' "$pc_pubkey" >> "$SSH_DIR/authorized_keys"
+            ok "PC key added to authorized_keys"
         else
             note "no PC key added — append it later or run \`passwd\` for password auth"
         fi
-    else
-        note "no TTY — skipping authorized_keys prompt. Append your PC pubkey to ~/.ssh/authorized_keys manually."
+    elif [ "$keys_present" = yes ]; then
+        # Count keys without leaking their content.
+        _nkeys=$(grep -c '^ssh-' "$SSH_DIR/authorized_keys" 2>/dev/null || printf 0)
+        ok "$_nkeys key(s) already in ~/.ssh/authorized_keys"
     fi
 
     # Autostart sshd whenever Termux opens. Lives in bashrc.local (gitignored)
@@ -690,34 +709,43 @@ if [ "$install_sshd" = yes ]; then
 # pgrep guard makes this a no-op if sshd is already running.
 pgrep -x sshd >/dev/null 2>&1 || sshd 2>/dev/null
 EOF
+        ok "sshd autostart added to ~/.bashrc.local"
     fi
     pgrep -x sshd >/dev/null 2>&1 || sshd 2>/dev/null
 
-    # Discover the local Wi-Fi IP so we can print the exact ssh command.
-    # `ip route get` works without root on Termux when wifi is up.
+    # Print connection info every run — useful reminder even on idempotent
+    # re-runs. `ip route get` works without root on Termux when wifi is up.
     local_ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
     termux_user=$(whoami)
     printf '\n  %ssshd running on port 8022.%s\n' "$_green" "$_reset"
     if [ -n "$local_ip" ]; then
         printf '  Same Wi-Fi from your PC:  %sssh -p 8022 %s@%s%s\n' "$_dim" "$termux_user" "$local_ip" "$_reset"
     else
-        printf '  Wi-Fi IP not detected. Run %sifconfig wlan0%s on the phone to find it.\n' "$_dim" "$_reset"
+        printf '  Wi-Fi IP not detected. Check Android Settings → Wi-Fi → connected network.\n'
     fi
 fi
 
-if [ "$install_tailscale" = yes ]; then
-    if ! dpkg -s tailscale >/dev/null 2>&1; then
-        pkg install -y tailscale >/dev/null 2>&1 \
-            && ok "tailscale CLI installed" \
-            || fail "tailscale install failed (Termux community repo may need refresh)"
+# --- Tailscale (install + first-run instructions only if newly installed) ---
+if [ "$setup_tailscale" = yes ] && [ "$tailscale_installed" = no ]; then
+    if pkg install -y tailscale >/dev/null 2>&1; then
+        ok "tailscale CLI installed"
+        tailscale_installed=yes
     else
-        ok "tailscale already installed"
+        note "tailscale install failed (Termux community repo may need refresh)"
     fi
-    printf '\n  Tailscale CLI needs a one-time setup. In two separate Termux tabs run:\n'
-    printf '    %sTab 1: tailscaled%s   (keep this tab open — it is the daemon)\n' "$_dim" "$_reset"
-    printf '    %sTab 2: tailscale up%s (open the URL it prints, log in to your tailnet)\n' "$_dim" "$_reset"
-    printf '  Then from your PC on any network:  %sssh -p 8022 %s@<phone-tailscale-ip>%s\n' "$_dim" "$(whoami)" "$_reset"
-    note "Easier alternative: install the official Tailscale Android app — same 100.x.x.x IP, no CLI dance."
+fi
+if [ "$setup_tailscale" = yes ] && [ "$tailscale_installed" = yes ]; then
+    # First-time wiring info — only when tailscale isn't yet authenticated.
+    # `tailscale status` exits non-zero before login; we use that as the gate.
+    if ! tailscale status >/dev/null 2>&1; then
+        printf '\n  Tailscale CLI needs a one-time setup. In two separate Termux tabs run:\n'
+        printf '    %sTab 1: tailscaled%s   (keep this tab open — it is the daemon)\n' "$_dim" "$_reset"
+        printf '    %sTab 2: tailscale up%s (open the URL it prints, log in to your tailnet)\n' "$_dim" "$_reset"
+        printf '  Then from your PC on any network:  %sssh -p 8022 %s@<phone-tailscale-ip>%s\n' "$_dim" "$(whoami)" "$_reset"
+        note "Easier alternative: install the official Tailscale Android app — same 100.x.x.x IP, no CLI dance."
+    else
+        ok "tailscale authenticated and running"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
