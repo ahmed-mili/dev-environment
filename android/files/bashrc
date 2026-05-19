@@ -9,6 +9,20 @@ case $- in
       *) return ;;
 esac
 
+# ---- ble.sh — autosuggestions + syntax highlighting (bash PSReadLine) ----
+# Source with --attach=none here, then ble-attach at the very end of this file
+# so starship/fzf/etc. configure cleanly first. ble.sh is optional — if the
+# file doesn't exist (install step in setup.sh failed), the rest of the
+# bashrc still works.
+if [ -f "$HOME/.local/share/blesh/ble.sh" ]; then
+    source "$HOME/.local/share/blesh/ble.sh" --attach=none
+    # Catppuccin Mocha overlay-1 for the ghost autosuggest, matches fzf hints.
+    ble-face -s auto_complete 'fg=#7f849c' 2>/dev/null
+    ble-face -s syntax_default 'fg=#cdd6f4' 2>/dev/null
+    ble-face -s syntax_command 'fg=#89b4fa' 2>/dev/null
+    ble-face -s syntax_error 'fg=#f38ba8,bold' 2>/dev/null
+fi
+
 # ---- UTF-8 console — accents in paths + Nerd Font glyphs ----
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
@@ -129,3 +143,6 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 
 # ---- Local overrides — keep machine-specific tweaks out of git ----
 [ -f "$HOME/.bashrc.local" ] && source "$HOME/.bashrc.local"
+
+# ---- ble.sh attach — MUST be last so all other line-editor configs are set first ----
+[[ ${BLE_VERSION-} ]] && ble-attach

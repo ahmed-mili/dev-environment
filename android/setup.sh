@@ -181,6 +181,8 @@ PKGS=(
     tmux
     termux-api
     coreutils gawk grep sed
+    make
+    gh
 )
 to_install=()
 for p in "${PKGS[@]}"; do
@@ -249,6 +251,31 @@ ok "$(short_path "$STARSHIP_PATH")"
 ok "$(short_path "$FASTFETCH_PATH")"
 
 # ---------------------------------------------------------------------------
+# 5b) ble.sh — bash autosuggestions + syntax highlighting (PSReadLine equivalent)
+# ---------------------------------------------------------------------------
+# Not in the Termux apt repo, so we install upstream via `make install` into
+# ~/.local. ble.sh is 100% bash — make just copies files, no compilation.
+# bashrc sources $HOME/.local/share/blesh/ble.sh conditionally; if this step
+# fails the shell still works, just without autosuggestions.
+step "ble.sh (autosuggestions + syntax highlighting)"
+BLESH="$HOME/.local/share/blesh/ble.sh"
+if [ -f "$BLESH" ]; then
+    ok "ble.sh already installed at $(short_path "$BLESH")"
+else
+    note "cloning + building ble.sh from upstream (one-time, ~15s)"
+    _tmp=$(mktemp -d)
+    if git clone --recursive --depth 1 --shallow-submodules \
+            https://github.com/akinomyoga/ble.sh.git "$_tmp/ble.sh" >/dev/null 2>&1 \
+        && make -C "$_tmp/ble.sh" install PREFIX="$HOME/.local" >/dev/null 2>&1 \
+        && [ -f "$BLESH" ]; then
+        ok "ble.sh installed at $(short_path "$BLESH")"
+    else
+        note "ble.sh install failed — shell will work without autosuggestions"
+    fi
+    rm -rf "$_tmp"
+fi
+
+# ---------------------------------------------------------------------------
 # 6) SSH key for GitHub
 # ---------------------------------------------------------------------------
 step "SSH key for GitHub"
@@ -290,77 +317,93 @@ EOF
     chmod 600 "$SSH_CONFIG"
 fi
 
-PUBKEY=$(cat "$KEY.pub")
-
-# UX shortcuts when the Termux:API Android app is installed (not just the
-# `termux-api` pkg): drop the pubkey straight into the Android clipboard
-# and open the GitHub form in a browser tab. Both calls are wrapped in
-# `timeout` because without the companion app the helpers hang forever
-# (they expect an answering daemon that never appears). 3s is enough for
-# the real daemon to respond; longer means the app is missing.
-clipboard_done=no
-api_app_missing=no
-if command -v termux-clipboard-set >/dev/null 2>&1; then
-    if printf '%s' "$PUBKEY" | timeout 3 termux-clipboard-set 2>/dev/null; then
-        clipboard_done=yes
-    else
-        api_app_missing=yes
-    fi
-fi
-
-printf '\n'
-printf '  %sPublic key — add this at https://github.com/settings/keys (New SSH key)%s\n' "$_yellow" "$_reset"
-# Print without dim so the terminal lets you long-press-select the line
-# cleanly even when the clipboard helper above is unavailable.
-printf '  %s\n\n' "$PUBKEY"
-if [ "$clipboard_done" = yes ]; then
-    ok "key copied to Android clipboard — paste it directly in the GitHub form"
-fi
-if [ "$clipboard_done" = no ] && command -v termux-open-url >/dev/null 2>&1; then
-    # Only try open-url when clipboard worked or wasn't present — if clipboard
-    # already timed out the API app is missing, no point hanging again.
-    timeout 3 termux-open-url "https://github.com/settings/ssh/new" >/dev/null 2>&1 \
-        && ok "opened github.com/settings/ssh/new in your browser"
-elif [ "$clipboard_done" = yes ]; then
-    timeout 3 termux-open-url "https://github.com/settings/ssh/new" >/dev/null 2>&1 \
-        && ok "opened github.com/settings/ssh/new in your browser"
-fi
-if [ "$api_app_missing" = yes ]; then
-    note "Termux:API CLI is installed but the Android companion app isn't —"
-    note "  long-press the key above to select+copy it manually, then open"
-    note "  https://github.com/settings/ssh/new in any browser."
-    note "  (Install Termux:API from F-Droid for one-tap clipboard next time.)"
-fi
-
-# Don't block forever in non-interactive contexts (curl|bash from another
-# script); only prompt when stdin is a TTY.
-if [ -t 0 ]; then
-    printf '\n  Once the key is saved on GitHub, come back to Termux and press ENTER... '
-    read -r _
-fi
-
-# Verify connectivity. ssh -T github.com always exits 1 even on success
+# Verify connectivity FIRST — if SSH already authenticates, the key is already
+# registered on GitHub (e.g. re-run on an already-set-up device, or key copied
+# from another machine). ssh -T github.com always exits 1 even on success
 # (GitHub never grants a shell), so we grep the welcome line instead.
-# Retry once if the user pressed ENTER too early — GitHub's edge takes a few
-# seconds to propagate a newly-added key, and people commonly forget to add
-# it at all the first time round.
-SSH_AUTH_OK=no
 check_ssh_github() {
     ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1 || true
 }
+SSH_AUTH_OK=no
 ssh_test=$(check_ssh_github)
 case "$ssh_test" in
     *"successfully authenticated"*)
         SSH_AUTH_OK=yes
-        ok "SSH auth OK ($(printf '%s' "$ssh_test" | awk -F'Hi ' '{print $2}' | awk -F'!' '{print $1}'))"
+        ok "SSH auth OK ($(printf '%s' "$ssh_test" | awk -F'Hi ' '{print $2}' | awk -F'!' '{print $1}')) — key already on GitHub"
         ;;
 esac
 
+# Not authed yet — use GitHub CLI (gh) device-code flow to register the
+# pubkey automatically. The user types an 8-char code into the browser
+# instead of copy-pasting an 80-char SSH key. gh handles auth, key upload,
+# and (bonus) leaves a usable token for `gh repo clone`, `gh pr create` etc.
+if [ "$SSH_AUTH_OK" = no ] && command -v gh >/dev/null 2>&1 && [ -t 0 ]; then
+    note "registering SSH key on GitHub via 'gh' CLI (easier than copy-pasting)"
+
+    # Step 1: ensure gh is authenticated to github.com.
+    if ! gh auth status -h github.com >/dev/null 2>&1; then
+        note "you'll see a short 8-character code — type it in the browser when prompted"
+        # --git-protocol ssh tells gh to clone via SSH (matches the key we just
+        # generated). --hostname pins it to github.com (vs ghe.io). --web opens
+        # the verification page automatically.
+        if gh auth login --hostname github.com --git-protocol ssh --web; then
+            ok "authenticated to github.com via gh CLI"
+        else
+            note "gh auth login failed or was cancelled — falling back to manual flow"
+        fi
+    else
+        ok "gh CLI already authenticated to github.com"
+    fi
+
+    # Step 2: add the SSH key via API (idempotent — checks current keys first).
+    if gh auth status -h github.com >/dev/null 2>&1; then
+        pubkey_content=$(awk '{print $2}' "$KEY.pub")
+        if gh ssh-key list 2>/dev/null | grep -qF "$pubkey_content"; then
+            ok "SSH key already registered on GitHub"
+        else
+            key_title="termux-$(whoami)-$(date +%Y-%m-%d)"
+            if gh ssh-key add "$KEY.pub" --title "$key_title" 2>/dev/null; then
+                ok "SSH key uploaded to GitHub (title: $key_title)"
+                # Edge propagation — give GitHub a moment before re-testing.
+                sleep 2
+                ssh_test=$(check_ssh_github)
+                case "$ssh_test" in
+                    *"successfully authenticated"*)
+                        SSH_AUTH_OK=yes
+                        ok "SSH auth OK ($(printf '%s' "$ssh_test" | awk -F'Hi ' '{print $2}' | awk -F'!' '{print $1}'))"
+                        ;;
+                esac
+            else
+                note "gh ssh-key add failed — token may lack 'admin:public_key' scope"
+                note "  re-run: gh auth refresh -h github.com -s admin:public_key"
+            fi
+        fi
+    fi
+fi
+
+# Manual fallback — only kicks in if (a) gh isn't available, (b) gh auth was
+# cancelled, or (c) gh upload failed AND ssh still isn't authenticated.
 if [ "$SSH_AUTH_OK" = no ] && [ -t 0 ]; then
-    note "SSH auth to github.com failed. Most common cause: pubkey not yet"
-    note "added to https://github.com/settings/keys (or added <10s ago — GitHub"
-    note "edge takes a moment to propagate)."
-    printf '\n  Re-check now? Add the key (printed above) then press ENTER, or type s to skip: '
+    PUBKEY=$(cat "$KEY.pub")
+    clipboard_done=no
+    if command -v termux-clipboard-set >/dev/null 2>&1; then
+        if printf '%s' "$PUBKEY" | timeout 3 termux-clipboard-set 2>/dev/null; then
+            clipboard_done=yes
+        fi
+    fi
+
+    printf '\n'
+    printf '  %sManual fallback — add this public key at https://github.com/settings/keys%s\n' "$_yellow" "$_reset"
+    printf '  %s\n\n' "$PUBKEY"
+    if [ "$clipboard_done" = yes ]; then
+        ok "key copied to Android clipboard — paste it directly in the GitHub form"
+    fi
+    if command -v termux-open-url >/dev/null 2>&1; then
+        timeout 3 termux-open-url "https://github.com/settings/ssh/new" >/dev/null 2>&1 \
+            && ok "opened github.com/settings/ssh/new in your browser"
+    fi
+
+    printf '\n  Once the key is saved on GitHub, press ENTER (or "s" to skip): '
     read -r _retry
     if [ "$_retry" != "s" ] && [ "$_retry" != "S" ]; then
         ssh_test=$(check_ssh_github)
@@ -370,8 +413,8 @@ if [ "$SSH_AUTH_OK" = no ] && [ -t 0 ]; then
                 ok "SSH auth OK on retry ($(printf '%s' "$ssh_test" | awk -F'Hi ' '{print $2}' | awk -F'!' '{print $1}'))"
                 ;;
             *)
-                note "SSH still failing. Output: $ssh_test"
-                note "git push/pull over SSH won't work until this is fixed."
+                note "SSH still failing — git push/pull over SSH won't work until fixed"
+                note "  re-run setup.sh later or do it manually: ~/.ssh/id_ed25519.pub"
                 ;;
         esac
     fi
