@@ -69,84 +69,76 @@ function Format-Bar([double]$pct, [string]$col, [int]$width = 14) {
 }
 
 function Get-EffortDisplay([string]$level) {
-    # Reproduit a l'identique le rendu du picker /effort de Claude Code (extrait du binaire) :
-    #   low    -> warning    = ansi:yellowBright, bold, statique
-    #   medium -> success    = ansi:greenBright,  bold, statique
-    #   high   -> permission = ansi:blueBright,   bold, statique
-    #   xhigh  -> halo magenta gaussien fige au milieu du label (figeage de
-    #             l'ancien shimmer anime, parite avec statusline-rs)
-    #   max    -> palette 7-stops Catppuccin etiree sur la largeur du label
-    #             (figeage de l'ancien rainbow anime, parite avec statusline-rs)
-    # CRUCIAL : le binaire emet `[1m` UNE SEULE FOIS au debut (via <Text bold> wrapper Ink)
-    # puis les changements de couleur per-char sans re-emettre `[1m`. Bold reste actif
-    # dans la state machine ANSI jusqu'au `[22m` final. `[0m` reset TOUT y compris le
-    # background -> on utilise `[22m[39m` qui n'ecrase pas le BG de la banniere s2_bg.
+    # Reproduit l'algorithme du picker /effort de Claude Code (extrait de claude.exe v2.0.32) :
+    #   low    -> "warning"    -> ansi:yellowBright = 93m  (statique)
+    #   medium -> "success"    -> ansi:greenBright  = 92m  (statique)
+    #   high   -> "permission" -> ansi:blueBright   = 94m  (statique)
+    #   xhigh  -> wSA "autoAccept-shimmer" : sweep position A = tick % (len+4).
+    #             char a la position A   -> RGB #d0b4ff bold (constante OSA cote JS).
+    #             voisins A-1 et A+1     -> ansi:magentaBright (95m) bold.
+    #             autres                  -> ansi:magentaBright non-bold.
+    #   max    -> jSA "rainbow-animated" : char Y -> Rz1[(Y+tick) % 7] tous bold.
+    #             Rz1 (theme dark-ansi via LC9) = ANSI 31, 91, 33, 32, 36, 34, 35
+    #             (red, redBright, yellow, green, cyan, blue, magenta).
+    #
+    # Cadence : le picker tourne a 10 Hz (Jz(100) cote JS). Ici Claude Code clamp
+    # refreshInterval >= 1 sur claude.exe non patche, donc le tick avance a 1 Hz :
+    # tick = floor(unix_seconds). L'animation est ~10x plus lente que le picker
+    # mais visible et algorithmiquement identique. Sur la machine de l'auteur,
+    # claude.exe est patche et statusline.exe (Rust, local-only) prend le relais
+    # a 10 Hz reel. Le .ps1 reste le fallback distribue au repo public.
+    #
+    # `[0m` reset TOUT y compris le background -> on utilise `[22m[39m` qui
+    # n'ecrase pas le BG de la banniere s2_bg.
     if (-not $level) { return '' }
-    $label = $level
+    $label    = $level
     $bold     = "$esc[1m"
     $boldOff  = "$esc[22m"
     $fgReset  = "$esc[39m"
-    $endStyle = "$boldOff$fgReset"   # equivalent strict de la sortie Ink (n'ecrase pas le BG)
+    $endStyle = "$boldOff$fgReset"
+
     switch ($level) {
         'low'    { return "$bold$esc[93m$label$endStyle" }
         'medium' { return "$bold$esc[92m$label$endStyle" }
         'high'   { return "$bold$esc[94m$label$endStyle" }
-        'xhigh'  {
-            # Halo gaussien centre, fige au milieu du label. Meme algo que
-            # statusline-rs : pos = (n-1)/2, sigma=0.9, lerp RGB entre base
-            # #F5C2E7 (magentaBright Catppuccin) et hi #d0b4ff (lumiere shimmer).
-            $chars = $label.ToCharArray()
-            $n = $chars.Length
-            if ($n -eq 0) { return '' }
-            $pos = ($n - 1) / 2.0
-            $sigma2 = 0.81   # (0.9)^2
-            $baseR = 245; $baseG = 194; $baseB = 231
-            $hiR = 208;   $hiG = 180;   $hiB = 255
-            $sb = [System.Text.StringBuilder]::new()
-            [void]$sb.Append($bold)
+    }
+
+    $chars = $label.ToCharArray()
+    $n = $chars.Length
+    if ($n -eq 0) { return '' }
+
+    # Tick base sur unix_seconds : monotone, independant des spawns du statusline.
+    $tick = [int64]([DateTime]::UtcNow - [DateTime]::UnixEpoch).TotalSeconds
+
+    $sb = [System.Text.StringBuilder]::new()
+    switch ($level) {
+        'xhigh' {
+            $period = $n + 4
+            $pos = [int]($tick % $period)
             for ($i = 0; $i -lt $n; $i++) {
-                $dist = [Math]::Abs($i - $pos)
-                $intensity = [Math]::Exp(-$dist * $dist / $sigma2)
-                $r = [int][Math]::Round($baseR + ($hiR - $baseR) * $intensity)
-                $g = [int][Math]::Round($baseG + ($hiG - $baseG) * $intensity)
-                $b = [int][Math]::Round($baseB + ($hiB - $baseB) * $intensity)
-                [void]$sb.Append((RGB $r $g $b))
+                $atGlimmer = ($i -eq $pos)
+                $neighbor  = (($pos -gt 0) -and ($i -eq $pos - 1)) -or ($i -eq $pos + 1)
+                if ($atGlimmer) {
+                    [void]$sb.Append("$esc[38;2;208;180;255m")   # OSA = #d0b4ff
+                    [void]$sb.Append($bold)
+                } elseif ($neighbor) {
+                    [void]$sb.Append("$esc[95m")                  # autoAccept (magentaBright)
+                    [void]$sb.Append($bold)
+                } else {
+                    [void]$sb.Append("$esc[95m")
+                    [void]$sb.Append($boldOff)
+                }
                 [void]$sb.Append($chars[$i])
             }
             [void]$sb.Append($endStyle)
             return $sb.ToString()
         }
-        'max'    {
-            # Stretch palette 7-stops Catppuccin sur la largeur du label. Pour
-            # "max" (3 chars) : palette[0]=red, palette[3]=green, palette[6]=magenta.
-            # RGB explicite (au lieu des codes ANSI shortcuts) pour matcher
-            # exactement le rendu Rust et eviter les variations cross-theme.
-            $palette = @(
-                @(243, 139, 168),   # red          #F38BA8
-                @(243, 139, 168),   # redBright    #F38BA8 (palette flat Catppuccin)
-                @(249, 226, 175),   # yellow       #F9E2AF
-                @(166, 227, 161),   # green        #A6E3A1
-                @(148, 226, 213),   # cyan         #94E2D5
-                @(137, 180, 250),   # blue         #89B4FA
-                @(245, 194, 231)    # magenta      #F5C2E7
-            )
-            $chars = $label.ToCharArray()
-            $n = $chars.Length
-            if ($n -eq 0) { return '' }
-            $denom = [Math]::Max($n - 1, 1)
-            $pmax = $palette.Count - 1
-            $sb = [System.Text.StringBuilder]::new()
+        'max' {
+            $rainbow = @("$esc[31m", "$esc[91m", "$esc[33m", "$esc[32m", "$esc[36m", "$esc[34m", "$esc[35m")
             [void]$sb.Append($bold)
             for ($i = 0; $i -lt $n; $i++) {
-                $target = $i / $denom * $pmax
-                $lo = [int][Math]::Floor($target)
-                $hi = [Math]::Min($lo + 1, $palette.Count - 1)
-                $t = $target - $lo
-                $a = $palette[$lo]; $b = $palette[$hi]
-                $r = [int][Math]::Round($a[0] + ($b[0] - $a[0]) * $t)
-                $g = [int][Math]::Round($a[1] + ($b[1] - $a[1]) * $t)
-                $bb = [int][Math]::Round($a[2] + ($b[2] - $a[2]) * $t)
-                [void]$sb.Append((RGB $r $g $bb))
+                $colorIdx = [int](($i + $tick) % 7)
+                [void]$sb.Append($rainbow[$colorIdx])
                 [void]$sb.Append($chars[$i])
             }
             [void]$sb.Append($endStyle)
@@ -557,48 +549,44 @@ if ($data -and $data.cost -and $null -ne $data.cost.total_cost_usd) {
 }
 
 if ($costStr) {
-    # CHEVRON 1 : path → cost banner (pointe path qui perfore le fond vert sombre)
+    # CHEVRON 1 : path → cost banner
     $line1 += "$pathFG$sCost_bg$ch"
     # Contenu bannière cost
     $line1 += "$sCost_fg $costStr "
-    # CHEVRON 2 : cost → model+ctx (pointe verte qui perfore le fond gris-bleu)
+    # CHEVRON 2 : cost → model+ctx
     $line1 += "$(RGB $sCostR $sCostG $sCostB)$s2_bg$ch"
 } else {
-    # Pas de donnée cost → on garde le rendu d'origine (path → model+ctx direct)
+    # Pas de donnée cost → path → model+ctx direct
     $line1 += "$pathFG$s2_bg$ch"
 }
 
-# --- BANNER 2 : modèle + ctx, sur fond s2_bg ---
+# --- BANNER 2 : modèle + effort + ctx, sur fond s2_bg uni ---
+# Le label de l'effort lui-même (xhigh/max) prend un bg gradient char-par-char
+# (halo gaussien pour xhigh, rainbow stretch pour max) avec fg sombre lisible.
+# Get-EffortDisplay restaure $s2_bg + $s2_fg à la fin pour que le reste de la
+# bannière garde son rendu normal.
 $line1 += "$s2_fg "
 if ($modelName) {
     $line1 += "$modelName  "
 }
 
-# Effort level (xhigh halo / max stretch palette) — Get-EffortDisplay finit par [22m[39m
-# (bold off + fg default) qui preserve le BG de la bannière. On restaure juste le fg.
 $effortStr = Get-EffortDisplay $effortLevel
 if ($effortStr) {
-    $line1 += "$effortStr$s2_fg  "
+    $line1 += "$effortStr  "
 }
 
-# Contexte affiche en permanence : sert de repere pour anticiper /clear.
-# Format "valeur unite" (convention SI : 5 GB, 2.4 kg, 243k tok) plutot que
-# "label valeur" qui melangeait semantique (ctx) et valeur (243k/1.0M).
-# Le suffixe "tok" est l'abreviation standard dans l'ecosysteme AI (OpenAI,
-# Anthropic). La valeur est en couleur dynamique (vert/jaune/rouge selon usage),
-# le label "tok" reste en couleur de base (subtil).
+# Compteur de tokens : couleur dynamique selon usage (vert/jaune/rouge).
 $ctxPctSafe = if ($null -ne $ctxPct) { [double]$ctxPct } else { 0 }
 $col = Get-UsageColor $ctxPctSafe
 if ($null -ne $ctxTokens -and $null -ne $ctxSize) {
     $tokStr = "$(Format-Tokens $ctxTokens)/$(Format-Tokens $ctxSize)"
     $line1 += "$col$tokStr$s2_fg tok"
 } else {
-    # Fallback : tokens absolus indisponibles, on garde l'ancien format
     $line1 += "ctx $col$([int]$ctxPctSafe)%$s2_fg"
 }
 $line1 += " "
 
-# --- CHEVRON 2 : sec2 → terminal default ---
+# CHEVRON 2 : bannière 2 → terminal default
 $line1 += "$reset$(RGB $s2R $s2G $s2B)$ch$reset"
 
 # Section account retirée du statusline → disponible via /account
