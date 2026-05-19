@@ -6,7 +6,7 @@
 *.log
 .DS_Store
 
-# Secrets — Ollama / SSH (NE JAMAIS COMMIT)
+# Secrets — SSH (NE JAMAIS COMMIT)
 id_ed25519
 id_ed25519.pub
 *.pem

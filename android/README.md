@@ -22,11 +22,11 @@ curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 
 pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh)
 ```
 
-Le script installe les paquets requis, déploie les configs Catppuccin, génère une clé SSH ed25519, installe Claude Code via npm. Trois prompts opt-in : Ollama (gros download, par défaut non), sshd, Tailscale. Tout le reste est non-interactif.
+Le script installe les paquets requis, déploie les configs Catppuccin, génère une clé SSH ed25519, installe Claude Code via npm. Deux prompts opt-in : sshd, Tailscale. Tout le reste est non-interactif.
 
 À la fin tu te retrouves avec un `~/dev/` vide et Claude Code dispo : il ne te reste qu'à cloner les repos que tu veux.
 
-> Le préambule `dpkg -r libngtcp2-crypto-ossl` est un no-op sur un Termux sain — il ne se déclenche que sur les builds où la lib HTTP/3 a une ABI mismatch avec OpenSSL et casse `curl` (et `pkg install` au passage). Process-substitution `bash <(...)` plutôt que `curl ... | bash` parce que les prompts sshd/Ollama et l'ajout de la clé SSH GitHub ont besoin d'un stdin TTY.
+> Le préambule `dpkg -r libngtcp2-crypto-ossl` est un no-op sur un Termux sain — il ne se déclenche que sur les builds où la lib HTTP/3 a une ABI mismatch avec OpenSSL et casse `curl` (et `pkg install` au passage). Process-substitution `bash <(...)` plutôt que `curl ... | bash` parce que les prompts sshd/Tailscale et l'ajout de la clé SSH GitHub ont besoin d'un stdin TTY.
 
 ## Personnaliser après install
 
@@ -59,15 +59,6 @@ tmain                          # tu retrouves Claude exactement où tu l'as lais
 ```
 
 Le wake-lock est acquis automatiquement par `~/.bashrc.local` (libère avec `termux-wake-unlock` ou supprime la ligne).
-
-## Ollama cloud (modèles `:cloud` routés via Claude Code)
-
-Si tu as installé Ollama au prompt :
-```bash
-ollama signin                                                                # 1× par appareil
-ollama launch claude --model glm-5.1:cloud -y -- --dangerously-skip-permissions
-ollama launch claude --model kimi-k2.5:cloud -y -- --dangerously-skip-permissions
-```
 
 ## Maximiser les perfs sur Xiaomi / MIUI
 
