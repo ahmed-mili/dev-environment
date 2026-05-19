@@ -83,7 +83,9 @@ else
     alias la='ls -lah --color=auto'
 fi
 command -v bat       >/dev/null 2>&1 && alias cat='bat --paging=never --style=plain'
-command -v rg        >/dev/null 2>&1 && alias grep='rg'
+# NOTE: do NOT alias grep → rg. Their flags diverge (rg -E = encoding,
+# grep -E = extended regex) and it silently breaks shell pipelines + muscle
+# memory. Call `rg` directly when you want ripgrep semantics.
 alias gs='git status'
 alias gd='git diff'
 alias gl='git log --oneline --graph --decorate -20'
