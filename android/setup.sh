@@ -673,31 +673,49 @@ if [ "$setup_sshd" = yes ]; then
     touch "$SSH_DIR/authorized_keys"
     chmod 600 "$SSH_DIR/authorized_keys"
 
-    # PC pubkey prompt: only ask when authorized_keys is empty AND we have a
-    # TTY. Once at least one key is in there, we trust the user manages this
-    # file themselves (they may have multiple PCs, work laptops, etc.) and
-    # never bug them again. We deliberately do NOT bundle any key in the repo
-    # — a public installer that grants the maintainer ssh into every forker's
-    # phone would be a backdoor.
+    # Optional: trust a PC's pubkey so SSH from that PC skips the password
+    # prompt. Two-step: (1) y/N gate with a one-line "why", (2) paste only
+    # if user opts in. Skipped entirely when authorized_keys already has a
+    # key — that's the "already set up" signal. Never bundle a key in the
+    # repo: a public installer that grants the maintainer ssh into every
+    # forker's phone would be a backdoor.
     keys_present=no
     if [ -s "$SSH_DIR/authorized_keys" ] && grep -q '^ssh-' "$SSH_DIR/authorized_keys" 2>/dev/null; then
         keys_present=yes
     fi
-    if [ "$keys_present" = no ] && [ -t 0 ]; then
-        printf '\n  Paste your PC pubkey (from ~/.ssh/id_ed25519.pub on the PC).\n'
-        printf '  Leave empty to skip — append later to ~/.ssh/authorized_keys.\n'
-        printf '  PC pubkey > '
-        read -r pc_pubkey
-        if [ -n "$pc_pubkey" ]; then
-            printf '%s\n' "$pc_pubkey" >> "$SSH_DIR/authorized_keys"
-            ok "PC key added to authorized_keys"
-        else
-            note "no PC key added — append it later or run \`passwd\` for password auth"
-        fi
-    elif [ "$keys_present" = yes ]; then
-        # Count keys without leaking their content.
+    if [ "$keys_present" = yes ]; then
         _nkeys=$(grep -c '^ssh-' "$SSH_DIR/authorized_keys" 2>/dev/null || printf 0)
-        ok "$_nkeys key(s) already in ~/.ssh/authorized_keys"
+        ok "$_nkeys PC key(s) already authorized — password-less SSH ready"
+    elif [ -t 0 ]; then
+        printf '\n  Trust your PC for SSH (no password)? [y/N]\n'
+        printf '    %sNeeds: ~/.ssh/id_ed25519.pub from your PC.%s\n' "$_dim" "$_reset"
+        printf '  > '
+        read -r _ans
+        case "$_ans" in
+            [yY]*)
+                printf '\n  Paste the pubkey line:\n  > '
+                read -r pc_pubkey
+                case "$pc_pubkey" in
+                    ssh-*)
+                        if grep -qxF "$pc_pubkey" "$SSH_DIR/authorized_keys" 2>/dev/null; then
+                            ok "key already in authorized_keys"
+                        else
+                            printf '%s\n' "$pc_pubkey" >> "$SSH_DIR/authorized_keys"
+                            ok "PC key added to authorized_keys"
+                        fi
+                        ;;
+                    "")
+                        note "no key pasted — keeping password auth"
+                        ;;
+                    *)
+                        note "doesn't look like an SSH pubkey (should start with 'ssh-')"
+                        ;;
+                esac
+                ;;
+            *)
+                ok "keeping password auth"
+                ;;
+        esac
     fi
 
     # Autostart sshd whenever Termux opens. Lives in bashrc.local (gitignored)
@@ -751,11 +769,20 @@ fi
 # ---------------------------------------------------------------------------
 # Done.
 # ---------------------------------------------------------------------------
-printf '\n  %sDone.%s\n' "$_green" "$_reset"
-printf '  Restart Termux (or run %ssource ~/.bashrc%s) for the look + prompt to take effect.\n\n' "$_dim" "$_reset"
+printf '\n  %sDone.%s\n\n' "$_green" "$_reset"
 printf '  %sRecommended workflow:%s\n' "$_yellow" "$_reset"
 printf '    %s1.%s  git clone git@github.com:YOUR/REPO.git %s/REPO\n' "$_dim" "$_reset" "$DEV_DIR"
 printf '    %s2.%s  tmain                       %s# attach the persistent tmux session%s\n' "$_dim" "$_reset" "$_dim" "$_reset"
 printf '    %s3.%s  cd %s/REPO && claude     %s# SessionStart auto-pulls%s\n' "$_dim" "$_reset" "$DEV_DIR" "$_dim" "$_reset"
 printf '    %s4.%s  Ctrl+B then D               %s# detach; close Termux; come back later with tmain%s\n\n' "$_dim" "$_reset" "$_dim" "$_reset"
 printf '  Docs: %shttps://github.com/ahmed-mili/dev-environment%s\n\n' "$_dim" "$_reset"
+
+# Auto-reload the shell so the user gets the new look + blesh + starship
+# immediately, no `source ~/.bashrc` to remember. exec replaces this script
+# process with a fresh interactive login bash — when the user types `exit`
+# they go back to whatever shell launched the bootstrap (or Termux closes).
+# Gated on stdin+stdout being a TTY: skip in CI, non-interactive pipes, etc.
+if [ -t 0 ] && [ -t 1 ]; then
+    printf '  %sLoading the new shell...%s\n\n' "$_dim" "$_reset"
+    exec bash -l
+fi
