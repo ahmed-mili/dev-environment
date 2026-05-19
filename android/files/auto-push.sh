@@ -1,5 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Auto-commit + push on Claude Code SessionEnd, scoped to repos under ~/dev.
+# Auto-commit + push on Claude Code SessionEnd, scoped to repos under
+# /storage/emulated/0/dev (Android shared storage — see setup.sh).
 # Commits any working-tree changes as "wip auto-sync (<host> <date>)" then pushes.
 #
 # Mirrors C:\Users\<user>\.claude\hooks\auto-push.ps1 from the Windows
@@ -10,10 +11,12 @@ set +e
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
 [ -z "$repo_root" ] && exit 0
 
-# Scope: only repos under $HOME/dev/
-home_dev="$HOME/dev"
+# Scope: only repos under /storage/emulated/0/dev/ — keep this in sync
+# with DEV_DIR in setup.sh. Hardcoded (not $HOME-relative) because the
+# dev tree lives on Android shared storage, not in Termux home.
+dev_dir="/storage/emulated/0/dev"
 case "$repo_root" in
-    "$home_dev"/*) ;;
+    "$dev_dir"/*) ;;
     *) exit 0 ;;
 esac
 

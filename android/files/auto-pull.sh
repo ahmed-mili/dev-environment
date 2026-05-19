@@ -1,5 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Auto-pull on Claude Code SessionStart, scoped to repos under ~/dev.
+# Auto-pull on Claude Code SessionStart, scoped to repos under
+# /storage/emulated/0/dev (Android shared storage — see setup.sh).
 # Fails loud on conflict (no auto-merge). Silent no-op otherwise.
 #
 # Mirrors C:\Users\<user>\.claude\hooks\auto-pull.ps1 from the Windows
@@ -11,10 +12,12 @@ set +e
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
 [ -z "$repo_root" ] && exit 0
 
-# Scope: only repos under $HOME/dev/
-home_dev="$HOME/dev"
+# Scope: only repos under /storage/emulated/0/dev/ — keep this in sync
+# with DEV_DIR in setup.sh. Hardcoded (not $HOME-relative) because the
+# dev tree lives on Android shared storage, not in Termux home.
+dev_dir="/storage/emulated/0/dev"
 case "$repo_root" in
-    "$home_dev"/*) ;;
+    "$dev_dir"/*) ;;
     *) exit 0 ;;
 esac
 
