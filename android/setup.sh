@@ -43,6 +43,13 @@ set -u
 # We never want a single failing optional step to abort the whole install,
 # so individual blocks below decide whether to fail-fast on their own.
 
+# Termux ships with a broken `C` locale (termux-packages#23010). ble.sh and
+# other tools warn or refuse to load when LC_CTYPE=C. Setting C.UTF-8 here
+# at the top of the script means EVERY child process (make install of ble.sh,
+# npm scripts, git, etc.) inherits a sane locale.
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
 REPO_RAW="https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android"
 
 # Dev tree lives on Android shared storage so it shows up in file managers
