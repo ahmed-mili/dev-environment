@@ -29,6 +29,29 @@ if [ -f "$HOME/.local/share/blesh/ble.sh" ]; then
     ble-face -s syntax_default 'fg=#cdd6f4' 2>/dev/null
     ble-face -s syntax_command 'fg=#89b4fa' 2>/dev/null
     ble-face -s syntax_error 'fg=#f38ba8,bold' 2>/dev/null
+
+    # Autosuggest tuning: faster ghost text + don't beep on no-match
+    bleopt complete_auto_complete=1            2>/dev/null
+    bleopt complete_auto_complete_delay=50     2>/dev/null
+    bleopt complete_menu_style=desc            2>/dev/null
+    bleopt edit_abell=                         2>/dev/null
+
+    # PSReadLine-like keybindings (mimic the Windows experience):
+    #   Tab → accept the inline ghost autosuggest if one is showing;
+    #         otherwise fall back to normal tab-completion
+    #   F2  → drop down a menu of all matching completions (ListView)
+    # The function uses a graceful fallback: if the internal probe
+    # _ble_complete_auto_complete is missing (different ble.sh version),
+    # Tab just behaves as normal complete — never broken.
+    function ble/widget/psread-tab {
+        if [[ ${_ble_complete_auto_complete-} ]]; then
+            ble/widget/auto_complete-insert
+        else
+            ble/widget/complete
+        fi
+    }
+    ble-bind -f 'TAB' psread-tab           2>/dev/null
+    ble-bind -f 'f2'  menu-complete        2>/dev/null
 fi
 
 # ---- Editor / pager defaults aligned with the Windows side ----
