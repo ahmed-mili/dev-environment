@@ -10,12 +10,16 @@
 #   - generates an ed25519 SSH key and prints the public part for GitHub
 #   - installs Claude Code via npm (global, ~/.npm-global)
 #   - prompts (optional) for Ollama, sshd, Tailscale
-#   - drops auto-pull / auto-push hooks scoped to ~/dev and patches
-#     ~/.claude/settings.json so SessionStart pulls and SessionEnd pushes
+#   - drops auto-pull / auto-push hooks scoped to /storage/emulated/0/dev
+#     and patches ~/.claude/settings.json so SessionStart pulls and
+#     SessionEnd pushes
 #
 # The installer is personal-repo agnostic: it sets up the Termux + Claude
-# Code environment, then leaves ~/dev/ empty for you to `git clone` your
-# own repos into.
+# Code environment, then leaves /storage/emulated/0/dev/ empty for you to
+# `git clone` your own repos into. That path puts code on the phone's
+# shared storage so file managers / Android editors (Acode, etc.) can see
+# it — see "FUSE caveats" below before cloning anything that uses
+# symlinks, executable bits, or node_modules.
 #
 # Idempotent: re-running picks up where the previous run stopped, skips
 # anything already in place, and never overwrites without a timestamped
@@ -25,7 +29,7 @@
 #   curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 2>/dev/null; \
 #   pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh)
 # or, after cloning the repo:
-#   bash ~/dev/dev-environment/android/setup.sh
+#   bash /storage/emulated/0/dev/dev-environment/android/setup.sh
 #
 # The `dpkg -r` preamble is a no-op on a healthy Termux. It only fires on
 # the broken-libngtcp2 builds where curl is dynamically dead, which also
@@ -41,7 +45,13 @@ set -u
 
 REPO_RAW="https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android"
 
-DEV_DIR="$HOME/dev"
+# Dev tree lives on Android shared storage so it shows up in file managers
+# and Android editors. Created only after `termux-setup-storage` (step 1)
+# has granted the FUSE mount. FUSE caveat: no symlinks inside, no exec
+# bits, no proper Unix permissions — set `git config core.fileMode false`
+# per repo if `git status` floods with mode changes, and keep node_modules
+# / Python venvs out of this tree (they break on FUSE).
+DEV_DIR="/storage/emulated/0/dev"
 CLAUDE_DIR="$HOME/.claude"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 TERMUX_DIR="$HOME/.termux"
@@ -395,9 +405,23 @@ else
     note "git identity not fully set — \`git config --global user.{name,email}\` later"
 fi
 
-# Ensure $DEV_DIR exists so hooks targeting ~/dev have something to walk.
+# Ensure $DEV_DIR exists on shared storage so hooks have something to walk.
 # Cloning specific repos into it is the user's job — this installer is
 # personal-repo agnostic.
+#
+# If a previous version of this script created $HOME/dev (real dir or
+# symlink), clean it up so there is exactly one dev tree, at $DEV_DIR.
+# Non-empty $HOME/dev is left alone with a warning — the user has to
+# decide what to migrate (FUSE can't store everything a Termux home can).
+if [ -L "$HOME/dev" ]; then
+    rm -f "$HOME/dev"
+elif [ -d "$HOME/dev" ]; then
+    if [ -z "$(ls -A "$HOME/dev" 2>/dev/null)" ]; then
+        rmdir "$HOME/dev"
+    else
+        note "leftover $HOME/dev is not empty — move its contents to $DEV_DIR manually, then \`rm -rf $HOME/dev\`"
+    fi
+fi
 mkdir -p "$DEV_DIR"
 
 # ---------------------------------------------------------------------------
@@ -637,7 +661,7 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# 10) Auto-pull / auto-push hooks scoped to ~/dev
+# 10) Auto-pull / auto-push hooks scoped to /storage/emulated/0/dev
 # ---------------------------------------------------------------------------
 step "Claude Code hooks"
 mkdir -p "$HOOKS_DIR"
@@ -828,9 +852,9 @@ fi
 printf '\n  %sDone.%s\n' "$_green" "$_reset"
 printf '  Restart Termux (or run %ssource ~/.bashrc%s) for the look + prompt to take effect.\n\n' "$_dim" "$_reset"
 printf '  %sRecommended workflow:%s\n' "$_yellow" "$_reset"
-printf '    %s1.%s  git clone git@github.com:YOUR/REPO.git ~/dev/REPO\n' "$_dim" "$_reset"
+printf '    %s1.%s  git clone git@github.com:YOUR/REPO.git %s/REPO\n' "$_dim" "$_reset" "$DEV_DIR"
 printf '    %s2.%s  tmain                       %s# attach the persistent tmux session%s\n' "$_dim" "$_reset" "$_dim" "$_reset"
-printf '    %s3.%s  cd ~/dev/REPO && claude     %s# SessionStart auto-pulls%s\n' "$_dim" "$_reset" "$_dim" "$_reset"
+printf '    %s3.%s  cd %s/REPO && claude     %s# SessionStart auto-pulls%s\n' "$_dim" "$_reset" "$DEV_DIR" "$_dim" "$_reset"
 printf '    %s4.%s  Ctrl+B then D               %s# detach; close Termux; come back later with tmain%s\n\n' "$_dim" "$_reset" "$_dim" "$_reset"
 printf '  Ollama cloud (if you installed Ollama and signed in):\n'
 printf '    %sollama launch claude --model glm-5.1:cloud -y -- --dangerously-skip-permissions%s\n\n' "$_dim" "$_reset"
