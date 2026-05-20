@@ -1,33 +1,33 @@
 # claude-code/
 
-Config Claude Code partagée entre Windows et Android. Source of truth unique.
+Claude Code config shared between Windows and Android. Single source of truth.
 
-## Contenu
+## Contents
 
-| Fichier | Rôle |
+| File | Role |
 | --- | --- |
-| `statusline.ps1` | Status line PowerShell : path coloré (selon mode permission), branche git, usage 5h/7j live, plan + email. Fallback portable, sans prérequis. |
-| `statusline-rs/` | Source Rust de la statusline animée 9 Hz (xhigh halo magenta + max rainbow stretch). **Prérequis : SAC désactivé + claude.exe patché** — cf. section dédiée. |
-| `settings.json` | Config Claude Code (modèle, plugins, statusline `.exe` à 0.112s, SessionStart hook patch-claude-exe) |
-| `hooks/patch-claude-exe.ps1` | Patche `claude.exe` au démarrage de session pour lever le clamp `refreshInterval >= 1` + débounce 300ms + keep-alive idle. **Flagged `FileFix.BBA!MTB` par Defender** — exception requise. |
-| `hooks/` (autres) | `auto-pull.ps1`, `auto-push.ps1`, `resolve-sync-conflicts.ps1` — réservés pour usage manuel/futur, plus appelés en SessionStart/End |
-| `skills/` | 9 skills custom : copy-edit, css-layout-check, edit-block, lucide-icons, release, root-cause-fix, smart-edit, sticky-column-bleed-fix, webapp-deploy |
-| `deploy.ps1` | Sync bidirectionnel manuel entre ce dossier et `~/.claude/` |
+| `statusline.ps1` | PowerShell status line: colored path (depends on permission mode), git branch, live 5h/7d usage, plan + email. Portable fallback, no prerequisites. |
+| `statusline-rs/` | Rust source for the 9 Hz animated statusline (xhigh magenta halo + max rainbow stretch). **Requires SAC disabled + patched claude.exe** — see dedicated section. |
+| `settings.json` | Claude Code config (model, plugins, `.exe` statusline at 0.112s, SessionStart hook patch-claude-exe) |
+| `hooks/patch-claude-exe.ps1` | Patches `claude.exe` on session start to lift the `refreshInterval >= 1` clamp + the 300ms debounce + idle keep-alive. **Flagged `FileFix.BBA!MTB` by Defender** — exception required. |
+| `hooks/` (others) | `auto-pull.ps1`, `auto-push.ps1`, `resolve-sync-conflicts.ps1` — reserved for manual/future use, no longer called from SessionStart/End |
+| `skills/` | 9 custom skills: copy-edit, css-layout-check, edit-block, lucide-icons, release, root-cause-fix, smart-edit, sticky-column-bleed-fix, webapp-deploy |
+| `deploy.ps1` | Manual bidirectional sync between this folder and `~/.claude/` |
 
-## Bootstrap d'une nouvelle machine
+## Bootstrap a new machine
 
 ```powershell
-# Clone le repo, puis pull les configs vers ~/.claude/
+# Clone the repo, then pull configs to ~/.claude/
 git clone https://github.com/ahmed-mili/dev-environment.git C:\dev\dev-environment
 C:\dev\dev-environment\claude-code\deploy.ps1 -Pull
-# Relance Claude Code
+# Restart Claude Code
 ```
 
-## Workflow quotidien
+## Daily workflow
 
-Le sync entre `~/.claude/` et ce repo est **manuel** (plus de hooks auto sur SessionStart/End). Justification : éviter les conflits Syncthing/git silencieux et garder un contrôle explicite sur ce qui est commit.
+Sync between `~/.claude/` and this repo is **manual** (no more auto hooks on SessionStart/End). Rationale: avoid silent Syncthing/git conflicts and keep explicit control over what gets committed.
 
-### Tu as ajouté/modifié une skill ou un setting dans `~/.claude/` ?
+### You added or modified a skill or setting in `~/.claude/`?
 
 ```powershell
 cd C:\dev\dev-environment
@@ -35,92 +35,92 @@ cd C:\dev\dev-environment
 git add -A ; git commit -m "<message>" ; git push
 ```
 
-> ⚠️ `deploy.ps1 -Push` ne copie que les **9 skills custom whitelist** vers le repo. Les skills officielles d'Anthropic ou téléchargées via marketplace (`brand-guidelines`, `claude-api`, `docx`, etc.) ne sont jamais commit (le repo reste lean).
+> ⚠️ `deploy.ps1 -Push` only copies the **9 whitelisted custom skills** to the repo. Anthropic's official skills or marketplace downloads (`brand-guidelines`, `claude-api`, `docx`, etc.) are never committed (keeps the repo lean).
 
-### Pour ajouter une nouvelle skill custom à la whitelist
+### To add a new custom skill to the whitelist
 
-Édite `deploy.ps1` ligne `$CustomSkills = @(...)` et ajoute le nom du dossier de ta skill.
+Edit `deploy.ps1` line `$CustomSkills = @(...)` and add your skill's folder name.
 
-## Statusline — détails techniques
+## Statusline — technical details
 
-Endpoint privé Claude Code pour l'usage live :
+Private Claude Code endpoint for live usage:
 ```
 GET https://api.anthropic.com/api/oauth/usage
-Authorization: Bearer <accessToken depuis ~/.claude/.credentials.json>
+Authorization: Bearer <accessToken from ~/.claude/.credentials.json>
 anthropic-beta: oauth-2025-04-20
 ```
 
-| Mode permission | Couleur path (RGB) |
+| Permission mode | Path color (RGB) |
 | --- | --- |
-| `bypassPermissions` | 255,121,198 (rose vif) |
-| `plan` | 139,233,253 (cyan clair) |
-| `acceptEdits` | 80,250,123 (vert) |
-| `dontAsk` | 189,147,249 (violet) |
+| `bypassPermissions` | 255,121,198 (hot pink) |
+| `plan` | 139,233,253 (light cyan) |
+| `acceptEdits` | 80,250,123 (green) |
+| `dontAsk` | 189,147,249 (purple) |
 | `auto` | 255,184,108 (orange) |
 
-| % usage | Couleur barre/texte |
+| Usage % | Bar/text color |
 | --- | --- |
-| `< 50%` | vert (80,250,123) |
-| `50–80%` | jaune (241,250,140) |
-| `> 80%` | rouge (255,85,85) |
+| `< 50%` | green (80,250,123) |
+| `50–80%` | yellow (241,250,140) |
+| `> 80%` | red (255,85,85) |
 
-Caches : usage 60s (`~/.claude/usage-cache.json`), auth 1h (`~/.claude/auth-status-cache.json`).
+Caches: usage 60s (`~/.claude/usage-cache.json`), auth 1h (`~/.claude/auth-status-cache.json`).
 
-## Effort level — deux modes de rendu
+## Effort level — two rendering modes
 
-Les 5 niveaux d'effort (`low`, `medium`, `high`, `xhigh`, `max`) ont deux rendus possibles :
+The 5 effort levels (`low`, `medium`, `high`, `xhigh`, `max`) have two possible renderings:
 
-| Niveau | Rendu `.ps1` (fallback) | Rendu `.exe` (Rust, 9 Hz) |
+| Level | `.ps1` rendering (fallback) | `.exe` rendering (Rust, 9 Hz) |
 | --- | --- | --- |
 | `low` | yellowBright bold | yellowBright bold |
 | `medium` | greenBright bold | greenBright bold |
 | `high` | blueBright bold | blueBright bold |
-| `xhigh` | halo magenta gaussien centré (base `#F5C2E7` ↔ highlight `#d0b4ff`, sigma=0.9) — **statique** | halo magenta qui sweep gauche→droite à 8.93 Hz |
-| `max` | palette 7-stops Catppuccin étirée sur la largeur du label (`#F38BA8` → `#A6E3A1` → `#F5C2E7`) — **statique** | palette rainbow qui cycle char-par-char à 8.93 Hz |
+| `xhigh` | centered Gaussian magenta halo (base `#F5C2E7` ↔ highlight `#d0b4ff`, sigma=0.9) — **static** | magenta halo sweeping left→right at 8.93 Hz |
+| `max` | 7-stop Catppuccin palette stretched across the label width (`#F38BA8` → `#A6E3A1` → `#F5C2E7`) — **static** | rainbow palette cycling char-by-char at 8.93 Hz |
 
-Le picker `/effort` interne de Claude Code anime `xhigh` et `max` à 10 Hz (Ink/React dans le binaire). La statusline `.ps1` reproduit les **couleurs** identiques mais en statique (pas de tick temporel). La version Rust + `claude.exe` patché reproduit l'animation **identique au picker** (M=112 ms, soit 8.93 Hz). Cf. section "Version animée 9 Hz (avancé)" ci-dessous pour les prérequis.
+Claude Code's internal `/effort` picker animates `xhigh` and `max` at 10 Hz (Ink/React inside the binary). The `.ps1` statusline reproduces the **exact same colors** but statically (no time tick). The Rust version + patched `claude.exe` reproduces the animation **identically to the picker** (M=112 ms, i.e. 8.93 Hz). See the "9 Hz animated version (advanced)" section below for prerequisites.
 
-## Version animée 9 Hz (avancé)
+## 9 Hz animated version (advanced)
 
-Le rendu `.ps1` par défaut marche sans prérequis et a tous les rendus statiques visuellement corrects. **N'active la version 9 Hz que si tu veux le mouvement.**
+The default `.ps1` rendering works with no prerequisites and all static renderings are visually correct. **Only enable the 9 Hz version if you want the motion.**
 
-### Prérequis (tous obligatoires)
+### Prerequisites (all required)
 
-1. **Smart App Control = Off** — sinon Windows 11 bloque l'exécution de tout binaire Rust unsigned (erreur OS 4551 sur cargo build aussi). Settings → Privacy & security → Smart App Control. ⚠️ **Désactivation définitive** : pour réactiver, il faut reset Windows. Ne le fais que si tu acceptes ce trade-off.
-2. **Exception Defender pour `~/.claude/hooks/patch-claude-exe.ps1`** — ce script est flagged `Trojan:Win32/FileFix.BBA!MTB` (heuristique standard pour les patcheurs de binaires). Sans exception, Defender met le fichier en quarantaine au clone et le hook ne fire jamais. Ajoute l'exception :
+1. **Smart App Control = Off** — otherwise Windows 11 blocks execution of any unsigned Rust binary (OS error 4551 on `cargo build` too). Settings → Privacy & security → Smart App Control. ⚠️ **Disabling SAC is permanent**: re-enabling requires a full Windows reset. Only do this if you accept the trade-off.
+2. **Defender exception for `~/.claude/hooks/patch-claude-exe.ps1`** — this script is flagged `Trojan:Win32/FileFix.BBA!MTB` (standard heuristic for binary patchers). Without an exception, Defender quarantines the file on clone and the hook never fires. Add the exception:
    ```powershell
-   # En PowerShell admin :
+   # From an elevated PowerShell:
    Add-MpPreference -ExclusionPath "$env:USERPROFILE\.claude\hooks\patch-claude-exe.ps1"
    ```
-3. **Rust toolchain** — pour compiler le binaire :
+3. **Rust toolchain** — to compile the binary:
    ```powershell
    winget install Rustlang.Rustup
    ```
 
-### Compilation
+### Build
 
 ```powershell
 cd C:\dev\dev-environment\claude-code\statusline-rs
 .\build.ps1
 ```
 
-`build.ps1` build en `--release` (LTO + strip), redirige `CARGO_TARGET_DIR` vers `%LOCALAPPDATA%\statusline-build\target` (path trusted hors de `C:\dev`, évite les blocs SAC sur les build-scripts cargo), puis copie le binaire vers `~/.claude/statusline.exe`.
+`build.ps1` builds in `--release` (LTO + strip), redirects `CARGO_TARGET_DIR` to `%LOCALAPPDATA%\statusline-build\target` (trusted zone outside `C:\dev`, avoids SAC blocks on cargo build scripts), then copies the binary to `~/.claude/statusline.exe`.
 
-### Comment marche le patch
+### How the patch works
 
-`patch-claude-exe.ps1` est un hook `SessionStart` qui scanne `claude.exe` à chaque démarrage de session et applique 4 patches in-place (in-place = même longueur, pas de décalage de bytes) :
+`patch-claude-exe.ps1` is a `SessionStart` hook that scans `claude.exe` on every session start and applies 4 in-place patches (in-place = same length, no byte shift):
 
-| Patch | Pattern remplacé | Effet |
+| Patch | Pattern replaced | Effect |
 | --- | --- | --- |
-| 1 | `Math.max(1,X)*1000` → `Math.max(0,X)*1000` | Lève le clamp `refreshInterval >= 1` sur la statusline |
-| 3 | `=H(()=>{F()},300)` → `=H(()=>{F()}, 50)` | Réduit le debounce 300 ms du composant statusline (sans ça, refresh < 300 ms reste bloqué) |
-| 4 | `!K\|\|q===null?gZH:` → `false?gZH:       ` | Force le path actif du hook `_9` même quand `useContext(YQ)` est null (sinon freeze ~30 s en idle) |
-| 5 | `K.setTimeout(Y,q)` → `Is8(Y,q)         ` (×2) | Bypass le setTimeout du RootStore Ink, utilise le setTimeout natif via `Is8` → tick continu en idle |
+| 1 | `Math.max(1,X)*1000` → `Math.max(0,X)*1000` | Lifts the `refreshInterval >= 1` clamp on the statusline |
+| 3 | `=H(()=>{F()},300)` → `=H(()=>{F()}, 50)` | Reduces the statusline component's 300 ms debounce (without this, refresh < 300 ms stays blocked) |
+| 4 | `!K\|\|q===null?gZH:` → `false?gZH:       ` | Forces the active path of the `_9` hook even when `useContext(YQ)` is null (otherwise ~30s freeze in idle) |
+| 5 | `K.setTimeout(Y,q)` → `Is8(Y,q)         ` (×2) | Bypasses the Ink RootStore's setTimeout, uses the native one via `Is8` → continuous tick in idle |
 
-Les patches sont idempotents (skip si déjà appliqués via marker `~/.claude/last-patched-claude-exe.txt` basé sur la mtime) et tolérants aux variables minifiées qui changent à chaque release Anthropic (recherche par regex avec contexte).
+Patches are idempotent (skipped if already applied via the `~/.claude/last-patched-claude-exe.txt` mtime marker) and tolerant of the minified variable names that change on every Anthropic release (regex search with context).
 
-Après une mise à jour de Claude Code, le hook re-patche automatiquement à la prochaine session et émet un `systemMessage` pour signaler que l'animation est réactivée.
+After a Claude Code update, the hook re-patches automatically on the next session and emits a `systemMessage` to signal that the animation has been re-enabled.
 
-## Crédit
+## Credit
 
-Endpoint `/usage` découvert par [Melvynx (codelynx.dev)](https://codelynx.dev/posts/claude-code-usage-limits-statusline) via Proxyman.
+The `/usage` endpoint was discovered by [Melvynx (codelynx.dev)](https://codelynx.dev/posts/claude-code-usage-limits-statusline) via Proxyman.
