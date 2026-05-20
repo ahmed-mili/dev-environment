@@ -14,13 +14,20 @@ dev-environment/
 ## Install
 
 ### Windows (one-liner)
+
+**Prérequis** :
+- **Smart App Control = Off** (Settings > Privacy & security > Smart App Control). ⚠️ Désactivation définitive : pour réactiver, reset Windows.
+- **PowerShell admin** : lance Windows Terminal en administrateur. Requis pour l'exception Defender sur `patch-claude-exe.ps1` (script flagged `Trojan:Win32/FileFix.BBA!MTB` — le bootstrap ajoute l'exception avant le `git clone` pour éviter la quarantaine silencieuse).
+
 ```powershell
 $b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.ps1 -OutFile $b; Unblock-File $b; & $b
 ```
 
 > Pattern `irm -OutFile + & file` (téléchargement vers disk puis exécution depuis le fichier) au lieu de `iex (irm ...)` (téléchargement + exécution in-memory). Le second est la signature classique de ClickFix (`Trojan:Win32/ClickFix.DAI!MTB`) — Defender flag aujourd'hui n'importe quel script qui combine `iex` avec `irm` sur un payload Github raw. Le premier est inoffensif (oh-my-posh, scoop, etc. l'utilisent), et permet à l'user d'inspecter le `.ps1` téléchargé avant exécution s'il le souhaite.
 
-Clones the repo to `C:\dev\dev-environment`, installs winget packages + PS7 profile + Terminal + Fastfetch, deploys Claude Code statusline/settings/hooks/skills. Optionally run `/plugin` inside Claude Code afterward to add `frontend-design`, `code-review`, `superpowers` from `claude-plugins-official`.
+Le bootstrap : (1) vérifie SAC + admin, (2) ajoute l'exception Defender, (3) clone le repo dans `C:\dev\dev-environment`, (4) installe les winget packages (PowerShell 7, Terminal, Fastfetch, Rust toolchain), (5) build le statusline Rust en `--release` (animation 9 Hz), (6) déploie la config Claude Code. `claude.exe` est ensuite patché automatiquement par le SessionStart hook à la prochaine session.
+
+Optionnel : lance `/plugin` dans Claude Code après pour ajouter `frontend-design`, `code-review`, `superpowers` du marketplace `claude-plugins-official`.
 
 ### Android (Termux, one-liner)
 ```bash

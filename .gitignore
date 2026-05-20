@@ -29,8 +29,3 @@ stats-cache.json
 
 # Archive locale (code mort gardé pour historique, pas dans le repo public)
 .archive/
-
-# Hook local-only : patche claude.exe pour lever le clamp refreshInterval.
-# Détecté FileFix.BBA!MTB par Defender → ne JAMAIS push sur le repo public.
-# Cf. commit a674338. Defense layer 2 (layer 1 = blacklist dans deploy.ps1).
-claude-code/hooks/patch-claude-exe.ps1
