@@ -1,19 +1,19 @@
 # android/
 
-Installer Termux générique : bash + Catppuccin Mocha, starship, fastfetch, Claude Code CLI, hooks auto-pull / auto-push sur `~/dev/`.
+Generic Termux installer: bash + Catppuccin Mocha, starship, fastfetch, Claude Code CLI, auto-pull / auto-push hooks on `~/dev/`.
 
-## Fichiers
+## Files
 
-| Fichier | Cible |
+| File | Target |
 | --- | --- |
-| `setup.sh` | Installer one-liner Termux |
+| `setup.sh` | One-liner Termux installer |
 | `files/bashrc` | `~/.bashrc` |
 | `files/starship.toml` | `~/.config/starship.toml` |
 | `files/fastfetch-config.jsonc` | `~/.config/fastfetch/config.jsonc` |
 | `files/termux.properties` | `~/.termux/termux.properties` |
 | `files/colors.properties` | `~/.termux/colors.properties` |
-| `files/auto-pull.sh` | Hook Claude Code SessionStart |
-| `files/auto-push.sh` | Hook Claude Code SessionEnd |
+| `files/auto-pull.sh` | Claude Code SessionStart hook |
+| `files/auto-push.sh` | Claude Code SessionEnd hook |
 
 ## Installation
 
@@ -22,61 +22,61 @@ curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 
 pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh)
 ```
 
-Le script installe les paquets requis, déploie les configs Catppuccin, génère une clé SSH ed25519, installe Claude Code via npm. Un seul prompt opt-in : sshd (pour SSH PC→phone). Tout le reste est non-interactif.
+The script installs the required packages, deploys the Catppuccin configs, generates an ed25519 SSH key, and installs Claude Code via npm. A single opt-in prompt: sshd (for SSH PC→phone). Everything else is non-interactive.
 
-À la fin tu te retrouves avec un `~/dev/` vide et Claude Code dispo : il ne te reste qu'à cloner les repos que tu veux.
+You end up with an empty `~/dev/` and Claude Code available — all that's left is cloning the repos you want.
 
-> Le préambule `dpkg -r libngtcp2-crypto-ossl` est un no-op sur un Termux sain — il ne se déclenche que sur les builds où la lib HTTP/3 a une ABI mismatch avec OpenSSL et casse `curl` (et `pkg install` au passage). Process-substitution `bash <(...)` plutôt que `curl ... | bash` parce que le prompt sshd et l'ajout de la clé SSH GitHub ont besoin d'un stdin TTY.
+> The `dpkg -r libngtcp2-crypto-ossl` preamble is a no-op on a healthy Termux — it only kicks in on builds where the HTTP/3 lib has an ABI mismatch with OpenSSL and breaks `curl` (and `pkg install` along with it). Process substitution `bash <(...)` rather than `curl ... | bash` because the sshd prompt and the GitHub SSH key prompt need a TTY stdin.
 
-## Personnaliser après install
+## Customize after install
 
 ```bash
-# Identité git (le script prompt aussi si manquante)
-git config --global user.name  "Ton Nom"
-git config --global user.email "ton@email"
+# Git identity (the script also prompts if missing)
+git config --global user.name  "Your Name"
+git config --global user.email "you@email"
 
-# Cloner tes propres repos
+# Clone your own repos
 mkdir -p ~/dev
 for r in repo1 repo2 repo3; do
-  git clone git@github.com:TON_USER/$r.git ~/dev/$r
+  git clone git@github.com:YOUR_USER/$r.git ~/dev/$r
 done
 
-# Si tu utilises sshd : ajouter ta pubkey PC
-echo "ssh-ed25519 AAAA... ton-pc-comment" >> ~/.ssh/authorized_keys
+# If you use sshd: add your PC pubkey
+echo "ssh-ed25519 AAAA... your-pc-comment" >> ~/.ssh/authorized_keys
 ```
 
-## Workflow recommandé pour Claude Code
+## Recommended workflow for Claude Code
 
 ```bash
-tmain                          # attache la session tmux "main" (la crée si absente)
-cd ~/dev/mon-repo
-claude                         # SessionStart hook auto-pull avant de te rendre la main
-# travaille...
-# Ctrl+B puis D                # detach — session continue en background
-# ferme Termux, change d'app, verrouille l'écran : la session survit
-# plus tard :
-tmain                          # tu retrouves Claude exactement où tu l'as laissé
+tmain                          # attach the "main" tmux session (create if absent)
+cd ~/dev/my-repo
+claude                         # SessionStart hook runs auto-pull before handing control back
+# work...
+# Ctrl+B then D                # detach — session keeps running in the background
+# close Termux, switch apps, lock the screen: the session survives
+# later:
+tmain                          # you find Claude exactly where you left it
 ```
 
-Le wake-lock est acquis automatiquement par `~/.bashrc.local` (libère avec `termux-wake-unlock` ou supprime la ligne).
+The wake-lock is acquired automatically by `~/.bashrc.local` (release with `termux-wake-unlock` or delete the line).
 
-## Maximiser les perfs sur Xiaomi / MIUI
+## Maximize performance on Xiaomi / MIUI
 
-Android tue agressivement les processus en background — surtout MIUI. Trois actions manuelles (1× par téléphone) qui rendent la différence visible :
+Android aggressively kills background processes — especially MIUI. Three manual actions (once per phone) that make a visible difference:
 
-**1. Exempter Termux de l'optim batterie**
-Paramètres Android → Apps → Termux → Battery → "Sans restriction" / "Unrestricted".
+**1. Exempt Termux from battery optimization**
+Android Settings → Apps → Termux → Battery → "Unrestricted".
 
-**2. Désactiver le phantom process killer** (Xiaomi/Android 12+ tue tout enfant qui dépasse 32 processes)
-Depuis un PC avec ADB :
+**2. Disable the phantom process killer** (Xiaomi/Android 12+ kills any child that exceeds 32 processes)
+From a PC with ADB:
 ```bash
 adb shell "settings put global settings_enable_monitor_phantom_procs false"
 adb shell "device_config put activity_manager max_phantom_processes 2147483647"
 ```
-(Ces deux settings se remettent à zéro à chaque MAJ Android — re-appliquer si tmux/claude meurent.)
+(Both settings reset to zero on every Android update — re-apply if tmux/claude die.)
 
-**3. Termux:Boot** (optionnel) — autostart tmux + sshd au démarrage du téléphone
-Installer le APK Termux:Boot depuis F-Droid, puis :
+**3. Termux:Boot** (optional) — autostart tmux + sshd when the phone boots
+Install the Termux:Boot APK from F-Droid, then:
 ```bash
 mkdir -p ~/.termux/boot
 cat > ~/.termux/boot/start.sh <<'EOF'
