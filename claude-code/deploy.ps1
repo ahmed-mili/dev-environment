@@ -31,11 +31,9 @@ $CustomSkills = @(
 )
 
 # Hooks local-only : présents dans ~/.claude/hooks/ mais qu'on ne veut JAMAIS
-# push sur le repo public (déclenchent Defender, cf. commit a674338).
-# Defense layer 1 : skip explicite ici. Layer 2 : .gitignore.
-$LocalOnlyHooks = @(
-    'patch-claude-exe.ps1'
-)
+# push sur le repo public. Vide depuis qu'on publie patch-claude-exe.ps1
+# (cf. README pour les prérequis SAC + Defender exception).
+$LocalOnlyHooks = @()
 
 function Copy-One($from, $to) {
     if (-not (Test-Path $from)) {

@@ -162,6 +162,8 @@ Install-WingetPackage -Id 'junegunn.fzf'                  -DisplayName 'fzf'
 Install-WingetPackage -Id 'ajeetdsouza.zoxide'            -DisplayName 'zoxide'
 Install-WingetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont'  -DisplayName 'JetBrainsMono Nerd Font'
 Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
+# Rust toolchain : requis pour compiler claude-code/statusline-rs/ -> statusline.exe (9 Hz animation).
+Install-WingetPackage -Id 'Rustlang.Rustup'               -DisplayName 'Rust toolchain (rustup)'
 
 # ---------------------------------------------------------------------------
 # 2) PowerShell 7 profile
