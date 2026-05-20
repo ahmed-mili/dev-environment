@@ -15,26 +15,26 @@ dev-environment/
 
 ### Windows (one-liner)
 
-**Prérequis** :
-- **Smart App Control = Off** (Settings > Privacy & security > Smart App Control). ⚠️ Désactivation définitive : pour réactiver, reset Windows.
-- **PowerShell admin** : lance Windows Terminal en administrateur. Requis pour l'exception Defender sur `patch-claude-exe.ps1` (script flagged `Trojan:Win32/FileFix.BBA!MTB` — le bootstrap ajoute l'exception avant le `git clone` pour éviter la quarantaine silencieuse).
+**Prerequisites**:
+- **Smart App Control = Off** (Settings > Privacy & security > Smart App Control). ⚠️ Disabling SAC is permanent — re-enabling requires a full Windows reset. Most developers already have SAC off.
+- **Elevated PowerShell**: launch Windows Terminal as administrator. Required to add a Defender exception on `patch-claude-exe.ps1` (flagged `Trojan:Win32/FileFix.BBA!MTB` — the bootstrap adds the exception before `git clone` so the file isn't quarantined silently).
 
 ```powershell
 $b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.ps1 -OutFile $b; Unblock-File $b; & $b
 ```
 
-> Pattern `irm -OutFile + & file` (téléchargement vers disk puis exécution depuis le fichier) au lieu de `iex (irm ...)` (téléchargement + exécution in-memory). Le second est la signature classique de ClickFix (`Trojan:Win32/ClickFix.DAI!MTB`) — Defender flag aujourd'hui n'importe quel script qui combine `iex` avec `irm` sur un payload Github raw. Le premier est inoffensif (oh-my-posh, scoop, etc. l'utilisent), et permet à l'user d'inspecter le `.ps1` téléchargé avant exécution s'il le souhaite.
+> Pattern `irm -OutFile + & file` (download to disk, then execute from the file) instead of `iex (irm ...)` (download + in-memory execute). The latter is the classic ClickFix signature (`Trojan:Win32/ClickFix.DAI!MTB`) — Defender now flags any script that combines `iex` with `irm` on a Github raw payload. The former is harmless (oh-my-posh, scoop, etc. all use it) and lets you inspect the downloaded `.ps1` before execution.
 
-Le bootstrap : (1) vérifie SAC + admin, (2) ajoute l'exception Defender, (3) clone le repo dans `C:\dev\dev-environment`, (4) installe les winget packages (PowerShell 7, Terminal, Fastfetch, Rust toolchain), (5) build le statusline Rust en `--release` (animation 9 Hz), (6) déploie la config Claude Code. `claude.exe` est ensuite patché automatiquement par le SessionStart hook à la prochaine session.
+The bootstrap: (1) checks SAC + admin, (2) adds the Defender exception, (3) clones the repo to `C:\dev\dev-environment`, (4) installs winget packages (PowerShell 7, Terminal, Fastfetch, Rust toolchain), (5) builds the Rust statusline in `--release` (9 Hz animation), (6) deploys the Claude Code config. `claude.exe` is then patched automatically by the SessionStart hook on the next session.
 
-Optionnel : lance `/plugin` dans Claude Code après pour ajouter `frontend-design`, `code-review`, `superpowers` du marketplace `claude-plugins-official`.
+Optional: run `/plugin` inside Claude Code afterward to install `frontend-design`, `code-review`, `superpowers` from the `claude-plugins-official` marketplace.
 
 ### Android (Termux, one-liner)
 ```bash
 pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.sh)
 ```
 
-Le `bootstrap.sh` auto-détecte l'état : fresh install → `android/setup.sh`, ancien setup Ollama/proot détecté → `android/migrate-from-ollama.sh` (cleanup puis re-run de setup.sh). Idempotent dans les deux cas.
+`bootstrap.sh` auto-detects the state: fresh install → `android/setup.sh`; legacy Ollama/proot setup detected → `android/migrate-from-ollama.sh` (cleanup, then re-run `setup.sh`). Idempotent either way.
 
 ## License
 
