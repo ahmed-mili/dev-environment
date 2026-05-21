@@ -11,9 +11,10 @@
 # Windows 11, Build Tools are absent and the build fails with
 #   error: linker `link.exe` not found
 # We detect this up-front via vswhere and, if Build Tools are absent, install
-# the stable-gnu toolchain (~50 MB, ships its own linker via mingw) and
-# build with that. The produced binary is equivalent for this use case
-# (statusline is a small stdin/stdout program).
+# the stable-gnu toolchain plus WinLibs/MinGW via winget. WinLibs provides
+# gcc.exe, which the cc crate needs to compile ring (rustls' crypto backend)
+# from its C/asm sources. The produced binary is equivalent for this use
+# case (statusline is a small stdin/stdout program).
 
 $ErrorActionPreference = 'Stop'
 
@@ -21,6 +22,8 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TargetDir   = Join-Path $env:LOCALAPPDATA 'statusline-build\target'
 $Dest        = Join-Path $env:USERPROFILE '.claude\statusline.exe'
 $CargoBin    = Join-Path $env:USERPROFILE '.cargo\bin'
+$GnuTarget   = 'x86_64-pc-windows-gnu'
+$WinLibsId   = 'BrechtSanders.WinLibs.POSIX.UCRT'
 
 # Resolve cargo + rustup : prefer the rustup-installed user-local ones,
 # fall back to PATH.
@@ -44,32 +47,70 @@ function Test-MsvcLinker {
     return $false
 }
 
+function Update-ProcessPath {
+    # Re-read PATH from registry (Machine + User) so a freshly-installed
+    # winget package becomes visible in the current process without restart.
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                [Environment]::GetEnvironmentVariable('Path', 'User') + ';' +
+                $CargoBin
+}
+
+function Test-GnuBuildTools {
+    # ring (rustls' crypto backend) is built via the cc crate, which looks
+    # for gcc.exe on PATH for target x86_64-pc-windows-gnu. dlltool.exe is
+    # used by the linker for import-lib generation on some deps.
+    return [bool]((Get-Command gcc.exe -ErrorAction SilentlyContinue) -and
+                  (Get-Command dlltool.exe -ErrorAction SilentlyContinue))
+}
+
+function Ensure-GnuBuildTools {
+    Update-ProcessPath
+    if (Test-GnuBuildTools) { return }
+
+    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if (-not $winget) {
+        throw "gcc.exe/dlltool.exe not found and winget is unavailable. Install WinLibs manually, then re-run."
+    }
+
+    Write-Host "==> Installing WinLibs/MinGW (gcc + dlltool) via winget..."
+    & $winget.Source install --id $WinLibsId --exact --source winget --accept-source-agreements --accept-package-agreements
+    if ($LASTEXITCODE -ne 0) { throw "winget install $WinLibsId failed" }
+
+    Update-ProcessPath
+    if (-not (Test-GnuBuildTools)) {
+        throw "WinLibs installed, but gcc.exe or dlltool.exe is still not visible on PATH. Restart the shell and re-run."
+    }
+}
+
 $useGnu = -not (Test-MsvcLinker)
 if ($useGnu) {
     Write-Host "==> MSVC linker (link.exe) absent - using stable-gnu toolchain instead." -ForegroundColor Yellow
-    Write-Host "    No Visual Studio install needed. Binary is equivalent for this use case."
+    Write-Host "    Visual Studio install avoided; WinLibs/MinGW provides gcc.exe and dlltool.exe."
     if (-not $Rustup -or -not (Test-Path -LiteralPath $Rustup)) {
         throw "rustup not found - cannot install stable-gnu toolchain"
     }
     # Idempotent : rustup is a no-op if stable-gnu is already installed.
     & $Rustup toolchain install stable-gnu --no-self-update --profile minimal
     if ($LASTEXITCODE -ne 0) { throw "rustup toolchain install stable-gnu failed" }
+    Ensure-GnuBuildTools
 }
 
 $env:CARGO_TARGET_DIR = $TargetDir
 $manifest = Join-Path $ProjectRoot 'Cargo.toml'
-$cargoArgs = if ($useGnu) { @('+stable-gnu', 'build', '--release', '--manifest-path', $manifest) }
-             else        { @('build', '--release', '--manifest-path', $manifest) }
+$cargoArgs = if ($useGnu) { @('+stable-gnu', 'build', '--release', '--manifest-path', $manifest, '--target', $GnuTarget) }
+             else         { @('build', '--release', '--manifest-path', $manifest) }
 
 $toolchainLabel = if ($useGnu) { 'stable-gnu' } else { 'stable-msvc' }
 Write-Host "==> Building (target=$TargetDir, toolchain=$toolchainLabel)..."
 & $Cargo @cargoArgs
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
-# Locate the produced binary. The exact subdir under target/ depends on
-# whether the toolchain output went into target/release (host-default
-# triple) or target/<triple>/release (explicit triple). Probe both.
+# Locate the produced binary. Prefer the exact path for the selected build,
+# then probe legacy paths as a fallback.
+$ExpectedBuiltExe = if ($useGnu) { Join-Path $TargetDir 'x86_64-pc-windows-gnu\release\statusline.exe' }
+                    else         { Join-Path $TargetDir 'release\statusline.exe' }
 $candidates = @(
+    $ExpectedBuiltExe,
     (Join-Path $TargetDir 'release\statusline.exe'),
     (Join-Path $TargetDir 'x86_64-pc-windows-gnu\release\statusline.exe'),
     (Join-Path $TargetDir 'x86_64-pc-windows-msvc\release\statusline.exe')

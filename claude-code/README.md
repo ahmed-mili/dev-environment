@@ -96,6 +96,7 @@ The default `.ps1` rendering works with no prerequisites and all static renderin
    ```powershell
    winget install Rustlang.Rustup
    ```
+   If Visual Studio Build Tools are absent, `build.ps1` automatically installs WinLibs/MinGW via winget (provides `gcc.exe` for ring/rustls) and builds with `stable-gnu`.
 
 ### Build
 
@@ -104,7 +105,7 @@ cd C:\dev\dev-environment\claude-code\statusline-rs
 .\build.ps1
 ```
 
-`build.ps1` builds in `--release` (LTO + strip), redirects `CARGO_TARGET_DIR` to `%LOCALAPPDATA%\statusline-build\target` (trusted zone outside `C:\dev`, avoids SAC blocks on cargo build scripts), then copies the binary to `~/.claude/statusline.exe`.
+`build.ps1` builds in `--release` (LTO + strip), redirects `CARGO_TARGET_DIR` to `%LOCALAPPDATA%\statusline-build\target` (trusted zone outside `C:\dev`, avoids SAC blocks on cargo build scripts), falls back to `stable-gnu` plus WinLibs/MinGW when MSVC is absent, then copies the binary to `~/.claude/statusline.exe`.
 
 ### How the patch works
 
