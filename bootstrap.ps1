@@ -291,8 +291,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Claude Code config deploy failed' }
 # to load what's not in ~/.claude/plugins/cache/. So we drive the install
 # explicitly here via `claude plugin install`, which:
 #   - is a non-interactive CLI subcommand,
-#   - is idempotent (prints "already installed" and exit 0 on re-run),
-#   - knows the official marketplace by default (no marketplace add needed).
+#   - is idempotent (prints "already installed" and exit 0 on re-run).
+# `claude-plugins-official` is pre-registered in claude.exe (no `marketplace
+# add` needed), but its catalog cache is NOT auto-populated on a fresh
+# install -- without a `marketplace update`, `plugin install` fails with
+# "Plugin X not found in marketplace ... Your local copy may be out of
+# date". So we always run `marketplace update` first to seed the cache.
 # Source-of-truth for the plugin list is settings.json -> enabledPlugins,
 # so this list stays in sync automatically.
 
@@ -301,7 +305,7 @@ $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [En
 $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
 if (-not $claudeCmd) {
     Write-Warn 'claude.exe not on PATH yet; skipping update + plugin install.'
-    Write-Hint 'Restart your shell, then run `claude update` and `claude plugin install <name>@claude-plugins-official`.'
+    Write-Hint 'Restart your shell, then run `claude update`, `claude plugin marketplace update claude-plugins-official`, and `claude plugin install <name>@claude-plugins-official`.'
 } else {
     # `claude update` upgrades to the latest Anthropic release. winget's
     # Anthropic.ClaudeCode package can lag by a release or two; this catches
@@ -311,6 +315,16 @@ if (-not $claudeCmd) {
     Write-Info 'claude update (catch up to latest Anthropic release)'
     & $claudeCmd.Source update 2>&1 | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) { Write-Warn ("claude update returned {0}" -f $LASTEXITCODE) }
+
+    # Seed the marketplace catalog cache. Without this, fresh installs hit:
+    #   Failed to install plugin "X": Plugin "X" not found in marketplace
+    #   "claude-plugins-official". Your local copy may be out of date --
+    #   try `claude plugin marketplace update claude-plugins-official`.
+    # The marketplace itself is registered by default, but its cache is
+    # empty until the first `marketplace update`.
+    Write-Info 'syncing claude-plugins-official marketplace'
+    & $claudeCmd.Source plugin marketplace update claude-plugins-official 2>&1 | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
+    if ($LASTEXITCODE -ne 0) { Write-Warn ("claude plugin marketplace update returned {0}" -f $LASTEXITCODE) }
 
     $settings = Get-Content (Join-Path $RepoPath 'claude-code\settings.json') -Raw | ConvertFrom-Json
     $plugins = @($settings.enabledPlugins.PSObject.Properties | Where-Object { $_.Value -eq $true } | ForEach-Object { $_.Name })
