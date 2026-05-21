@@ -59,7 +59,7 @@ $GLYPH_OK = [char]0x2713  # check mark
 
 $script:T0        = Get-Date
 $script:StepIdx   = 0
-$script:StepTotal = 7   # 1.Checks 2.Defender 3.Git 4.Clone 5.Bundle 6.Build 7.Deploy
+$script:StepTotal = 9   # 1.Checks 2.Defender 3.Git 4.GitConfig 5.Clone 6.Bundle 7.Build 8.Deploy 9.Plugins
 
 function Write-Step {
     param([string]$msg)
@@ -111,13 +111,14 @@ Write-Host ''
 Write-Host '==> ' -ForegroundColor Blue -NoNewline
 Write-Host 'This script will install / configure:' -ForegroundColor White
 Write-Host '    Microsoft Defender exclusion for patch-claude-exe.ps1'
-Write-Host '    Git (via winget, if missing)'
+Write-Host '    Git (via winget, if missing) + git user.name/email (prompted if unset)'
 Write-Host ('    dev-environment repo at {0}' -f $RepoPath)
 Write-Host '    PowerShell 7, Windows Terminal, fzf, zoxide, fastfetch, Rust (via winget)'
 Write-Host '    Claude Code (via winget, official Anthropic.ClaudeCode package)'
 Write-Host '    WinLibs/MinGW (via winget, only if MSVC Build Tools are missing)'
 Write-Host '    Custom Rust statusline binary (~/.claude/statusline.exe, animated 9 Hz)'
 Write-Host '    Claude Code config: settings + hooks + skills'
+Write-Host '    Claude Code plugins (frontend-design, code-review, superpowers, rust-analyzer-lsp)'
 Write-Host ''
 Write-Host '    First run: about 10-15 min. Re-runs are idempotent (~1-2 min).' -ForegroundColor DarkGray
 Write-Host ''
@@ -206,6 +207,34 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 
 # ---------------------------------------------------------------------------
+# Git identity (idempotent)
+# ---------------------------------------------------------------------------
+# user.name + user.email are mandatory for commit authorship. If unset,
+# prompt for them once; if set, leave alone (so re-runs are silent).
+
+Write-Step 'Configuring Git identity'
+$gitName  = (& git config --global user.name)  2>$null
+$gitEmail = (& git config --global user.email) 2>$null
+if ($gitName -and $gitEmail) {
+    Write-Ok ("name='{0}' email='{1}' (already set)" -f $gitName, $gitEmail)
+} else {
+    Write-Info 'Git needs user.name + user.email for commit authorship.'
+    if (-not $gitName) {
+        $gitName = Read-Host '    Enter your full name (e.g., Ada Lovelace)'
+        if ([string]::IsNullOrWhiteSpace($gitName)) { throw 'Empty name; aborting.' }
+        & git config --global user.name $gitName
+        if ($LASTEXITCODE -ne 0) { throw 'git config user.name failed' }
+    }
+    if (-not $gitEmail) {
+        $gitEmail = Read-Host '    Enter your email (e.g., ada@example.com)'
+        if ([string]::IsNullOrWhiteSpace($gitEmail)) { throw 'Empty email; aborting.' }
+        & git config --global user.email $gitEmail
+        if ($LASTEXITCODE -ne 0) { throw 'git config user.email failed' }
+    }
+    Write-Ok ("set: name='{0}' email='{1}'" -f $gitName, $gitEmail)
+}
+
+# ---------------------------------------------------------------------------
 # Clone / update repo
 # ---------------------------------------------------------------------------
 
@@ -255,6 +284,36 @@ Write-Step 'Deploying Claude Code config (statusline + settings + hooks + skills
 if ($LASTEXITCODE -ne 0) { throw 'Claude Code config deploy failed' }
 
 # ---------------------------------------------------------------------------
+# Claude Code plugins (idempotent CLI install)
+# ---------------------------------------------------------------------------
+# enabledPlugins in settings.json declares which plugins are active, but
+# Claude Code does NOT auto-install them from that field -- it just refuses
+# to load what's not in ~/.claude/plugins/cache/. So we drive the install
+# explicitly here via `claude plugin install`, which:
+#   - is a non-interactive CLI subcommand,
+#   - is idempotent (prints "already installed" and exit 0 on re-run),
+#   - knows the official marketplace by default (no marketplace add needed).
+# Source-of-truth for the plugin list is settings.json -> enabledPlugins,
+# so this list stays in sync automatically.
+
+Write-Step 'Installing Claude Code plugins'
+$env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+$claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+if (-not $claudeCmd) {
+    Write-Warn 'claude.exe not on PATH yet; skipping plugin install.'
+    Write-Hint 'Restart your shell and run `claude plugin install <name>@claude-plugins-official` manually.'
+} else {
+    $settings = Get-Content (Join-Path $RepoPath 'claude-code\settings.json') -Raw | ConvertFrom-Json
+    $plugins = @($settings.enabledPlugins.PSObject.Properties | Where-Object { $_.Value -eq $true } | ForEach-Object { $_.Name })
+    foreach ($p in $plugins) {
+        Write-Info ("installing {0}" -f $p)
+        & $claudeCmd.Source plugin install $p --scope user 2>&1 | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
+        if ($LASTEXITCODE -ne 0) { Write-Warn ("claude plugin install {0} returned {1}" -f $p, $LASTEXITCODE) }
+    }
+    Write-Ok ("{0} plugin(s) processed" -f $plugins.Count)
+}
+
+# ---------------------------------------------------------------------------
 # Done (Homebrew-style: "==> Installation successful!" + next steps)
 # ---------------------------------------------------------------------------
 
@@ -272,12 +331,8 @@ Write-Host 'claude' -ForegroundColor Cyan -NoNewline
 Write-Host ' + new profiles.'
 Write-Host '  2. Run ' -NoNewline
 Write-Host 'claude' -ForegroundColor Cyan -NoNewline
-Write-Host ' -- the SessionStart hook patches claude.exe (9 Hz animation)'
-Write-Host '     on first launch.'
-Write-Host '  3. Inside Claude Code, run ' -NoNewline
-Write-Host '/plugin' -ForegroundColor Cyan -NoNewline
-Write-Host ' to install plugins'
-Write-Host '     (frontend-design, code-review, superpowers).'
+Write-Host ' -- the SessionStart hook patches claude.exe (9 Hz'
+Write-Host '     animation) on first launch. Plugins are already installed.'
 Write-Host ''
 Write-Host '==> ' -ForegroundColor Blue -NoNewline
 Write-Host 'Docs: ' -ForegroundColor White -NoNewline
