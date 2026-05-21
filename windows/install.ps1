@@ -43,7 +43,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 function Write-Step($msg) { Write-Host "  ==> $msg" -ForegroundColor Blue }
-function Write-Ok($msg)   { Write-Host "      ✓ " -ForegroundColor Green -NoNewline; Write-Host $msg }
+function Write-Ok($msg)   { Write-Host "      + " -ForegroundColor Green -NoNewline; Write-Host $msg }
 function Write-Note($msg) { Write-Host "      ! " -ForegroundColor Yellow -NoNewline; Write-Host $msg }
 
 function Short-Path([string]$p) {
@@ -141,7 +141,7 @@ if ($effective -in 'RemoteSigned','Unrestricted','Bypass') {
 } else {
     try {
         Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop
-        Write-Ok "execution policy → RemoteSigned"
+        Write-Ok "execution policy -> RemoteSigned"
     } catch {
         Write-Note "Could not set CurrentUser policy ($($_.Exception.Message.Split([Environment]::NewLine)[0])). Continuing anyway."
     }
@@ -257,10 +257,10 @@ if ($isLaptop) {
     if ($fastfetchConfig -eq $before) {
         Write-Note "Laptop detected ($reason) but the board key was not found in the embedded config -- icon NOT swapped."
     } else {
-        Write-Ok "laptop ($reason) → icon + label ""Laptop"""
+        Write-Ok "laptop ($reason) -> icon + label ""Laptop"""
     }
 } else {
-    Write-Ok 'desktop → keeping "Board"'
+    Write-Ok 'desktop -> keeping "Board"'
 }
 Write-Utf8File -Path $ffConfigPath -Content $fastfetchConfig -WithBom $false
 Write-Ok (Short-Path $ffConfigPath)
