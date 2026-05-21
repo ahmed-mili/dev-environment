@@ -57,13 +57,17 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $GLYPH_OK = [char]0x2713  # check mark
 
-$script:T0 = Get-Date
+$script:T0        = Get-Date
+$script:StepIdx   = 0
+$script:StepTotal = 7   # 1.Checks 2.Defender 3.Git 4.Clone 5.Bundle 6.Build 7.Deploy
 
 function Write-Step {
     param([string]$msg)
+    $script:StepIdx++
     Write-Host ''
     Write-Host '==> ' -ForegroundColor Blue -NoNewline
-    Write-Host $msg  -ForegroundColor White
+    Write-Host ('[{0}/{1}] ' -f $script:StepIdx, $script:StepTotal) -ForegroundColor DarkGray -NoNewline
+    Write-Host $msg -ForegroundColor White
 }
 function Write-Ok {
     param([string]$msg)
@@ -110,6 +114,7 @@ Write-Host '    Microsoft Defender exclusion for patch-claude-exe.ps1'
 Write-Host '    Git (via winget, if missing)'
 Write-Host ('    dev-environment repo at {0}' -f $RepoPath)
 Write-Host '    PowerShell 7, Windows Terminal, fzf, zoxide, fastfetch, Rust (via winget)'
+Write-Host '    WinLibs/MinGW (via winget, only if MSVC Build Tools are missing)'
 Write-Host '    Custom Rust statusline binary (~/.claude/statusline.exe, animated 9 Hz)'
 Write-Host '    Claude Code config: settings + hooks + skills'
 Write-Host ''
@@ -229,9 +234,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Windows bundle install failed' }
 # Build statusline Rust binary
 # ---------------------------------------------------------------------------
 # build.ps1 redirects CARGO_TARGET_DIR to %LOCALAPPDATA% (trusted zone, away
-# from C:\dev under Smart App Control), auto-falls-back to the stable-gnu
-# toolchain if VS Build Tools are absent, builds --release, and copies the
-# binary to ~/.claude/statusline.exe.
+# from C:\dev under Smart App Control), auto-falls-back to stable-gnu plus
+# WinLibs/MinGW if VS Build Tools are absent (WinLibs provides gcc.exe for
+# ring/rustls), builds --release, and copies the binary to
+# ~/.claude/statusline.exe.
 # Refresh PATH first so cargo is visible if Rust was just installed.
 
 Write-Step 'Building statusline Rust binary'
