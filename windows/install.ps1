@@ -172,6 +172,10 @@ Install-WingetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont'  -DisplayName 'JetBrain
 Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
 # Rust toolchain : requis pour compiler claude-code/statusline-rs/ -> statusline.exe (9 Hz animation).
 Install-WingetPackage -Id 'Rustlang.Rustup'               -DisplayName 'Rust toolchain (rustup)'
+# Claude Code itself : the one-liner's whole point is to bootstrap a working
+# `claude` install. Native installer would work but uses `irm | iex` which
+# Defender flags (ClickFix.DAI!MTB) -- winget is the safe path.
+Install-WingetPackage -Id 'Anthropic.ClaudeCode'          -DisplayName 'Claude Code'
 
 # ---------------------------------------------------------------------------
 # 2) PowerShell 7 profile

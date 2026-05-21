@@ -114,6 +114,7 @@ Write-Host '    Microsoft Defender exclusion for patch-claude-exe.ps1'
 Write-Host '    Git (via winget, if missing)'
 Write-Host ('    dev-environment repo at {0}' -f $RepoPath)
 Write-Host '    PowerShell 7, Windows Terminal, fzf, zoxide, fastfetch, Rust (via winget)'
+Write-Host '    Claude Code (via winget, official Anthropic.ClaudeCode package)'
 Write-Host '    WinLibs/MinGW (via winget, only if MSVC Build Tools are missing)'
 Write-Host '    Custom Rust statusline binary (~/.claude/statusline.exe, animated 9 Hz)'
 Write-Host '    Claude Code config: settings + hooks + skills'
@@ -226,7 +227,7 @@ if (Test-Path (Join-Path $RepoPath '.git')) {
 # Windows bundle (delegated to windows\install.ps1)
 # ---------------------------------------------------------------------------
 
-Write-Step 'Installing Windows bundle (PowerShell 7, Terminal, fzf, zoxide, fastfetch, Rust)'
+Write-Step 'Installing Windows bundle (PowerShell 7, Terminal, fzf, zoxide, fastfetch, Rust, Claude Code)'
 & (Join-Path $RepoPath 'windows\install.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Windows bundle install failed' }
 
@@ -266,13 +267,17 @@ Write-Host ('(' + $elapsed + ')')      -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '==> ' -ForegroundColor Blue -NoNewline
 Write-Host 'Next steps:' -ForegroundColor White
-Write-Host '  1. Restart Windows Terminal to load the new profiles.'
-Write-Host '  2. Open Claude Code and run ' -NoNewline
+Write-Host '  1. Restart Windows Terminal so PATH picks up ' -NoNewline
+Write-Host 'claude' -ForegroundColor Cyan -NoNewline
+Write-Host ' + new profiles.'
+Write-Host '  2. Run ' -NoNewline
+Write-Host 'claude' -ForegroundColor Cyan -NoNewline
+Write-Host ' -- the SessionStart hook patches claude.exe (9 Hz animation)'
+Write-Host '     on first launch.'
+Write-Host '  3. Inside Claude Code, run ' -NoNewline
 Write-Host '/plugin' -ForegroundColor Cyan -NoNewline
 Write-Host ' to install plugins'
 Write-Host '     (frontend-design, code-review, superpowers).'
-Write-Host '  3. claude.exe will be patched automatically by the SessionStart hook'
-Write-Host '     at the next Claude Code session.'
 Write-Host ''
 Write-Host '==> ' -ForegroundColor Blue -NoNewline
 Write-Host 'Docs: ' -ForegroundColor White -NoNewline
