@@ -1,12 +1,21 @@
-# Sync bidirectionnel entre dev-environment/claude-code/ et ~/.claude/
+# Bidirectional sync between dev-environment/claude-code/ and ~/.claude/
 #
 # Usage :
-#   .\deploy.ps1 -Pull    # depuis le repo vers ~/.claude/  (bootstrap ou réinit)
-#   .\deploy.ps1 -Push    # depuis ~/.claude/ vers le repo  (avant git commit/push)
+#   .\deploy.ps1 -Pull    # from repo to ~/.claude/  (bootstrap or reinit)
+#   .\deploy.ps1 -Push    # from ~/.claude/ to repo  (before git commit/push)
 #
-# Ne touche QUE aux fichiers trackés du repo : statusline.ps1, settings.json,
-# hooks/, skills/. Le reste de ~/.claude/ (sessions, history, plugins officiels,
-# credentials) est laissé intact.
+# Touches ONLY the repo-tracked files: statusline.ps1, settings.json,
+# hooks/, skills/. The rest of ~/.claude/ (sessions, history, official
+# plugins, credentials) is left intact.
+#
+# ---------------------------------------------------------------------------
+# ASCII-only source - DO NOT add non-ASCII chars to this file.
+# Reason: Windows PowerShell 5.1 reads .ps1 files from disk in CP-1252 when
+# no UTF-8 BOM is present. Multi-byte UTF-8 sequences for glyphs like check
+# marks or arrows decode to smart-quote bytes in CP-1252, which PS 5.1
+# treats as string delimiters -> parser breaks far from the offending char.
+# Stay ASCII-only. See windows/install.ps1 commit 58f9da3 for full analysis.
+# ---------------------------------------------------------------------------
 
 [CmdletBinding(DefaultParameterSetName='Pull')]
 param(
@@ -23,37 +32,37 @@ $ErrorActionPreference = 'Stop'
 $RepoClaude = Split-Path -Parent $PSCommandPath          # ...\dev-environment\claude-code
 $HomeClaude = "$env:USERPROFILE\.claude"
 
-# Custom skills tracked dans le repo (whitelist explicite)
+# Custom skills tracked in the repo (explicit whitelist)
 $CustomSkills = @(
     'claude-file-recovery', 'copy-edit', 'css-layout-check', 'deploy-safety',
     'edit-block', 'lucide-icons', 'release', 'root-cause-fix', 'smart-edit',
     'sticky-column-bleed-fix', 'webapp-deploy'
 )
 
-# Hooks local-only : présents dans ~/.claude/hooks/ mais qu'on ne veut JAMAIS
-# push sur le repo public. Vide depuis qu'on publie patch-claude-exe.ps1
-# (cf. README pour les prérequis SAC + Defender exception).
+# Local-only hooks : present in ~/.claude/hooks/ but never pushed to the
+# public repo. Empty since we started publishing patch-claude-exe.ps1
+# (see README for SAC + Defender exception prereqs).
 $LocalOnlyHooks = @()
 
 function Copy-One($from, $to) {
     if (-not (Test-Path $from)) {
-        Write-Host "  ✗ skip $from (absent)" -ForegroundColor DarkGray
+        Write-Host "  x skip $from (missing)" -ForegroundColor DarkGray
         return
     }
     $parent = Split-Path -Parent $to
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force $parent | Out-Null }
-    # Gotcha PowerShell : `Copy-Item <dir> <dir-existant> -Recurse` copie À
-    # L'INTÉRIEUR au lieu de remplacer, créant skills/X/X/ parasite. On efface
-    # donc le target dir d'abord. Pour les fichiers, -Force suffit.
+    # PowerShell gotcha : `Copy-Item <dir> <existing-dir> -Recurse` copies
+    # INSIDE instead of replacing, producing skills/X/X/ parasite. So we
+    # wipe the target dir first. For files, -Force is enough.
     if ((Test-Path $from -PathType Container) -and (Test-Path $to)) {
         Remove-Item $to -Recurse -Force
     }
     Copy-Item $from $to -Force -Recurse
-    Write-Host "  ✓ $(Split-Path -Leaf $from)" -ForegroundColor Green
+    Write-Host "  + $(Split-Path -Leaf $from)" -ForegroundColor Green
 }
 
 if ($Pull) {
-    Write-Host "=== Pull : $RepoClaude → $HomeClaude ===" -ForegroundColor Cyan
+    Write-Host "=== Pull : $RepoClaude -> $HomeClaude ===" -ForegroundColor Cyan
     Copy-One "$RepoClaude\statusline.ps1" "$HomeClaude\statusline.ps1"
     Copy-One "$RepoClaude\settings.json"  "$HomeClaude\settings.json"
 
@@ -70,11 +79,11 @@ if ($Pull) {
         Copy-One "$RepoClaude\skills\$s" "$HomeClaude\skills\$s"
     }
 
-    Write-Host "`nFait. Relance Claude Code pour que les nouvelles skills/settings soient pris en compte." -ForegroundColor Yellow
+    Write-Host "`nDone. Restart Claude Code so the new skills/settings are picked up." -ForegroundColor Yellow
 }
 
 if ($Push) {
-    Write-Host "=== Push : $HomeClaude → $RepoClaude ===" -ForegroundColor Cyan
+    Write-Host "=== Push : $HomeClaude -> $RepoClaude ===" -ForegroundColor Cyan
     Copy-One "$HomeClaude\statusline.ps1" "$RepoClaude\statusline.ps1"
     Copy-One "$HomeClaude\settings.json"  "$RepoClaude\settings.json"
 
@@ -83,17 +92,17 @@ if ($Push) {
         New-Item -ItemType Directory -Force "$RepoClaude\hooks" | Out-Null
         Get-ChildItem "$HomeClaude\hooks" -File | ForEach-Object {
             if ($LocalOnlyHooks -contains $_.Name) {
-                Write-Host "  ⊘ skip $($_.Name) (local-only)" -ForegroundColor DarkYellow
+                Write-Host "  o skip $($_.Name) (local-only)" -ForegroundColor DarkYellow
                 return
             }
             Copy-One $_.FullName "$RepoClaude\hooks\$($_.Name)"
         }
     }
 
-    Write-Host "Skills (whitelist 9 custom uniquement) :" -ForegroundColor Cyan
+    Write-Host "Skills (custom whitelist only) :" -ForegroundColor Cyan
     foreach ($s in $CustomSkills) {
         Copy-One "$HomeClaude\skills\$s" "$RepoClaude\skills\$s"
     }
 
-    Write-Host "`nFait. N'oublie pas : cd dev-environment ; git add -A ; git commit ; git push" -ForegroundColor Yellow
+    Write-Host "`nDone. Reminder : cd dev-environment ; git add -A ; git commit ; git push" -ForegroundColor Yellow
 }
