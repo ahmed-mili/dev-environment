@@ -22,12 +22,14 @@
 #>
 
 # ---------------------------------------------------------------------------
-# ASCII-only source - DO NOT introduce non-ASCII chars in this file.
+# ASCII-only source - DO NOT add non-ASCII chars to this file.
 # Reason: Windows PowerShell 5.1 reads .ps1 files from disk in CP-1252 when
-# no UTF-8 BOM is present (the no-bom CI check enforces no BOM, because BOM
+# no UTF-8 BOM is present (no-bom CI check enforces no BOM, because BOM
 # breaks `iex (irm ...)`). Multi-byte UTF-8 bytes 0x91-0x94 decode to smart
 # quotes (U+2018-U+201D) in CP-1252, which PS 5.1 treats as string
 # delimiters -> parser breaks far from the offending char. Stay ASCII-only.
+# Unicode glyphs in OUTPUT are fine: they're constructed via [char]0x...
+# at runtime, which only ever puts ASCII codepoints in the source.
 # ---------------------------------------------------------------------------
 
 $ErrorActionPreference = 'Stop'
@@ -36,25 +38,55 @@ $RepoUrl  = 'https://github.com/ahmed-mili/dev-environment.git'
 $RepoPath = 'C:\dev\dev-environment'
 
 # ---------------------------------------------------------------------------
-# Output helpers - style aligned with popular installers (Homebrew, oh-my-zsh,
-# starship). Color-coded, succinct, step-numbered.
+# Output helpers
 # ---------------------------------------------------------------------------
+# Visual style synthesizes the patterns of the most popular installer
+# scripts on GitHub:
+#   - Section header  "==> " (BOLD BLUE) + message (BOLD WHITE)   [Homebrew]
+#   - Success         " V " (GREEN) + message                     [starship]
+#   - Info            " > " (BOLD DARKGRAY) + message             [starship]
+#   - Warning         " ! " (YELLOW) + message                    [starship]
+#   - Error           " x " (RED) + message                       [starship]
+#   - Hint            "   " (DARKGRAY)                            [Homebrew]
+#
+# Unicode check-mark (U+2713) is built at runtime from its codepoint so the
+# source file stays ASCII (see header comment). UTF-8 output encoding is
+# set so Windows Terminal renders the glyph correctly.
 
-$script:StepNum   = 0
-$script:StepTotal = 7
-$script:T0        = Get-Date
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+
+$GLYPH_OK = [char]0x2713  # check mark
+
+$script:T0 = Get-Date
 
 function Write-Step {
     param([string]$msg)
-    $script:StepNum++
     Write-Host ''
-    Write-Host ("==> [{0}/{1}] {2}" -f $script:StepNum, $script:StepTotal, $msg) -ForegroundColor Cyan
+    Write-Host '==> ' -ForegroundColor Blue -NoNewline
+    Write-Host $msg  -ForegroundColor White
 }
-function Write-Ok   { param([string]$msg) Write-Host '    + ' -ForegroundColor Green   -NoNewline; Write-Host $msg }
-function Write-Info { param([string]$msg) Write-Host '    - ' -ForegroundColor Gray    -NoNewline; Write-Host $msg }
-function Write-Warn { param([string]$msg) Write-Host '    ! ' -ForegroundColor Yellow  -NoNewline; Write-Host $msg }
-function Write-Err  { param([string]$msg) Write-Host '    X ' -ForegroundColor Red     -NoNewline; Write-Host $msg }
-function Write-Hint { param([string]$msg) Write-Host ('      ' + $msg) -ForegroundColor DarkGray }
+function Write-Ok {
+    param([string]$msg)
+    Write-Host ('  ' + $GLYPH_OK + ' ') -ForegroundColor Green -NoNewline
+    Write-Host $msg
+}
+function Write-Info {
+    param([string]$msg)
+    Write-Host '  > ' -ForegroundColor DarkGray -NoNewline
+    Write-Host $msg
+}
+function Write-Warn {
+    param([string]$msg)
+    Write-Host ('  ! ' + $msg) -ForegroundColor Yellow
+}
+function Write-Err {
+    param([string]$msg)
+    Write-Host ('  x ' + $msg) -ForegroundColor Red
+}
+function Write-Hint {
+    param([string]$msg)
+    Write-Host ('    ' + $msg) -ForegroundColor DarkGray
+}
 
 function Format-Elapsed {
     param([TimeSpan]$ts)
@@ -63,22 +95,25 @@ function Format-Elapsed {
 }
 
 # ---------------------------------------------------------------------------
-# Header (informative, like `brew install` and `starship init`)
+# Header (Homebrew-style: name + URL, then a flat "this will install" list)
 # ---------------------------------------------------------------------------
 
 Write-Host ''
-Write-Host '  dev-environment  ::  one-liner installer' -ForegroundColor Cyan
+Write-Host '  dev-environment '       -ForegroundColor Cyan     -NoNewline
+Write-Host '::'                       -ForegroundColor DarkGray -NoNewline
+Write-Host ' one-liner installer'     -ForegroundColor Cyan
 Write-Host '  https://github.com/ahmed-mili/dev-environment' -ForegroundColor DarkGray
 Write-Host ''
-Write-Host '  This will install / configure:'
-Write-Host '    - Microsoft Defender exclusion for patch-claude-exe.ps1'
-Write-Host '    - Git (via winget, if missing)'
-Write-Host ('    - dev-environment repo at {0}' -f $RepoPath)
-Write-Host '    - Windows bundle: PowerShell 7, Windows Terminal, fzf, fastfetch, Rust'
-Write-Host '    - Custom Rust statusline binary (~/.claude/statusline.exe, 9 Hz animated)'
-Write-Host '    - Claude Code config: settings + hooks + skills'
+Write-Host '==> ' -ForegroundColor Blue -NoNewline
+Write-Host 'This script will install / configure:' -ForegroundColor White
+Write-Host '    Microsoft Defender exclusion for patch-claude-exe.ps1'
+Write-Host '    Git (via winget, if missing)'
+Write-Host ('    dev-environment repo at {0}' -f $RepoPath)
+Write-Host '    PowerShell 7, Windows Terminal, fzf, zoxide, fastfetch, Rust (via winget)'
+Write-Host '    Custom Rust statusline binary (~/.claude/statusline.exe, animated 9 Hz)'
+Write-Host '    Claude Code config: settings + hooks + skills'
 Write-Host ''
-Write-Host '  First run takes about 10-15 min. Re-runs are idempotent (about 1-2 min).'
+Write-Host '    First run: about 10-15 min. Re-runs are idempotent (~1-2 min).' -ForegroundColor DarkGray
 Write-Host ''
 
 if ((Get-ExecutionPolicy -Scope Process) -notin 'Bypass','Unrestricted') {
@@ -86,66 +121,54 @@ if ((Get-ExecutionPolicy -Scope Process) -notin 'Bypass','Unrestricted') {
 }
 
 # ---------------------------------------------------------------------------
-# Step 1/7 : pre-flight - Smart App Control state
+# Pre-flight checks (Homebrew style: one section, multiple sub-checks)
 # ---------------------------------------------------------------------------
-# SAC blocks unsigned binaries at runtime (statusline.exe is unsigned and
-# low-reputation when freshly built) and some cargo build-scripts also fail
-# under SAC. The registry key VerifiedAndReputablePolicyState is :
-# 0 = Off, 1 = Evaluation, 2 = On. Accept Off + Evaluation, refuse On.
+# SAC state registry key VerifiedAndReputablePolicyState : 0=Off, 1=Eval, 2=On.
+# Accept 0/1, refuse 2.
 
-Write-Step 'Pre-flight: Smart App Control state'
+Write-Step 'Checking prerequisites'
+
 $sacState = 0
 try {
     $sacState = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' `
                                   -Name VerifiedAndReputablePolicyState `
                                   -ErrorAction Stop).VerifiedAndReputablePolicyState
 } catch {
-    # SAC absent (Windows < 11 or edition without SAC) - treat as Off.
-    $sacState = 0
+    $sacState = 0   # SAC absent on older Windows / non-Pro editions -> treat as Off
 }
 if ($sacState -eq 2) {
-    Write-Err 'Smart App Control is ON.'
+    Write-Err 'Smart App Control is ON'
     Write-Hint ''
     Write-Hint 'To continue, disable SAC:'
     Write-Hint '  Settings > Privacy & security > Smart App Control > Off'
     Write-Hint 'Then re-run this bootstrap.'
     Write-Hint ''
-    Write-Hint 'WARNING: disabling SAC is permanent. Re-enabling it requires'
-    Write-Hint 'a full Windows reset.'
+    Write-Hint 'WARNING: disabling SAC is permanent. Re-enabling requires a full Windows reset.'
     exit 1
 }
-Write-Ok "OK (state=$sacState)"
+Write-Ok ("Smart App Control: off (state={0})" -f $sacState)
 
-# ---------------------------------------------------------------------------
-# Step 2/7 : pre-flight - elevation
-# ---------------------------------------------------------------------------
-
-Write-Step 'Pre-flight: elevation'
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    Write-Err 'Not running as administrator.'
+    Write-Err 'Not running as administrator'
     Write-Hint ''
     Write-Hint 'Re-run from an elevated PowerShell (Windows Terminal as Admin).'
     Write-Hint 'Needed to add a Defender exception on patch-claude-exe.ps1.'
     exit 1
 }
-Write-Ok 'OK'
+Write-Ok 'Elevation: yes'
 
 # ---------------------------------------------------------------------------
-# Step 3/7 : Defender exclusions (must run BEFORE git clone)
+# Defender exclusions (must run BEFORE git clone)
 # ---------------------------------------------------------------------------
 # patch-claude-exe.ps1 is flagged Trojan:Win32/FileFix.BBA!MTB (standard
-# heuristic for binary patchers : ReadAllBytes + IndexOf + WriteAllBytes on
+# heuristic for binary patchers: ReadAllBytes + IndexOf + WriteAllBytes on
 # a .exe). Without a pre-existing exclusion, Defender quarantines the file
 # as soon as it lands on disk -> git clone "succeeds" but the file silently
 # disappears -> the SessionStart hook never fires.
 #
-# Add-MpPreference accepts paths that don't exist yet : the exclusion is
+# Add-MpPreference accepts paths that don't exist yet: the exclusion is
 # armed BEFORE the file is written, so Defender skips it on arrival.
-#
-# Two exclusions because the file lives in two places after deploy.ps1 -Pull:
-# 1. In the cloned repo (read by Claude Code via the absolute path in settings.json)
-# 2. In ~/.claude/hooks/ (where deploy.ps1 -Pull copies it for consistency)
 
 Write-Step 'Adding Defender exclusions for patch-claude-exe.ps1'
 $exclusions = @(
@@ -157,49 +180,58 @@ foreach ($p in $exclusions) {
         Add-MpPreference -ExclusionPath $p -ErrorAction Stop
         Write-Ok $p
     } catch {
-        Write-Warn ("Could not add exclusion for {0} : {1}" -f $p, $_.Exception.Message)
+        Write-Warn ("Could not add exclusion for {0}: {1}" -f $p, $_.Exception.Message)
     }
 }
 
 # ---------------------------------------------------------------------------
-# Step 4/7 : Git + clone
+# Git
 # ---------------------------------------------------------------------------
 
-Write-Step 'Git + repo'
+Write-Step 'Installing Git'
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Write-Info 'Installing Git via winget...'
+    Write-Info 'not found - installing via winget'
     winget install --id Git.Git --exact --source winget --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -ne 0) { throw 'Git install failed' }
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+    Write-Ok 'installed'
 } else {
     Write-Ok 'git already installed'
 }
 
+# ---------------------------------------------------------------------------
+# Clone / update repo
+# ---------------------------------------------------------------------------
+
 if (Test-Path (Join-Path $RepoPath '.git')) {
-    Write-Info "Updating $RepoPath"
+    Write-Step ("Updating {0}" -f $RepoPath)
     git -C $RepoPath pull --ff-only
+    if ($LASTEXITCODE -ne 0) { throw 'git pull failed' }
+    Write-Ok 'up to date'
 } else {
-    Write-Info "Cloning into $RepoPath"
+    Write-Step ("Cloning into {0}" -f $RepoPath)
     $parent = Split-Path $RepoPath
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force $parent | Out-Null }
     git clone $RepoUrl $RepoPath
+    if ($LASTEXITCODE -ne 0) { throw 'git clone failed' }
+    Write-Ok 'cloned'
 }
 
 # ---------------------------------------------------------------------------
-# Step 5/7 : Windows bundle (delegates to windows\install.ps1)
+# Windows bundle (delegated to windows\install.ps1)
 # ---------------------------------------------------------------------------
 
-Write-Step 'Windows bundle (winget packages + PS profiles + Terminal + Fastfetch + Rust)'
+Write-Step 'Installing Windows bundle (PowerShell 7, Terminal, fzf, zoxide, fastfetch, Rust)'
 & (Join-Path $RepoPath 'windows\install.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Windows bundle install failed' }
 
 # ---------------------------------------------------------------------------
-# Step 6/7 : Build statusline Rust binary
+# Build statusline Rust binary
 # ---------------------------------------------------------------------------
-# build.ps1 redirects CARGO_TARGET_DIR to %LOCALAPPDATA% (trusted zone,
-# away from C:\dev under Smart App Control), auto-falls-back to the
-# stable-gnu toolchain if VS Build Tools are absent, builds --release,
-# and copies the binary to ~/.claude/statusline.exe.
+# build.ps1 redirects CARGO_TARGET_DIR to %LOCALAPPDATA% (trusted zone, away
+# from C:\dev under Smart App Control), auto-falls-back to the stable-gnu
+# toolchain if VS Build Tools are absent, builds --release, and copies the
+# binary to ~/.claude/statusline.exe.
 # Refresh PATH first so cargo is visible if Rust was just installed.
 
 Write-Step 'Building statusline Rust binary'
@@ -208,29 +240,35 @@ $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [En
 if ($LASTEXITCODE -ne 0) { throw 'Statusline build failed' }
 
 # ---------------------------------------------------------------------------
-# Step 7/7 : Deploy Claude Code config
+# Deploy Claude Code config
 # ---------------------------------------------------------------------------
 
-Write-Step 'Claude Code config (statusline + settings + hooks + skills)'
+Write-Step 'Deploying Claude Code config (statusline + settings + hooks + skills)'
 & (Join-Path $RepoPath 'claude-code\deploy.ps1') -Pull
 if ($LASTEXITCODE -ne 0) { throw 'Claude Code config deploy failed' }
 
 # ---------------------------------------------------------------------------
-# Summary
+# Done (Homebrew-style: "==> Installation successful!" + next steps)
 # ---------------------------------------------------------------------------
 
-$elapsed = (Get-Date) - $script:T0
+$elapsed = Format-Elapsed ((Get-Date) - $script:T0)
+
 Write-Host ''
-Write-Host '  +-------------------------------------------------------------+' -ForegroundColor Green
-Write-Host ('  |  All done in {0,-46} |' -f (Format-Elapsed $elapsed))         -ForegroundColor Green
-Write-Host '  +-------------------------------------------------------------+' -ForegroundColor Green
+Write-Host '==> ' -ForegroundColor Blue  -NoNewline
+Write-Host 'Installation successful! ' -ForegroundColor White    -NoNewline
+Write-Host ('(' + $elapsed + ')')      -ForegroundColor DarkGray
 Write-Host ''
-Write-Host '  Next steps:'
-Write-Host '    1. Restart Windows Terminal to load the new profiles.'
-Write-Host '    2. Open Claude Code and run /plugin to install frontend-design,'
-Write-Host '       code-review, and superpowers plugins.'
-Write-Host '    3. claude.exe will be patched automatically by the SessionStart'
-Write-Host '       hook at the next Claude Code session.'
+Write-Host '==> ' -ForegroundColor Blue -NoNewline
+Write-Host 'Next steps:' -ForegroundColor White
+Write-Host '  1. Restart Windows Terminal to load the new profiles.'
+Write-Host '  2. Open Claude Code and run ' -NoNewline
+Write-Host '/plugin' -ForegroundColor Cyan -NoNewline
+Write-Host ' to install plugins'
+Write-Host '     (frontend-design, code-review, superpowers).'
+Write-Host '  3. claude.exe will be patched automatically by the SessionStart hook'
+Write-Host '     at the next Claude Code session.'
 Write-Host ''
-Write-Host '  Docs:  https://github.com/ahmed-mili/dev-environment' -ForegroundColor DarkGray
+Write-Host '==> ' -ForegroundColor Blue -NoNewline
+Write-Host 'Docs: ' -ForegroundColor White -NoNewline
+Write-Host 'https://github.com/ahmed-mili/dev-environment' -ForegroundColor Cyan
 Write-Host ''

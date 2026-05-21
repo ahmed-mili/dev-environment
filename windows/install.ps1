@@ -42,8 +42,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# UTF-8 output so the Unicode check-mark glyph below renders correctly in
+# Windows Terminal. The glyph is built at runtime from its codepoint
+# ([char]0x2713) so the source file stays pure ASCII (PS 5.1 reads unBOMed
+# .ps1 in CP-1252 -> UTF-8 bytes 0x91-0x94 would decode to smart quotes
+# which break the parser).
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+$GLYPH_OK = [char]0x2713  # check mark
+
 function Write-Step($msg) { Write-Host "  ==> $msg" -ForegroundColor Blue }
-function Write-Ok($msg)   { Write-Host "      + " -ForegroundColor Green -NoNewline; Write-Host $msg }
+function Write-Ok($msg)   { Write-Host ("      " + $GLYPH_OK + " ") -ForegroundColor Green -NoNewline; Write-Host $msg }
 function Write-Note($msg) { Write-Host "      ! " -ForegroundColor Yellow -NoNewline; Write-Host $msg }
 
 function Short-Path([string]$p) {
