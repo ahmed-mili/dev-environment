@@ -8,7 +8,6 @@
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Read;
-use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -26,15 +25,6 @@ const RESET: &str = "\x1b[0m";
 
 fn rgb(r: u8, g: u8, b: u8) -> String {
     format!("\x1b[38;2;{};{};{}m", r, g, b)
-}
-
-fn lerp_u8(a: u8, b: u8, t: f64) -> u8 {
-    (a as f64 + (b as f64 - a as f64) * t)
-        .round()
-        .clamp(0.0, 255.0) as u8
-}
-fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f64) -> (u8, u8, u8) {
-    (lerp_u8(a.0, b.0, t), lerp_u8(a.1, b.1, t), lerp_u8(a.2, b.2, t))
 }
 
 fn now_ms() -> i64 {
@@ -388,8 +378,6 @@ struct CredsRoot {
 struct CredsOauth {
     #[serde(rename = "accessToken")]
     access_token: Option<String>,
-    #[serde(rename = "subscriptionType")]
-    subscription_type: Option<String>,
 }
 
 fn read_credentials(claude_dir: &Path) -> Option<CredsRoot> {
