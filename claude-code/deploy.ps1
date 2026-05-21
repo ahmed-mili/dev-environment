@@ -44,11 +44,12 @@ $CustomSkills = @(
 # (see README for SAC + Defender exception prereqs).
 $LocalOnlyHooks = @()
 
+# ---------------------------------------------------------------------------
+# Copy primitive : returns a status string instead of printing, so the caller
+# can format the result inside a table row.
+# ---------------------------------------------------------------------------
 function Copy-One($from, $to) {
-    if (-not (Test-Path $from)) {
-        Write-Host "  x skip $from (missing)" -ForegroundColor DarkGray
-        return
-    }
+    if (-not (Test-Path $from)) { return 'SKIP' }
     $parent = Split-Path -Parent $to
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force $parent | Out-Null }
     # PowerShell gotcha : `Copy-Item <dir> <existing-dir> -Recurse` copies
@@ -58,51 +59,136 @@ function Copy-One($from, $to) {
         Remove-Item $to -Recurse -Force
     }
     Copy-Item $from $to -Force -Recurse
-    Write-Host "  + $(Split-Path -Leaf $from)" -ForegroundColor Green
+    return 'OK'
 }
 
-if ($Pull) {
-    Write-Host "=== Pull : $RepoClaude -> $HomeClaude ===" -ForegroundColor Cyan
-    Copy-One "$RepoClaude\statusline.ps1" "$HomeClaude\statusline.ps1"
-    Copy-One "$RepoClaude\settings.json"  "$HomeClaude\settings.json"
+# ---------------------------------------------------------------------------
+# ASCII table helpers : +---+---+ style. Status column is fixed width 6
+# (max of 'Status' header / 'OK' / 'SKIP' / 'LOCAL' = 6 chars).
+# ---------------------------------------------------------------------------
+$StatusColW = 6
 
-    Write-Host "Hooks :" -ForegroundColor Cyan
+function New-TableBorder($nameWidth) {
+    return '+' + ('-' * ($nameWidth + 2)) + '+' + ('-' * ($StatusColW + 2)) + '+'
+}
+
+function Write-TableHeader($title, $count, $nameWidth) {
+    $border = New-TableBorder $nameWidth
+    Write-Host ''
+    Write-Host ("{0} ({1}) :" -f $title, $count) -ForegroundColor Cyan
+    Write-Host ("  " + $border) -ForegroundColor DarkGray
+    Write-Host ("  | " + ('Name'.PadRight($nameWidth)) + " | " + ('Status'.PadRight($StatusColW)) + " |")
+    Write-Host ("  " + $border) -ForegroundColor DarkGray
+}
+
+function Write-TableRow($name, $status, $nameWidth) {
+    $color = switch ($status) {
+        'OK'    { 'Green' }
+        'SKIP'  { 'DarkGray' }
+        'LOCAL' { 'DarkYellow' }
+        default { 'Red' }
+    }
+    $pipe = '|'
+    Write-Host ("  " + $pipe + " ") -NoNewline -ForegroundColor DarkGray
+    Write-Host ($name.PadRight($nameWidth)) -NoNewline
+    Write-Host (" " + $pipe + " ") -NoNewline -ForegroundColor DarkGray
+    Write-Host ($status.PadRight($StatusColW)) -NoNewline -ForegroundColor $color
+    Write-Host (" " + $pipe) -ForegroundColor DarkGray
+}
+
+function Write-TableFooter($nameWidth) {
+    Write-Host ("  " + (New-TableBorder $nameWidth)) -ForegroundColor DarkGray
+}
+
+function Get-NameWidth($names) {
+    $maxName = ($names | Measure-Object -Maximum -Property Length).Maximum
+    if ($maxName -lt 4) { $maxName = 4 }   # 'Name' header is 4 chars
+    return $maxName
+}
+
+# ---------------------------------------------------------------------------
+# Pull : repo -> ~/.claude/
+# ---------------------------------------------------------------------------
+if ($Pull) {
+    Write-Host ("=== Pull : {0} -> {1} ===" -f $RepoClaude, $HomeClaude) -ForegroundColor Cyan
+
+    # Top-level files
+    $files = @('statusline.ps1', 'settings.json')
+    $fileW = Get-NameWidth $files
+    Write-TableHeader 'Files' $files.Count $fileW
+    foreach ($f in $files) {
+        $st = Copy-One "$RepoClaude\$f" "$HomeClaude\$f"
+        Write-TableRow $f $st $fileW
+    }
+    Write-TableFooter $fileW
+
+    # Hooks
     if (Test-Path "$RepoClaude\hooks") {
         New-Item -ItemType Directory -Force "$HomeClaude\hooks" | Out-Null
-        Get-ChildItem "$RepoClaude\hooks" -File | ForEach-Object {
-            Copy-One $_.FullName "$HomeClaude\hooks\$($_.Name)"
+        $hooks = @(Get-ChildItem "$RepoClaude\hooks" -File | Sort-Object Name)
+        $hookNames = @($hooks | ForEach-Object { $_.Name })
+        $hookW = Get-NameWidth $hookNames
+        Write-TableHeader 'Hooks' $hooks.Count $hookW
+        foreach ($h in $hooks) {
+            $st = Copy-One $h.FullName "$HomeClaude\hooks\$($h.Name)"
+            Write-TableRow $h.Name $st $hookW
         }
+        Write-TableFooter $hookW
     }
 
-    Write-Host "Skills :" -ForegroundColor Cyan
-    foreach ($s in $CustomSkills) {
-        Copy-One "$RepoClaude\skills\$s" "$HomeClaude\skills\$s"
+    # Skills
+    $sortedSkills = $CustomSkills | Sort-Object
+    $skillW = Get-NameWidth $sortedSkills
+    Write-TableHeader 'Skills' $sortedSkills.Count $skillW
+    foreach ($s in $sortedSkills) {
+        $st = Copy-One "$RepoClaude\skills\$s" "$HomeClaude\skills\$s"
+        Write-TableRow $s $st $skillW
     }
+    Write-TableFooter $skillW
 
     Write-Host "`nDone. Restart Claude Code so the new skills/settings are picked up." -ForegroundColor Yellow
 }
 
+# ---------------------------------------------------------------------------
+# Push : ~/.claude/ -> repo
+# ---------------------------------------------------------------------------
 if ($Push) {
-    Write-Host "=== Push : $HomeClaude -> $RepoClaude ===" -ForegroundColor Cyan
-    Copy-One "$HomeClaude\statusline.ps1" "$RepoClaude\statusline.ps1"
-    Copy-One "$HomeClaude\settings.json"  "$RepoClaude\settings.json"
+    Write-Host ("=== Push : {0} -> {1} ===" -f $HomeClaude, $RepoClaude) -ForegroundColor Cyan
 
-    Write-Host "Hooks :" -ForegroundColor Cyan
+    $files = @('statusline.ps1', 'settings.json')
+    $fileW = Get-NameWidth $files
+    Write-TableHeader 'Files' $files.Count $fileW
+    foreach ($f in $files) {
+        $st = Copy-One "$HomeClaude\$f" "$RepoClaude\$f"
+        Write-TableRow $f $st $fileW
+    }
+    Write-TableFooter $fileW
+
     if (Test-Path "$HomeClaude\hooks") {
         New-Item -ItemType Directory -Force "$RepoClaude\hooks" | Out-Null
-        Get-ChildItem "$HomeClaude\hooks" -File | ForEach-Object {
-            if ($LocalOnlyHooks -contains $_.Name) {
-                Write-Host "  o skip $($_.Name) (local-only)" -ForegroundColor DarkYellow
-                return
+        $hooks = @(Get-ChildItem "$HomeClaude\hooks" -File | Sort-Object Name)
+        $hookNames = @($hooks | ForEach-Object { $_.Name })
+        $hookW = Get-NameWidth $hookNames
+        Write-TableHeader 'Hooks' $hooks.Count $hookW
+        foreach ($h in $hooks) {
+            if ($LocalOnlyHooks -contains $h.Name) {
+                Write-TableRow $h.Name 'LOCAL' $hookW
+                continue
             }
-            Copy-One $_.FullName "$RepoClaude\hooks\$($_.Name)"
+            $st = Copy-One $h.FullName "$RepoClaude\hooks\$($h.Name)"
+            Write-TableRow $h.Name $st $hookW
         }
+        Write-TableFooter $hookW
     }
 
-    Write-Host "Skills (custom whitelist only) :" -ForegroundColor Cyan
-    foreach ($s in $CustomSkills) {
-        Copy-One "$HomeClaude\skills\$s" "$RepoClaude\skills\$s"
+    $sortedSkills = $CustomSkills | Sort-Object
+    $skillW = Get-NameWidth $sortedSkills
+    Write-TableHeader 'Skills' $sortedSkills.Count $skillW
+    foreach ($s in $sortedSkills) {
+        $st = Copy-One "$HomeClaude\skills\$s" "$RepoClaude\skills\$s"
+        Write-TableRow $s $st $skillW
     }
+    Write-TableFooter $skillW
 
     Write-Host "`nDone. Reminder : cd dev-environment ; git add -A ; git commit ; git push" -ForegroundColor Yellow
 }
