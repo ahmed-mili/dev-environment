@@ -59,7 +59,7 @@ $GLYPH_OK = [char]0x2713  # check mark
 
 $script:T0        = Get-Date
 $script:StepIdx   = 0
-$script:StepTotal = 9   # 1.Checks 2.Defender 3.Git 4.GitConfig 5.Clone 6.Bundle 7.Build 8.Deploy 9.Plugins
+$script:StepTotal = 9   # 1.Checks 2.Defender 3.Git 4.GitConfig 5.Clone 6.Bundle 7.Build 8.Deploy 9.UpdateClaude+Plugins
 
 function Write-Step {
     param([string]$msg)
@@ -296,13 +296,22 @@ if ($LASTEXITCODE -ne 0) { throw 'Claude Code config deploy failed' }
 # Source-of-truth for the plugin list is settings.json -> enabledPlugins,
 # so this list stays in sync automatically.
 
-Write-Step 'Installing Claude Code plugins'
+Write-Step 'Updating Claude Code + installing plugins'
 $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
 $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
 if (-not $claudeCmd) {
-    Write-Warn 'claude.exe not on PATH yet; skipping plugin install.'
-    Write-Hint 'Restart your shell and run `claude plugin install <name>@claude-plugins-official` manually.'
+    Write-Warn 'claude.exe not on PATH yet; skipping update + plugin install.'
+    Write-Hint 'Restart your shell, then run `claude update` and `claude plugin install <name>@claude-plugins-official`.'
 } else {
+    # `claude update` upgrades to the latest Anthropic release. winget's
+    # Anthropic.ClaudeCode package can lag by a release or two; this catches
+    # us up so the patch-claude-exe hook always sees the current binary
+    # structure (e.g., v2.1.147 removed the idle-freeze code path so the
+    # old tick-force-active patch is no longer needed).
+    Write-Info 'claude update (catch up to latest Anthropic release)'
+    & $claudeCmd.Source update 2>&1 | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
+    if ($LASTEXITCODE -ne 0) { Write-Warn ("claude update returned {0}" -f $LASTEXITCODE) }
+
     $settings = Get-Content (Join-Path $RepoPath 'claude-code\settings.json') -Raw | ConvertFrom-Json
     $plugins = @($settings.enabledPlugins.PSObject.Properties | Where-Object { $_.Value -eq $true } | ForEach-Object { $_.Name })
     foreach ($p in $plugins) {

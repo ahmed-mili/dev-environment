@@ -3,17 +3,34 @@
 # Pourquoi : claude.exe applique un clamp `Math.max(1, refreshInterval) * 1000`
 # (= refreshInterval >= 1 seconde) sur la cadence d'appel de la statusline
 # command. Avec ce clamp, l'animation /effort xhigh/max du statusline Rust
-# tourne a 1 Hz max au lieu de la cadence picker (8.93 Hz = M=112ms).
+# tourne a 1 Hz max au lieu de la cadence picker (8.93 Hz = M=112ms). De plus,
+# le composant statusline est wrappe dans un debouncer 300ms qui empeche
+# 112ms < 300ms de faire fire le spawn. On corrige les deux.
 #
-# Le patch remplace `Math.max(1,X)*1000` par `Math.max(0,X)*1000` (X = var
-# minifiee, change a chaque release Anthropic -> on utilise un regex pour
-# trouver le pattern). Same length, in-place replacement.
+# Patches actifs (2) :
+#   1. refreshInterval-clamp : Math.max(1,X)*1000 -> Math.max(0,X)*1000
+#   2. statusline-debounce   : =H(()=>{F()},300)  -> =H(()=>{F()}, 50)
+# X, H, F sont des vars minifiees Bun qui changent a chaque release Anthropic.
+# Les patches sont regex-based avec verification de contexte pour rester
+# robustes aux re-minifications.
+#
+# Historique (pour reference si le bug idle ressurgit) :
+# Sur claude.exe v2.1.145, le tick statusline freezait ~30s entre les vagues
+# d'activite a cause d'une garde `!K||q===null?gZH:` qui short-circuitait
+# vers une fn no-op pendant l'idle (K=useContext(YQ) devenait null entre
+# 2 messages assistant). On appliquait alors 2 patches additionnels
+# (tick-force-active + tick-native-settimeout) pour forcer le path actif.
+# Anthropic a refactor le code dans v2.1.147 : le tick utilise maintenant
+# `let M=!1,O,j=()=>{...O=_.setTimeout(j,q)},return O=_.setTimeout(j,q)` sans
+# garde idle -> path toujours actif par construction. Patches obsoletes,
+# retires. Le bootstrap force `claude update` apres install pour garantir
+# v2.1.147+ partout.
 #
 # Logique :
 # 1. Skip rapide si mtime de claude.exe == mtime stockee dans le marker
 #    (pas d'update depuis la derniere fois qu'on a patche).
-# 2. Sinon scanner le binaire avec regex pour trouver le pattern courant,
-#    appliquer le patch si nouveau, no-op si deja patche.
+# 2. Sinon scanner le binaire avec regex pour trouver les patterns courants,
+#    appliquer les patches si nouveaux, no-op si deja patche.
 # 3. Mettre a jour le marker avec la nouvelle mtime.
 #
 # Si on a re-patche, on emet un systemMessage pour signaler a l'user qu'il
@@ -42,17 +59,17 @@ if (Test-Path -LiteralPath $markerPath) {
 $bytes = [System.IO.File]::ReadAllBytes($claudePath)
 $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
 
-# PATCH 1 - Pattern : Math.max(1,X)*1000 ou X est un ident d'une lettre (minifie Bun).
-# On exige aussi que ce soit le clamp du statusLine refreshInterval (verif
-# par contexte : presence de "statusLine?.refreshInterval" dans les 300
-# chars precedents) pour eviter de toucher un autre Math.max(1, ...)*1000
-# eventuel.
-$pattern1 = 'Math\.max\(1,([a-zA-Z_$])\)\*1000'
-$matches1 = [regex]::Matches($text, $pattern1)
-
 $applied = @()
 $warnings = @()
 $toApply = @()
+
+# PATCH 1 - refreshInterval clamp. Pattern : Math.max(1,X)*1000 ou X est un
+# ident d'une lettre (minifie Bun). On exige aussi que ce soit le clamp du
+# statusLine refreshInterval (verif par contexte : presence de
+# "statusLine?.refreshInterval" dans les 300 chars precedents) pour eviter
+# de toucher un autre Math.max(1, ...)*1000 eventuel.
+$pattern1 = 'Math\.max\(1,([a-zA-Z_$])\)\*1000'
+$matches1 = [regex]::Matches($text, $pattern1)
 
 foreach ($m in $matches1) {
     $idx = $m.Index
@@ -72,26 +89,20 @@ foreach ($m in $matches1) {
     }
 }
 
-# PATCH 3 - Statusline debounce. Pattern : =HOOK(()=>{FN()},300)
-# Le composant statusline crée R = VC(() => { p() }, 300) ou VC est un hook
-# debounce (Bun-minified, renomme entre releases : etait HC, maintenant VC).
-# Le pattern : =[hook](()=>{[fn]()},300) avec hook = 1-3 chars, fn = 1 char.
-# On verifie le contexte (presence de "statusLine" ou "executeCommand" ou
-# "onResult" dans les 600 chars precedents pour s'assurer que c'est le bon
-# debounce et pas un autre dans le binaire).
-#
-# Le debounce de 300ms empeche refreshInterval < 300ms de fonctionner :
-# _9(R, 112) arme R() toutes les 112ms, mais R() est un debouncer qui reset
-# son timer a chaque appel, donc p() (le vrai spawn) n'est JAMAIS appele
-# tant que R() est rearme avant 300ms. Resultat : statusline figee apres
-# le mount initial.
+# PATCH 2 - Statusline debounce. Pattern : =HOOK(()=>{FN()},300)
+# Le composant statusline cree R = VC(() => { p() }, 300) ou VC est un hook
+# debounce (Bun-minified, renomme entre releases : etait HC, puis VC, puis
+# Kb...). Le pattern : =[hook](()=>{[fn]()},300) avec hook = 1-3 chars,
+# fn = 1 char. On verifie le contexte (presence de "statusLine" ou
+# "executeCommand" ou "onResult" dans les 600 chars precedents pour
+# s'assurer que c'est le bon debounce et pas un autre dans le binaire).
 #
 # Replacement : 300 -> ` 50` (espace + 50). 3 chars = 3 chars, in-place OK.
 # JavaScript ignore le whitespace -> setTimeout(fn, 50) = 50ms.
-$pattern3 = '=([a-zA-Z_$]{1,3})\(\(\)=>\{([a-zA-Z_$])\(\)\},300\)'
-$matches3 = [regex]::Matches($text, $pattern3)
+$pattern2 = '=([a-zA-Z_$]{1,3})\(\(\)=>\{([a-zA-Z_$])\(\)\},300\)'
+$matches2 = [regex]::Matches($text, $pattern2)
 
-foreach ($m in $matches3) {
+foreach ($m in $matches2) {
     $idx = $m.Index
     $contextStart = [Math]::Max(0, $idx - 600)
     $context = $text.Substring($contextStart, $idx - $contextStart)
@@ -111,115 +122,6 @@ foreach ($m in $matches3) {
         Idx  = $idx
         Len  = $m.Length
         New  = $newStr
-    }
-}
-
-# PATCH 4 & 5 - statusline tick keep-alive en idle (decouvert 2026-05-20)
-#
-# Le hook qui appelle R() toutes les 112ms est `function _9(H,q){...}` :
-#
-#   function _9(H,q){
-#     let $=Wt.useRef(H);$.current=H;
-#     let K=Wt.useContext(YQ);
-#     let _=Wt.useMemo(()=>
-#       !K||q===null?gZH:                              <-- PATTERN A
-#       (f)=>{let A=!1,z;let Y=()=>{
-#         if(A)return;
-#         try{$.current()}
-#         finally{if(!A)z=K.setTimeout(Y,q)}           <-- PATTERN B (×1)
-#       };
-#       return z=K.setTimeout(Y,q),                    <-- PATTERN B (×2)
-#       ()=>{A=!0,z()}},
-#       [K,q]);
-#     Wt.useSyncExternalStore(_,Cs8);
-#   }
-#
-# K=useContext(YQ) est le RootStore Ink, qui devient null ou suspend
-# `K.setTimeout` pendant les phases idle entre 2 messages assistant. Resultat :
-# R() ne fire plus, p() (le spawn statusline.exe) jamais appele -> animation
-# figee ~30s entre les vagues d'activite.
-#
-# Verifie empiriquement le 2026-05-20 via instrumentation `~/.claude/statusline-tick-log.txt` :
-# 5 gaps de ~30s consecutifs, cycle 60s actif + 30s freeze repetitif. Le picker
-# /effort ne freeze pas car il utilise `q.subscribeKeepAlive` (vz function),
-# different code path qui survit l'idle. La statusline statique externe utilise
-# `_9` qui depend de K.setTimeout = pas idle-safe.
-#
-# Fix : forcer le path actif (false?gZH: au lieu de !K||q===null?gZH:) ET
-# remplacer K.setTimeout par Is8 (le setTimeout natif fallback deja defini
-# pres de la def de Is8). Padding avec espaces pour conserver la longueur.
-# JS ignore le whitespace -> code valide.
-#
-# Is8 = (H,q)=>{let $=setTimeout(H,q);return()=>clearTimeout($)}
-# -> retourne une cleanup function, compatible avec z() qui appelle z comme
-#    fonction dans le cleanup.
-
-# PATCH 4 : force `false?gZH:` (toujours path actif) au lieu de `!K||q===null?gZH:`
-$old4 = '!K||q===null?gZH:'
-$new4 = 'false?gZH:       '   # 7 espaces de padding pour conserver 17 chars
-if ($old4.Length -ne $new4.Length) {
-    $warnings += "tick-force-active: lengths differ ($($old4.Length) vs $($new4.Length))"
-} else {
-    $idx4 = $text.IndexOf($old4)
-    if ($idx4 -lt 0) {
-        # Verifier si deja patche
-        $alreadyP4 = $text.Contains($new4)
-        if (-not $alreadyP4) {
-            $warnings += "tick-force-active: pattern '!K||q===null?gZH:' introuvable"
-        }
-    } else {
-        # Verif contexte : doit etre dans la def de _9, donc dans 200 chars
-        # avant on attend 'function _9(' OU 'useContext(YQ)'
-        $contextStart = [Math]::Max(0, $idx4 - 250)
-        $context = $text.Substring($contextStart, $idx4 - $contextStart)
-        if ($context -notmatch 'function _9\(|useContext\(YQ\)') {
-            $warnings += "tick-force-active: contexte non reconnu autour de offset $idx4"
-        } else {
-            $toApply += [PSCustomObject]@{
-                Name = "tick-force-active-path"
-                Idx  = $idx4
-                Len  = $old4.Length
-                New  = $new4
-            }
-        }
-    }
-}
-
-# PATCH 5 : remplace `K.setTimeout(Y,q)` (×2) par `Is8(Y,q)` + padding
-# Is8 retourne une cleanup function -> compatible avec le cleanup z() du _9.
-$old5 = 'K.setTimeout(Y,q)'
-$new5 = 'Is8(Y,q)         '   # 9 espaces de padding pour conserver 17 chars
-if ($old5.Length -ne $new5.Length) {
-    $warnings += "tick-native-settimeout: lengths differ ($($old5.Length) vs $($new5.Length))"
-} else {
-    # Trouver TOUTES les occurrences (attendu : 2, toutes dans _9)
-    $idx5 = 0
-    $found5 = @()
-    while (($idx5 = $text.IndexOf($old5, $idx5)) -ge 0) {
-        $found5 += $idx5
-        $idx5++
-    }
-    if ($found5.Count -eq 0) {
-        $alreadyP5 = $text.Contains($new5)
-        if (-not $alreadyP5) {
-            $warnings += "tick-native-settimeout: pattern 'K.setTimeout(Y,q)' introuvable"
-        }
-    } else {
-        foreach ($occ in $found5) {
-            # Verif contexte : doit etre proche de la def _9 (a 50KB pres)
-            $contextStart = [Math]::Max(0, $occ - 300)
-            $context = $text.Substring($contextStart, $occ - $contextStart)
-            if ($context -notmatch '\$\.current\(\)|useSyncExternalStore|function _9\(') {
-                $warnings += "tick-native-settimeout: contexte non reconnu a offset $occ, skip"
-                continue
-            }
-            $toApply += [PSCustomObject]@{
-                Name = "tick-native-settimeout-at-$occ"
-                Idx  = $occ
-                Len  = $old5.Length
-                New  = $new5
-            }
-        }
     }
 }
 
