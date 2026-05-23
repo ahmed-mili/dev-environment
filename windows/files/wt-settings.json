@@ -22,7 +22,7 @@
             "colorScheme": "Catppuccin Mocha",
             "font":
             {
-                "face": "JetBrainsMono Nerd Font",
+                "face": "JetBrains Mono, Symbols Nerd Font Mono, Noto Color Emoji, Segoe UI Emoji",
                 "size": 11
             },
             "opacity": 85,
