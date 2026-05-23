@@ -15,5 +15,6 @@
   "autoUpdatesChannel": "latest",
   "autoDreamEnabled": true,
   "skipDangerousModePermissionPrompt": true,
-  "theme": "dark-ansi"
+  "theme": "dark-ansi",
+  "skipAutoPermissionPrompt": true
 }
