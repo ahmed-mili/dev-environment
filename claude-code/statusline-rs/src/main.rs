@@ -120,30 +120,12 @@ fn format_bar(pct: f64, col: &str, width: usize) -> String {
     )
 }
 
-// Parite bit-pour-bit avec le picker /effort de claude.exe v2.1.145.
-// Source extraite du binaire :
-//
-//   var ZC = 16;
-//   function vz(H = 16) {                       // H = 100 pour le picker
-//       ...
-//       let M = H === null ? null : Math.ceil(H/ZC) * ZC;  // = 112 pour H=100
-//       let w = sZH.useSyncExternalStore(..., () =>
-//           Math.floor(q.now() / M) * M
-//       );
-//       return [_, w];
-//   }
-//   function Xbf(H){ ... let [, K] = vz(100), _ = Math.floor(K/100); ...
-//                    color: wi(Y + _) }   // max
-//   function Jbf(H){ ... let [, K] = vz(100), _ = $.length + 4,
-//                    f = Math.floor(K/100) % _; ...
-//                    color: O ? Wbf : "autoAccept", bold: O || w }   // xhigh
-//
-// Donc le picker tick reel = floor(K/100) avec K = floor(now/M)*M et M=112.
-// La frame avance toutes les 112 ms (~8.93 Hz), MAIS comme on divise par 100
-// un K qui progresse par paliers de 112, certaines transitions sautent une
-// frame. Exemple : K=896 -> frame 8, K=1008 -> frame 10 (saut de 2). Ce
-// stutter structurel se produit tous les ~9 frames, et est intrinseque au
-// picker -- le reproduire est necessaire pour la parite visuelle.
+// Cadence interne du picker /effort de claude.exe : M=112ms (~9 Hz). Le rendu
+// des effort levels cote statusline est desormais statique (cf.
+// get_effort_display), donc picker_tick ne sert plus qu'au log
+// d'instrumentation (statusline-tick-log.txt) comme identifiant deterministe
+// d'un tick -- utile pour correler des ticks rapproches sans coller un
+// timestamp ms qui change a chaque invocation.
 const PICKER_ZC: i64 = 16;
 const PICKER_H: i64 = 100;
 const PICKER_M: i64 = ((PICKER_H + PICKER_ZC - 1) / PICKER_ZC) * PICKER_ZC; // = 112
@@ -157,76 +139,36 @@ fn get_effort_display(level: Option<&str>) -> String {
     let Some(level) = level else { return String::new(); };
     if level.is_empty() { return String::new(); }
     let bold = "\x1b[1m";
-    let nobold = "\x1b[22m";
     let rst = "\x1b[0m";
     let label = level;
 
-    // Couleurs statiques pour low/medium/high (theme dark-ansi, mapping Om9
-    // dans claude.exe) -- inchangees, aucune animation.
-    // Couleurs animees pour xhigh/max :
-    //   xhigh -> "autoAccept-shimmer" : pour chaque char au position M :
-    //              O = (M === frame)        glimmer
-    //              w = (M === frame +/- 1)  voisin
-    //              color: O ? Wbf : "autoAccept"
-    //              bold:  O || w
-    //            Wbf = "#d0b4ff", "autoAccept" mappe a ansi:magentaBright dans
-    //            dark-ansi (= \x1b[95m).
-    //   max   -> "rainbow-animated" : pour chaque char a la position M :
-    //              color: wi(M + tick)
-    //              bold:  true (au parent)
-    //            wi(N) = UO1[N % 7] avec UO1 = [rainbow_red, rainbow_orange,
-    //            rainbow_yellow, rainbow_green, rainbow_blue, rainbow_indigo,
-    //            rainbow_violet]. Dans dark-ansi : red, redBright, yellow,
-    //            green, cyan, blue, magenta (ANSI 31, 91, 33, 32, 36, 34, 35).
-    let now = now_ms();
-    let tick = picker_tick(now);
-
+    // Rendu statique. Les couleurs sont des codes ANSI de slots de palette du
+    // terminal, PAS des RGB figes : on emet exactement le meme SGR que
+    // claude.exe pour chaque cible -> rendu strictement identique quel que soit
+    // le theme du terminal (ici Catppuccin Mocha : slot 9 = #F38BA8, slot 13 =
+    // #F5C2E7) et le reglage intenseTextStyle.
+    //   low/medium/high -> ANSI bright 93/92/94 + bold (design statusline, pas
+    //                      de cible externe a matcher).
+    //   xhigh -> ANSI 95 (magentaBright), SANS gras = couleur EXACTE de
+    //            l'indicateur "⏵⏵ accept edits on". Verifie dans le binaire :
+    //            acceptEdits -> color:"autoAccept" ; dark-ansi mappe autoAccept
+    //            -> ansi:magentaBright -> chalk.magentaBright -> \x1b[95m. C'est
+    //            aussi la couleur de base des lettres de l'ancien xhigh anime
+    //            (le halo balayant #D0B4FF n'est PAS voulu) -- cf. git 5c3b0c3.
+    //   max   -> ANSI 91 (bright red), SANS gras = couleur EXACTE de
+    //            l'indicateur "⏵⏵ bypass permissions on". Verifie :
+    //            bypassPermissions -> color:"error" ; dark-ansi mappe error ->
+    //            ansi:redBright -> chalk.redBright -> \x1b[91m.
+    // Les indicateurs de claude.exe sont rendus color-only -- createElement(
+    // Text, {color}, glyph, " ", label), AUCUN bold ni dim. On reproduit donc
+    // uniquement le code couleur (sans \x1b[1m) : match au pixel pres, robuste
+    // au theme, a la police (JetBrainsMono Nerd Font) et a intenseTextStyle.
     match level {
         "low" => format!("\x1b[93m{}{}{}", bold, label, rst),
         "medium" => format!("\x1b[92m{}{}{}", bold, label, rst),
         "high" => format!("\x1b[94m{}{}{}", bold, label, rst),
-        "xhigh" => {
-            let chars: Vec<char> = label.chars().collect();
-            let period = (chars.len() as i64) + 4;
-            let mut frame = tick % period;
-            if frame < 0 { frame += period; }
-            let mut s = String::new();
-            for (i, c) in chars.iter().enumerate() {
-                let i = i as i64;
-                if i == frame {
-                    s.push_str(&rgb(208, 180, 255));
-                    s.push_str(bold);
-                } else if i == frame - 1 || i == frame + 1 {
-                    s.push_str("\x1b[95m");
-                    s.push_str(bold);
-                } else {
-                    s.push_str("\x1b[95m");
-                    s.push_str(nobold);
-                }
-                s.push(*c);
-            }
-            s.push_str(rst);
-            s
-        }
-        "max" => {
-            let palette = [
-                "\x1b[31m", "\x1b[91m", "\x1b[33m", "\x1b[32m", "\x1b[36m", "\x1b[34m",
-                "\x1b[35m",
-            ];
-            let chars: Vec<char> = label.chars().collect();
-            let palette_len = palette.len() as i64;
-            let mut s = String::new();
-            for (i, c) in chars.iter().enumerate() {
-                let i = i as i64;
-                let mut idx = (i + tick) % palette_len;
-                if idx < 0 { idx += palette_len; }
-                s.push_str(palette[idx as usize]);
-                s.push_str(bold);
-                s.push(*c);
-            }
-            s.push_str(rst);
-            s
-        }
+        "xhigh" => format!("\x1b[95m{}{}", label, rst),
+        "max" => format!("\x1b[91m{}{}", label, rst),
         _ => String::new(),
     }
 }
@@ -386,16 +328,53 @@ fn read_credentials(claude_dir: &Path) -> Option<CredsRoot> {
     serde_json::from_str(&raw).ok()
 }
 
-// INSTRUMENTATION (2026-05-20) : tracer la voie effective pour distinguer
-// cache hit / appel HTTP (durée mesurée) / cooldown / stale. Sert UNIQUEMENT au
-// log de debug `statusline-tick-log.txt` — à supprimer une fois la cause du
-// freeze ~3s identifiée.
+// Cache 1h de la version de claude.exe pour le User-Agent. Si l'API Anthropic
+// commence un jour a verifier strictement le UA, hard-coder "2.0.32" devient
+// une bombe a retardement. On extrait la version via `claude --version`
+// (sortie : "2.1.148 (Claude Code)\n"), cachee dans claude-version.txt.
+// Fallback "2.0.32" si claude introuvable -- valeur historique connue pour
+// fonctionner avec l'endpoint /api/oauth/usage.
+fn detect_claude_version(claude_dir: &Path) -> String {
+    let cache_path = claude_dir.join("claude-version.txt");
+    if let Some(age) = file_age_secs(&cache_path) {
+        if age < 3600.0 {
+            if let Ok(s) = fs::read_to_string(&cache_path) {
+                let v = s.trim().to_string();
+                if !v.is_empty() {
+                    return v;
+                }
+            }
+        }
+    }
+    let mut cmd = Command::new("claude");
+    cmd.arg("--version");
+    cmd.stdin(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let version = cmd
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .and_then(|s| s.split_whitespace().next().map(String::from))
+        .filter(|s| !s.is_empty() && s.chars().next().map_or(false, |c| c.is_ascii_digit()))
+        .unwrap_or_else(|| "2.0.32".to_string());
+    let _ = fs::write(&cache_path, &version);
+    version
+}
+
 #[derive(Debug, Clone, Copy)]
 enum UsageSource {
+    Stdin,              // rate_limits.* directement dans le stdin JSON (Pro/Max
+                        // apres 1er API call). Source la plus fiable -- pas
+                        // d'appel HTTP, pas de token, pas de cache.
     CacheFresh,
     ApiSuccess,
-    ApiTimeoutOrIo,
+    ApiSuccessRetry,    // succes au 2e essai apres retry 500ms
+    ApiTimeoutOrIo,     // echec apres 1 essai (+1 retry) -- reseau down ou DNS
     Api429,
+    Api401,             // token expire -- claude refresh au prochain api call
+    ApiBadStatus,       // autre code 4xx/5xx
     Cooldown,
     StaleCacheFallback,
     NoCredsOrNoCache,
@@ -407,15 +386,130 @@ struct UsageResult {
     reference: Option<DateTime<Utc>>,
     source: UsageSource,
     api_ms: Option<u128>,
+    api_status: Option<u16>,
+    api_attempts: u8,
 }
 
-fn read_usage(claude_dir: &Path) -> UsageResult {
+// Resultat d'un essai HTTP unique. Distingue les classes d'erreurs pour decider
+// quoi faire :
+//   - Io/Timeout -> RETRY (peut etre transitoire : DNS hiccup, packet loss)
+//   - Status(code) -> PAS de retry (server-side decision : 429, 401, 5xx ne se
+//     resolvent pas en 500ms)
+//   - BodyParse -> PAS de retry (le serveur a renvoye 200 OK mais avec un corps
+//     non-JSON : probablement une page d'erreur HTML, structurelle)
+enum FetchOutcome {
+    Ok(Value),
+    Io,
+    Status(u16),
+    BodyParse,
+}
+
+fn fetch_usage_once(agent: &ureq::Agent, token: &str, user_agent: &str) -> FetchOutcome {
+    match agent
+        .get("https://api.anthropic.com/api/oauth/usage")
+        .set("Authorization", &format!("Bearer {}", token))
+        .set("anthropic-beta", "oauth-2025-04-20")
+        .set("User-Agent", user_agent)
+        .set("Accept", "application/json, text/plain, */*")
+        .set("Content-Type", "application/json")
+        .call()
+    {
+        Ok(resp) => match resp.into_string() {
+            Ok(body) => match serde_json::from_str::<Value>(&body) {
+                Ok(v) => FetchOutcome::Ok(v),
+                Err(_) => FetchOutcome::BodyParse,
+            },
+            Err(_) => FetchOutcome::Io,
+        },
+        Err(ureq::Error::Status(code, _)) => FetchOutcome::Status(code),
+        Err(ureq::Error::Transport(_)) => FetchOutcome::Io,
+    }
+}
+
+// Convertit le bloc rate_limits du stdin Claude Code en JSON format usage-cache
+// (utilization + resets_at ISO). Documente :
+//   https://code.claude.com/docs/en/statusline#full-json-schema
+//   rate_limits = { five_hour: { used_percentage, resets_at }, seven_day: {...} }
+//   resets_at est un Unix epoch en SECONDES dans le stdin (vs ISO 8601 dans
+//   l'API endpoint /api/oauth/usage). On normalise vers ISO 8601 pour que
+//   `format_reset` n'ait qu'une seule branche.
+// Absent pour : (a) sessions early avant 1er API call, (b) users API direct
+// (non Pro/Max). Dans ces cas le caller fallback sur l'API HTTP.
+fn build_usage_from_stdin_rate_limits(data: &Value) -> Option<Value> {
+    let rl = data.get("rate_limits")?;
+    let mut result = serde_json::Map::new();
+
+    for key in ["five_hour", "seven_day"] {
+        if let Some(window) = rl.get(key) {
+            let pct = window.get("used_percentage").and_then(|v| v.as_f64());
+            if let Some(p) = pct {
+                let mut obj = serde_json::Map::new();
+                obj.insert("utilization".to_string(), Value::from(p));
+                if let Some(epoch) = window.get("resets_at").and_then(|v| v.as_i64()) {
+                    if let Some(dt) = Utc.timestamp_opt(epoch, 0).single() {
+                        obj.insert("resets_at".to_string(), Value::from(dt.to_rfc3339()));
+                    }
+                }
+                result.insert(key.to_string(), Value::Object(obj));
+            }
+        }
+    }
+
+    if result.is_empty() {
+        None
+    } else {
+        Some(Value::Object(result))
+    }
+}
+
+fn read_usage(
+    claude_dir: &Path,
+    stdin_rate_limits: Option<Value>,
+    stdin_version: Option<&str>,
+) -> UsageResult {
     let cache_path = claude_dir.join("usage-cache.json");
     let ratelimit_path = claude_dir.join("usage-ratelimit.txt");
+
+    // STDIN PATH (toujours prefere : zero overhead, zero token, zero
+    // dependance reseau). On enrichit avec seven_day_opus depuis le cache si
+    // disponible (rate_limits du stdin ne contient pas opus -- limitation
+    // documentee Anthropic, opus_usage change peu sur une window 7j donc
+    // staleness moderee acceptable).
+    if let Some(stdin_data) = stdin_rate_limits {
+        let mut merged = stdin_data;
+        if let Ok(raw) = fs::read_to_string(&cache_path) {
+            if let Ok(cached) = serde_json::from_str::<Value>(&raw) {
+                if let Some(sdo) = cached.get("seven_day_opus") {
+                    if let Some(merged_obj) = merged.as_object_mut() {
+                        merged_obj.insert("seven_day_opus".to_string(), sdo.clone());
+                    }
+                }
+            }
+        }
+        // Update cache avec donnees fraiches stdin pour futur fallback API
+        if let Ok(body) = serde_json::to_string(&merged) {
+            let _ = fs::write(&cache_path, body.as_bytes());
+        }
+        // Si on avait un ratelimit arme avant, le retirer maintenant qu'on a
+        // une donnee valide (le 429 etait peut-etre transitoire).
+        let _ = fs::remove_file(&ratelimit_path);
+
+        return UsageResult {
+            json: Some(merged),
+            stale: false,
+            reference: None,
+            source: UsageSource::Stdin,
+            api_ms: None,
+            api_status: None,
+            api_attempts: 0,
+        };
+    }
 
     let mut usage: Option<Value> = None;
     let mut source = UsageSource::NoCredsOrNoCache;
     let mut api_ms: Option<u128> = None;
+    let mut api_status: Option<u16> = None;
+    let mut api_attempts: u8 = 0;
 
     // Cache 60s
     if let Some(age) = file_age_secs(&cache_path) {
@@ -445,38 +539,61 @@ fn read_usage(claude_dir: &Path) -> UsageResult {
 
     if usage.is_none() && !in_cooldown {
         if let Some(creds) = read_credentials(claude_dir) {
-            if let Some(token) = creds.claude_ai_oauth.as_ref().and_then(|o| o.access_token.clone()) {
+            if let Some(token) = creds.claude_ai_oauth.as_ref().and_then(|o| o.access_token.clone())
+            {
+                // User-Agent : version depuis stdin (gratuit), sinon spawn
+                // `claude --version` cache 1h, sinon fallback hardcode "2.0.32".
+                let version = stdin_version
+                    .map(String::from)
+                    .unwrap_or_else(|| detect_claude_version(claude_dir));
+                let user_agent = format!("claude-code/{}", version);
                 let agent = ureq::AgentBuilder::new()
                     .timeout(Duration::from_secs(4))
                     .build();
                 let t_api = Instant::now();
-                match agent
-                    .get("https://api.anthropic.com/api/oauth/usage")
-                    .set("Authorization", &format!("Bearer {}", token))
-                    .set("anthropic-beta", "oauth-2025-04-20")
-                    .set("User-Agent", "claude-code/2.0.32")
-                    .set("Accept", "application/json, text/plain, */*")
-                    .set("Content-Type", "application/json")
-                    .call()
-                {
-                    Ok(resp) => {
-                        api_ms = Some(t_api.elapsed().as_millis());
-                        if let Ok(body) = resp.into_string() {
-                            if let Ok(v) = serde_json::from_str::<Value>(&body) {
-                                let _ = fs::write(&cache_path, body.as_bytes());
-                                let _ = fs::remove_file(&ratelimit_path);
-                                usage = Some(v);
-                                source = UsageSource::ApiSuccess;
-                            }
+                api_attempts = 1;
+                let mut outcome = fetch_usage_once(&agent, &token, &user_agent);
+
+                // Retry une seule fois apres 500ms si erreur IO/timeout. Pas de
+                // retry sur 4xx/5xx (le serveur a deja decide), pas sur BodyParse
+                // (changement structurel cote serveur).
+                if matches!(outcome, FetchOutcome::Io) {
+                    std::thread::sleep(Duration::from_millis(500));
+                    api_attempts = 2;
+                    outcome = fetch_usage_once(&agent, &token, &user_agent);
+                }
+                api_ms = Some(t_api.elapsed().as_millis());
+
+                match outcome {
+                    FetchOutcome::Ok(v) => {
+                        if let Ok(body) = serde_json::to_string(&v) {
+                            let _ = fs::write(&cache_path, body.as_bytes());
                         }
+                        let _ = fs::remove_file(&ratelimit_path);
+                        usage = Some(v);
+                        source = if api_attempts == 2 {
+                            UsageSource::ApiSuccessRetry
+                        } else {
+                            UsageSource::ApiSuccess
+                        };
+                        api_status = Some(200);
                     }
-                    Err(ureq::Error::Status(429, _)) => {
-                        api_ms = Some(t_api.elapsed().as_millis());
+                    FetchOutcome::Status(429) => {
                         let _ = fs::write(&ratelimit_path, Utc::now().to_rfc3339().as_bytes());
                         source = UsageSource::Api429;
+                        api_status = Some(429);
                     }
-                    Err(_) => {
-                        api_ms = Some(t_api.elapsed().as_millis());
+                    FetchOutcome::Status(401) => {
+                        // Token expire -- claude.exe le refresh au prochain api
+                        // call principal. Pas la peine d'armer le cooldown 429.
+                        source = UsageSource::Api401;
+                        api_status = Some(401);
+                    }
+                    FetchOutcome::Status(code) => {
+                        source = UsageSource::ApiBadStatus;
+                        api_status = Some(code);
+                    }
+                    FetchOutcome::Io | FetchOutcome::BodyParse => {
                         source = UsageSource::ApiTimeoutOrIo;
                     }
                 }
@@ -498,7 +615,15 @@ fn read_usage(claude_dir: &Path) -> UsageResult {
         }
     }
 
-    UsageResult { json: usage, stale, reference, source, api_ms }
+    UsageResult {
+        json: usage,
+        stale,
+        reference,
+        source,
+        api_ms,
+        api_status,
+        api_attempts,
+    }
 }
 
 // =================== BUILD LINE 1 (banner) ===================
@@ -786,12 +911,18 @@ fn main() {
         .pointer("/cost/total_cost_usd")
         .and_then(|v| v.as_f64());
 
+    // Pre-extract version + rate_limits du stdin pour read_usage (cf. doc
+    // officielle https://code.claude.com/docs/en/statusline -- ces champs sont
+    // fournis par Claude Code lui-meme, plus fiables que tout appel HTTP).
+    let stdin_version = data.get("version").and_then(|v| v.as_str()).map(String::from);
+    let stdin_rate_limits = build_usage_from_stdin_rate_limits(&data);
+
     let t_git = Instant::now();
     let git = compute_git(&dir);
     let git_ms = t_git.elapsed().as_millis();
 
     let t_usage = Instant::now();
-    let usage = read_usage(&claude_dir);
+    let usage = read_usage(&claude_dir, stdin_rate_limits, stdin_version.as_deref());
     let usage_ms = t_usage.elapsed().as_millis();
 
     let line1 = build_line1(
@@ -826,13 +957,15 @@ fn main() {
     let _ = (|| -> std::io::Result<()> {
         let log_path = claude_dir.join("statusline-tick-log.txt");
         let line = format!(
-            "{} tick={} effort={} git_ms={} usage_ms={} usage_src={:?} api_ms={} total_ms={} pid={}\n",
+            "{} tick={} effort={} git_ms={} usage_ms={} usage_src={:?} api_status={} api_attempts={} api_ms={} total_ms={} pid={}\n",
             start_ms_unix,
             picker_tick(start_ms_unix),
             effort.as_deref().unwrap_or("none"),
             git_ms,
             usage_ms,
             usage.source,
+            usage.api_status.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
+            usage.api_attempts,
             usage.api_ms.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
             total_ms,
             std::process::id(),
