@@ -128,6 +128,81 @@ function Install-WingetPackage {
     winget install --id $Id --exact --source winget --accept-source-agreements --accept-package-agreements
 }
 
+# Resolve the download URL of the first matching asset in a GitHub repo's latest
+# release. Unauthenticated API requests are rate-limited to 60/hour per IP -- ample
+# for a one-time install.
+function Get-LatestGithubReleaseAsset {
+    param(
+        [Parameter(Mandatory)] [string]$Repo,         # e.g. 'JetBrains/JetBrainsMono'
+        [Parameter(Mandatory)] [string]$NamePattern   # wildcard like 'JetBrainsMono-*.zip'
+    )
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -UseBasicParsing
+    $asset   = $release.assets | Where-Object { $_.name -like $NamePattern } | Select-Object -First 1
+    if (-not $asset) { throw "No asset matching '$NamePattern' in latest release of $Repo." }
+    return $asset.browser_download_url
+}
+
+# User-scope font install (no admin required). Accepts either a .zip URL
+# (extracted, then TTFs matching $FilePattern are picked up) or a direct .ttf
+# URL (downloaded as-is). Each TTF is copied to %LOCALAPPDATA%\Microsoft\
+# Windows\Fonts and registered under HKCU so apps see it without re-login.
+# Idempotent: skips if $MarkerFile already exists in the user fonts dir.
+function Install-UserFont {
+    param(
+        [Parameter(Mandatory)] [string]$DisplayName,
+        [Parameter(Mandatory)] [string]$Url,           # .zip or .ttf
+        [string]$FilePattern,                          # required for .zip; ignored for .ttf
+        [Parameter(Mandatory)] [string]$MarkerFile     # e.g. 'JetBrainsMono-Regular.ttf' or 'NotoColorEmoji.ttf'
+    )
+    if ($SkipWinget) { return }
+    $userFontsDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+    if (Test-Path (Join-Path $userFontsDir $MarkerFile)) {
+        Write-Ok $DisplayName
+        return
+    }
+
+    Write-Step "Installing $DisplayName"
+    $tmpRoot = Join-Path $env:TEMP ("font-" + [guid]::NewGuid().Guid)
+    New-Item -ItemType Directory -Path $tmpRoot -Force | Out-Null
+    try {
+        $isZip = $Url -match '\.zip(\?.*)?$'
+        if ($isZip) {
+            $tmpZip     = Join-Path $tmpRoot 'archive.zip'
+            $tmpExtract = Join-Path $tmpRoot 'extract'
+            Invoke-WebRequest -Uri $Url -OutFile $tmpZip -UseBasicParsing
+            Expand-Archive -Path $tmpZip -DestinationPath $tmpExtract -Force
+            $ttfs = @(Get-ChildItem -Path $tmpExtract -Recurse -Filter $FilePattern)
+        } else {
+            # Direct .ttf/.otf download. The downloaded file is named after the
+            # marker so the destination filename in the user fonts dir matches
+            # the idempotence check exactly.
+            $tmpFile = Join-Path $tmpRoot $MarkerFile
+            Invoke-WebRequest -Uri $Url -OutFile $tmpFile -UseBasicParsing
+            $ttfs = @(Get-Item $tmpFile)
+        }
+
+        if ($ttfs.Count -eq 0) {
+            Write-Note "No fonts matching '$FilePattern' in $DisplayName archive."
+            return
+        }
+
+        if (-not (Test-Path $userFontsDir)) {
+            New-Item -ItemType Directory -Path $userFontsDir -Force | Out-Null
+        }
+        $regPath = 'HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+
+        foreach ($ttf in $ttfs) {
+            $dest    = Join-Path $userFontsDir $ttf.Name
+            Copy-Item -Path $ttf.FullName -Destination $dest -Force
+            $regName = "$([IO.Path]::GetFileNameWithoutExtension($ttf.Name)) (TrueType)"
+            New-ItemProperty -Path $regPath -Name $regName -Value $dest -PropertyType String -Force | Out-Null
+        }
+        Write-Ok "$DisplayName ($($ttfs.Count) faces)"
+    } finally {
+        Remove-Item $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Bootstrap: execution policy + unblock self
 # ---------------------------------------------------------------------------
@@ -168,7 +243,37 @@ Install-WingetPackage -Id 'Microsoft.PowerShell'          -DisplayName 'PowerShe
 Install-WingetPackage -Id 'Microsoft.WindowsTerminal'     -DisplayName 'Windows Terminal'
 Install-WingetPackage -Id 'junegunn.fzf'                  -DisplayName 'fzf'
 Install-WingetPackage -Id 'ajeetdsouza.zoxide'            -DisplayName 'zoxide'
-Install-WingetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont'  -DisplayName 'JetBrainsMono Nerd Font'
+# Fonts : on installe en trio plutot que la Nerd Font patchee fourre-tout, car
+# cette derniere remplace les codepoints emoji BMP (U+2705 ✓, U+274C ✗, U+26A0 ⚠
+# etc.) par des glyphes monochromes qui ecrasent le fallback Segoe UI Emoji
+# colore. Resultat avec la Nerd Font seule : tableaux et docs avec emojis BMP
+# illisibles en noir et blanc. Le combo recommande par Nerd Fonts eux-memes :
+#   1) JetBrains Mono vanille  : base + ligatures de code, ne touche pas aux
+#      codepoints emoji.
+#   2) Symbols Nerd Font Mono  : icones uniquement (PUA U+E000-F8FF + plans
+#      supplementaires U+F0000+), aucun caractere de base, aucun patch emoji.
+#   3) Segoe UI Emoji          : natif Windows, gere tous les emojis colores.
+# Chaque police s'occupe de SON domaine de codepoints -- zero collision. Voir
+# wt-settings.json -> profiles.defaults.font.face pour la chaine de fallback.
+$jbmZipUrl = Get-LatestGithubReleaseAsset -Repo 'JetBrains/JetBrainsMono' -NamePattern 'JetBrainsMono-*.zip'
+Install-UserFont -DisplayName 'JetBrains Mono (vanilla)' `
+    -Url         $jbmZipUrl `
+    -FilePattern 'JetBrainsMono-*.ttf' `
+    -MarkerFile  'JetBrainsMono-Regular.ttf'
+Install-UserFont -DisplayName 'Symbols Nerd Font Mono' `
+    -Url         'https://github.com/ryanoasis/nerd-fonts/releases/latest/download/NerdFontsSymbolsOnly.zip' `
+    -FilePattern 'SymbolsNerdFontMono-*.ttf' `
+    -MarkerFile  'SymbolsNerdFontMono-Regular.ttf'
+# Noto Color Emoji : la police emoji native Android (Google/Xiaomi/MIUI). On
+# la prefere a Segoe UI Emoji parce que (1) elle gere les drapeaux pays
+# (Windows affiche 'FR' au lieu de 🇫🇷 -- decision politique MS), (2) le
+# style match exactement les emojis du telephone de l'user (coherence
+# cross-device), (3) format COLRv1 supporte par Windows 11 22H2+. Le .ttf
+# vit en permanence dans le source tree du repo officiel googlefonts, donc
+# l'URL raw est stable.
+Install-UserFont -DisplayName 'Noto Color Emoji (Android-style)' `
+    -Url         'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/fonts/NotoColorEmoji.ttf' `
+    -MarkerFile  'NotoColorEmoji.ttf'
 Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
 # Rust toolchain : requis pour compiler claude-code/statusline-rs/ -> statusline.exe.
 Install-WingetPackage -Id 'Rustlang.Rustup'               -DisplayName 'Rust toolchain (rustup)'
