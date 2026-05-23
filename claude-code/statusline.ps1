@@ -69,24 +69,18 @@ function Format-Bar([double]$pct, [string]$col, [int]$width = 14) {
 }
 
 function Get-EffortDisplay([string]$level) {
-    # Reproduit l'algorithme du picker /effort de Claude Code (extrait de claude.exe v2.0.32) :
-    #   low    -> "warning"    -> ansi:yellowBright = 93m  (statique)
-    #   medium -> "success"    -> ansi:greenBright  = 92m  (statique)
-    #   high   -> "permission" -> ansi:blueBright   = 94m  (statique)
-    #   xhigh  -> wSA "autoAccept-shimmer" : sweep position A = tick % (len+4).
-    #             char a la position A   -> RGB #d0b4ff bold (constante OSA cote JS).
-    #             voisins A-1 et A+1     -> ansi:magentaBright (95m) bold.
-    #             autres                  -> ansi:magentaBright non-bold.
-    #   max    -> jSA "rainbow-animated" : char Y -> Rz1[(Y+tick) % 7] tous bold.
-    #             Rz1 (theme dark-ansi via LC9) = ANSI 31, 91, 33, 32, 36, 34, 35
-    #             (red, redBright, yellow, green, cyan, blue, magenta).
+    # Rendu statique de l'effort level dans le statusline. Pas d'animation :
+    # claude.exe invoque le subprocess statusline sur state change (pas sur
+    # timer), donc animer ici est de toute facon impraticable.
     #
-    # Cadence : le picker tourne a 10 Hz (Jz(100) cote JS). Ici Claude Code clamp
-    # refreshInterval >= 1 sur claude.exe non patche, donc le tick avance a 1 Hz :
-    # tick = floor(unix_seconds). L'animation est ~10x plus lente que le picker
-    # mais visible et algorithmiquement identique. Sur la machine de l'auteur,
-    # claude.exe est patche et statusline.exe (Rust, local-only) prend le relais
-    # a 10 Hz reel. Le .ps1 reste le fallback distribue au repo public.
+    #   low    -> ANSI 93 (yellowBright) bold
+    #   medium -> ANSI 92 (greenBright)  bold
+    #   high   -> ANSI 94 (blueBright)   bold
+    #   xhigh  -> RGB(242,193,233) = #F2C1E9 uniforme + bold (rose pastel doux).
+    #   max    -> RGB(255,121,198) = #FF79C6 uniforme + bold = couleur exacte
+    #             du path en bypassPermissions.
+    # Truecolor explicite (\e[38;2;R;G;Bm) garantit la parite visuelle
+    # independamment du theme du terminal et du theme dark-ansi de Claude Code.
     #
     # `[0m` reset TOUT y compris le background -> on utilise `[22m[39m` qui
     # n'ecrase pas le BG de la banniere s2_bg.
@@ -101,49 +95,8 @@ function Get-EffortDisplay([string]$level) {
         'low'    { return "$bold$esc[93m$label$endStyle" }
         'medium' { return "$bold$esc[92m$label$endStyle" }
         'high'   { return "$bold$esc[94m$label$endStyle" }
-    }
-
-    $chars = $label.ToCharArray()
-    $n = $chars.Length
-    if ($n -eq 0) { return '' }
-
-    # Tick base sur unix_seconds : monotone, independant des spawns du statusline.
-    $tick = [int64]([DateTime]::UtcNow - [DateTime]::UnixEpoch).TotalSeconds
-
-    $sb = [System.Text.StringBuilder]::new()
-    switch ($level) {
-        'xhigh' {
-            $period = $n + 4
-            $pos = [int]($tick % $period)
-            for ($i = 0; $i -lt $n; $i++) {
-                $atGlimmer = ($i -eq $pos)
-                $neighbor  = (($pos -gt 0) -and ($i -eq $pos - 1)) -or ($i -eq $pos + 1)
-                if ($atGlimmer) {
-                    [void]$sb.Append("$esc[38;2;208;180;255m")   # OSA = #d0b4ff
-                    [void]$sb.Append($bold)
-                } elseif ($neighbor) {
-                    [void]$sb.Append("$esc[95m")                  # autoAccept (magentaBright)
-                    [void]$sb.Append($bold)
-                } else {
-                    [void]$sb.Append("$esc[95m")
-                    [void]$sb.Append($boldOff)
-                }
-                [void]$sb.Append($chars[$i])
-            }
-            [void]$sb.Append($endStyle)
-            return $sb.ToString()
-        }
-        'max' {
-            $rainbow = @("$esc[31m", "$esc[91m", "$esc[33m", "$esc[32m", "$esc[36m", "$esc[34m", "$esc[35m")
-            [void]$sb.Append($bold)
-            for ($i = 0; $i -lt $n; $i++) {
-                $colorIdx = [int](($i + $tick) % 7)
-                [void]$sb.Append($rainbow[$colorIdx])
-                [void]$sb.Append($chars[$i])
-            }
-            [void]$sb.Append($endStyle)
-            return $sb.ToString()
-        }
+        'xhigh'  { return "$bold$esc[38;2;242;193;233m$label$endStyle" }
+        'max'    { return "$bold$esc[38;2;255;121;198m$label$endStyle" }
     }
     return ''
 }
@@ -369,21 +322,55 @@ if (-not $plan) {
 
 # ============================== USAGE (5h + 7j) ==============================
 
-# Cache 60s : meme cadence que claude.ai dashboard. L'historique TTL=7s causait
-# des 429 systematiques en usage interactif (la status bar etant rafraichie a
-# chaque keystroke). 60s elimine la pression sur l'API tout en gardant l'info
-# frais a la minute pres.
+# SOURCE PRIMAIRE : stdin.rate_limits (Pro/Max apres 1er API call). Doc :
+#   https://code.claude.com/docs/en/statusline#full-json-schema
+# Quand present, c'est la source la plus fiable : pas d'appel HTTP, pas de
+# token a manipuler, pas de cache a gerer. resets_at est en Unix epoch
+# secondes -> on convertit vers ISO 8601 pour matcher le format du cache API
+# (legacy fallback) et que Format-Reset n'ait qu'une seule branche.
 $usageCache = "$env:USERPROFILE\.claude\usage-cache.json"
-$usageValid = (Test-Path $usageCache) -and ((Get-Date) - (Get-Item $usageCache).LastWriteTime).TotalSeconds -lt 60
+$rateLimitFile = "$env:USERPROFILE\.claude\usage-ratelimit.txt"
 $usage = $null
+
+if ($data -and $data.rate_limits) {
+    $rl = $data.rate_limits
+    $usage = [PSCustomObject]@{}
+    foreach ($key in @('five_hour', 'seven_day')) {
+        $window = $rl.$key
+        if ($window -and $null -ne $window.used_percentage) {
+            $obj = [ordered]@{ utilization = [double]$window.used_percentage }
+            if ($window.resets_at) {
+                $resetIso = [DateTimeOffset]::FromUnixTimeSeconds([long]$window.resets_at).UtcDateTime.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+                $obj.resets_at = $resetIso
+            }
+            $usage | Add-Member -NotePropertyName $key -NotePropertyValue ([PSCustomObject]$obj)
+        }
+    }
+    # Enrichir avec seven_day_opus depuis cache si dispo (stdin ne contient pas opus)
+    if (Test-Path $usageCache) {
+        try {
+            $cached = Get-Content -Raw $usageCache | ConvertFrom-Json
+            if ($cached.seven_day_opus) {
+                $usage | Add-Member -NotePropertyName 'seven_day_opus' -NotePropertyValue $cached.seven_day_opus
+            }
+        } catch {}
+    }
+    # Refresh le cache avec donnees fraiches stdin (pour future fallback)
+    try { $usage | ConvertTo-Json -Depth 6 | Set-Content -Path $usageCache -Encoding UTF8 } catch {}
+    # Nettoyer cooldown si on avait un 429 en attente
+    if (Test-Path $rateLimitFile) { Remove-Item $rateLimitFile -Force -ErrorAction SilentlyContinue }
+}
+
+# FALLBACK API : seulement si stdin ne contient pas rate_limits (early session
+# avant 1er API call, ou user sur plan API/enterprise sans rate_limits).
+# Cache 60s : meme cadence que claude.ai dashboard.
+$usageValid = (-not $usage) -and (Test-Path $usageCache) -and ((Get-Date) - (Get-Item $usageCache).LastWriteTime).TotalSeconds -lt 60
 if ($usageValid) {
     try { $usage = Get-Content -Raw $usageCache | ConvertFrom-Json } catch {}
 }
 
 # Cooldown post-429 : si on s'est pris un rate-limit recemment, on n'essaie meme
-# pas l'API (sinon on l'aggrave). 5 min de cooldown : le rate-limit Anthropic
-# semble s'etendre sur plusieurs minutes, retenter plus tot agrave le probleme.
-$rateLimitFile = "$env:USERPROFILE\.claude\usage-ratelimit.txt"
+# pas l'API (sinon on l'aggrave). 5 min de cooldown.
 $inCooldown = $false
 if ((-not $usage) -and (Test-Path $rateLimitFile)) {
     try {
@@ -393,6 +380,9 @@ if ((-not $usage) -and (Test-Path $rateLimitFile)) {
 }
 
 if ((-not $usage) -and (-not $inCooldown)) {
+    # User-Agent : version depuis stdin.version (fiable), sinon hardcode "2.0.32".
+    $version = if ($data -and $data.version) { [string]$data.version } else { '2.0.32' }
+    $userAgent = "claude-code/$version"
     try {
         $creds = Get-Content -Raw "$env:USERPROFILE\.claude\.credentials.json" | ConvertFrom-Json
         $token = $creds.claudeAiOauth.accessToken
@@ -400,11 +390,33 @@ if ((-not $usage) -and (-not $inCooldown)) {
             $headers = @{
                 'Authorization'   = "Bearer $token"
                 'anthropic-beta'  = 'oauth-2025-04-20'
-                'User-Agent'      = 'claude-code/2.0.32'
+                'User-Agent'      = $userAgent
                 'Accept'          = 'application/json, text/plain, */*'
                 'Content-Type'    = 'application/json'
             }
-            $resp = Invoke-RestMethod -Uri 'https://api.anthropic.com/api/oauth/usage' -Headers $headers -Method Get -TimeoutSec 4
+            $resp = $null
+            $retryDone = $false
+            try {
+                $resp = Invoke-RestMethod -Uri 'https://api.anthropic.com/api/oauth/usage' -Headers $headers -Method Get -TimeoutSec 4
+            } catch {
+                # Retry 1x apres 500ms uniquement sur erreur reseau/timeout
+                # (pas sur 429/401/etc. -- erreurs server qui ne se resolvent pas en 500ms).
+                $status = $null
+                try { $status = $_.Exception.Response.StatusCode.value__ } catch {}
+                if (-not $status) {
+                    Start-Sleep -Milliseconds 500
+                    $retryDone = $true
+                    try { $resp = Invoke-RestMethod -Uri 'https://api.anthropic.com/api/oauth/usage' -Headers $headers -Method Get -TimeoutSec 4 } catch {
+                        $status = $null
+                        try { $status = $_.Exception.Response.StatusCode.value__ } catch {}
+                        if ($status -eq 429) {
+                            (Get-Date).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture) | Set-Content -Path $rateLimitFile -Encoding UTF8
+                        }
+                    }
+                } elseif ($status -eq 429) {
+                    (Get-Date).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture) | Set-Content -Path $rateLimitFile -Encoding UTF8
+                }
+            }
             if ($resp) {
                 $usage = $resp
                 $resp | ConvertTo-Json -Depth 6 | Set-Content -Path $usageCache -Encoding UTF8
@@ -412,14 +424,7 @@ if ((-not $usage) -and (-not $inCooldown)) {
                 if (Test-Path $rateLimitFile) { Remove-Item $rateLimitFile -Force -ErrorAction SilentlyContinue }
             }
         }
-    } catch {
-        # Detecter 429 specifiquement et armer le cooldown
-        $status = $null
-        try { $status = $_.Exception.Response.StatusCode.value__ } catch {}
-        if ($status -eq 429) {
-            (Get-Date).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture) | Set-Content -Path $rateLimitFile -Encoding UTF8
-        }
-    }
+    } catch {}
 }
 
 # Fallback stale : si l'API a echoue (timeout, rate-limit, reseau, etc.) et qu'on n'a
@@ -459,11 +464,6 @@ if ($data -and $data.context_window) {
 $ch = ([char]0xE0B0).ToString()   # ▶ Powerline RIGHT TRIANGLE SOLID (banner-end)
 $sep = " $(RGB 220 220 220)·$reset "   # middle dot gris très clair — même teinte que "Opus 4.7 ctx"
 
-# Section cost ($/h) : background gris-vert foncé (money vibe), texte vert Catppuccin
-$sCostR = 45; $sCostG = 55; $sCostB = 45
-$sCost_bg = BG  $sCostR $sCostG $sCostB
-$sCost_fg = RGB 166 227 161   # Catppuccin Green
-
 # Section 2 (model + ctx) : background gris-bleu foncé, texte clair
 $s2R = 60; $s2G = 64; $s2B = 80
 $s2_bg = BG  $s2R $s2G $s2B
@@ -491,8 +491,15 @@ if ($branch) {
     # le ref upstream local, donc si le fetch background échoue depuis > 2.5 min,
     # ces nombres peuvent être périmés. * (dirty) reste en couleur normale car
     # 100% local.
-    $branchFG = RGB 60 65 80
-    $branchSyncFG = if ($gitFetchStale) { RGB 200 170 100 } else { $branchFG }
+    # Texte git unifié avec celui du path : même couleur sombre sur le fond
+    # bleu dégradé. Les parenthèses délimitent le bloc git, pas besoin d'un gris
+    # distinct qui créait une 2e teinte sur la même bannière.
+    $branchFG = $pathTextFG
+    # Sync arrows ↑/↓ en violet Copilot (#8534F3, https://brand.github.com/
+    # foundations/color) — couleur signature GitHub, saturée donc visible sur le
+    # fond bleu clair du path. Jaune fetch_stale conservé en alerte distincte
+    # (fetch background planté = compteurs périmés).
+    $branchSyncFG = if ($gitFetchStale) { RGB 200 170 100 } else { RGB 133 52 243 }
 
     $branchPrefix = " ($branch"
     if ($gitShortSha) { $branchPrefix += " $gitShortSha" }
@@ -536,29 +543,11 @@ if ($gradStops) {
     $line1 += $reset
 }
 
-# --- BANNER COST — entité distincte du modèle, intercalée entre path et model+ctx ---
-# Source : data.cost.total_cost_usd déjà fourni dans stdin (cumul session, monotone croissant).
-# Préfixe "≈" (approximately equal) : pour les plans Pro/Max ce n'est PAS ce que
-# l'utilisateur paye, c'est l'équivalent au tarif API direct. Le symbole
-# mathématique lève l'ambiguïté de manière universelle et compacte.
-$costStr = $null
-if ($data -and $data.cost -and $null -ne $data.cost.total_cost_usd) {
-    $totalCost = [double]$data.cost.total_cost_usd
-    $inv = [System.Globalization.CultureInfo]::InvariantCulture
-    $costStr = [char]0x2248 + '$' + $totalCost.ToString('0.00', $inv)
-}
-
-if ($costStr) {
-    # CHEVRON 1 : path → cost banner
-    $line1 += "$pathFG$sCost_bg$ch"
-    # Contenu bannière cost
-    $line1 += "$sCost_fg $costStr "
-    # CHEVRON 2 : cost → model+ctx
-    $line1 += "$(RGB $sCostR $sCostG $sCostB)$s2_bg$ch"
-} else {
-    # Pas de donnée cost → path → model+ctx direct
-    $line1 += "$pathFG$s2_bg$ch"
-}
+# Transition path → bannière 2 (model + ctx). Section coût ($) retirée :
+# total_cost_usd est un estimatif au tarif API, sans signification en
+# abonnement Pro/Max (forfait fixe, pas de facturation au token). Les vraies
+# jauges de budget sont les barres 5h/7d/opus de la ligne 2.
+$line1 += "$pathFG$s2_bg$ch"
 
 # --- BANNER 2 : modèle + effort + ctx, sur fond s2_bg uni ---
 # Le label de l'effort lui-même (xhigh/max) prend un bg gradient char-par-char
