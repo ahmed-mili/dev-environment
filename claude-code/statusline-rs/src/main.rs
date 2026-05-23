@@ -645,7 +645,6 @@ fn build_line1(
     ctx_pct: Option<f64>,
     ctx_tokens: Option<i64>,
     ctx_size: Option<i64>,
-    cost: Option<f64>,
 ) -> String {
     // Couleur de fin de banner (chevron + dernier stop ou fond uni)
     let (p_r, p_g, p_b, grad_stops): (u8, u8, u8, Option<Vec<GradStop>>) = match mode {
@@ -667,11 +666,6 @@ fn build_line1(
     let path_fg = rgb(p_r, p_g, p_b);
     let path_bg = bg(p_r, p_g, p_b);
 
-    // Section cost (banner intermediaire)
-    let s_cost = (45u8, 55u8, 45u8);
-    let s_cost_bg = bg(s_cost.0, s_cost.1, s_cost.2);
-    let s_cost_fg = rgb(166, 227, 161);
-
     // Section 2 (model + ctx)
     let s2 = (60u8, 64u8, 80u8);
     let s2_bg = bg(s2.0, s2.1, s2.2);
@@ -687,7 +681,12 @@ fn build_line1(
     }];
 
     if let Some(branch) = &git.branch {
-        let branch_fg = rgb(60, 65, 80);
+        // Texte git unifie avec celui du path : meme couleur sombre sur le fond
+        // bleu degrade -- les parentheses suffisent a delimiter le bloc git, pas
+        // besoin d'un gris distinct qui creait une 2e teinte sur la meme banniere.
+        let branch_fg = path_text_fg.clone();
+        // Sync arrows en jaune si fetch_stale : alerte utile, on garde la couleur
+        // distincte uniquement pour ce cas.
         let branch_sync_fg = if git.fetch_stale { rgb(200, 170, 100) } else { branch_fg.clone() };
 
         let mut prefix = format!(" ({}", branch);
@@ -749,22 +748,13 @@ fn build_line1(
         line1.push_str(RESET);
     }
 
-    // Banner cost
-    let cost_str = cost.map(|c| format!("\u{2248}${:.2}", c));
-    if let Some(cs) = &cost_str {
-        line1.push_str(&path_fg);
-        line1.push_str(&s_cost_bg);
-        line1.push(chevron);
-        line1.push_str(&s_cost_fg);
-        line1.push_str(&format!(" {} ", cs));
-        line1.push_str(&rgb(s_cost.0, s_cost.1, s_cost.2));
-        line1.push_str(&s2_bg);
-        line1.push(chevron);
-    } else {
-        line1.push_str(&path_fg);
-        line1.push_str(&s2_bg);
-        line1.push(chevron);
-    }
+    // Transition path -> banner 2 (model + ctx). Section cout ($) retiree :
+    // total_cost_usd est un estimatif au tarif API, sans signification en
+    // abonnement Pro/Max (forfait fixe, pas de facturation au token). Les vraies
+    // jauges de budget sont les barres 5h/7d/opus de la ligne 2.
+    line1.push_str(&path_fg);
+    line1.push_str(&s2_bg);
+    line1.push(chevron);
 
     // Banner 2 : modele + effort + ctx
     line1.push_str(&s2_fg);
@@ -907,9 +897,6 @@ fn main() {
     let ctx_size = data
         .pointer("/context_window/context_window_size")
         .and_then(|v| v.as_i64());
-    let cost = data
-        .pointer("/cost/total_cost_usd")
-        .and_then(|v| v.as_f64());
 
     // Pre-extract version + rate_limits du stdin pour read_usage (cf. doc
     // officielle https://code.claude.com/docs/en/statusline -- ces champs sont
@@ -934,7 +921,6 @@ fn main() {
         ctx_pct,
         ctx_tokens,
         ctx_size,
-        cost,
     );
     let line2 = build_line2(&usage);
 
