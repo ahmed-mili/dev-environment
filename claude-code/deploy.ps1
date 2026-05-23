@@ -40,8 +40,8 @@ $CustomSkills = @(
 )
 
 # Local-only hooks : present in ~/.claude/hooks/ but never pushed to the
-# public repo. Empty since we started publishing patch-claude-exe.ps1
-# (see README for SAC + Defender exception prereqs).
+# public repo. Currently empty -- all hooks in ~/.claude/hooks/ are
+# committed.
 $LocalOnlyHooks = @()
 
 # ---------------------------------------------------------------------------
