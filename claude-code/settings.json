@@ -1,22 +1,8 @@
 {
   "model": "opus",
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/Ahmed/.claude/hooks/patch-claude-exe.ps1"
-          }
-        ]
-      }
-    ]
-  },
   "statusLine": {
     "type": "command",
-    "command": "C:/Users/Ahmed/.claude/statusline.exe",
-    "refreshInterval": 0.112
+    "command": "C:/Users/Ahmed/.claude/statusline.exe"
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,
