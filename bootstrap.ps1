@@ -2,22 +2,16 @@
 <#
 .SYNOPSIS
     One-liner bootstrap: clone dev-environment, install Windows bundle, build
-    statusline Rust binary, patch claude.exe for 9 Hz animation, deploy Claude
-    Code config.
+    statusline Rust binary, deploy Claude Code config.
 
 .DESCRIPTION
-    Hard prereqs (script will abort otherwise):
-    - Smart App Control DISABLED. Otherwise Windows blocks the unsigned
-      statusline Rust binary at runtime AND some cargo build-scripts fail
-      under SAC. Toggle off in Settings > Privacy & security > Smart App
-      Control. WARNING: disabling SAC is permanent (requires full Windows
-      reset to re-enable).
-    - ELEVATED PowerShell session (admin). Needed to add a Microsoft Defender
-      exception on patch-claude-exe.ps1, otherwise flagged
-      Trojan:Win32/FileFix.BBA!MTB and quarantined at clone time.
+    Hard prereq (script will abort otherwise): Smart App Control DISABLED.
+    Otherwise Windows blocks the unsigned statusline Rust binary at runtime
+    AND some cargo build-scripts fail under SAC. Toggle off in Settings >
+    Privacy & security > Smart App Control. WARNING: disabling SAC is
+    permanent (requires full Windows reset to re-enable).
 
 .EXAMPLE
-    # From an elevated PowerShell:
     $b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.ps1 -OutFile $b; Unblock-File $b; & $b
 #>
 
@@ -59,7 +53,7 @@ $GLYPH_OK = [char]0x2713  # check mark
 
 $script:T0        = Get-Date
 $script:StepIdx   = 0
-$script:StepTotal = 9   # 1.Checks 2.Defender 3.Git 4.GitConfig 5.Clone 6.Bundle 7.Build 8.Deploy 9.UpdateClaude+Plugins
+$script:StepTotal = 8   # 1.Checks 2.Git 3.GitConfig 4.Clone 5.Bundle 6.Build 7.Deploy 8.UpdateClaude+Plugins
 
 function Write-Step {
     param([string]$msg)
@@ -110,13 +104,12 @@ Write-Host '  https://github.com/ahmed-mili/dev-environment' -ForegroundColor Da
 Write-Host ''
 Write-Host '==> ' -ForegroundColor Blue -NoNewline
 Write-Host 'This script will install / configure:' -ForegroundColor White
-Write-Host '    Microsoft Defender exclusion for patch-claude-exe.ps1'
 Write-Host '    Git (via winget, if missing) + git user.name/email (prompted if unset)'
 Write-Host ('    dev-environment repo at {0}' -f $RepoPath)
 Write-Host '    PowerShell 7, Windows Terminal, fzf, zoxide, fastfetch, Rust (via winget)'
 Write-Host '    Claude Code (via winget, official Anthropic.ClaudeCode package)'
 Write-Host '    WinLibs/MinGW (via winget, only if MSVC Build Tools are missing)'
-Write-Host '    Custom Rust statusline binary (~/.claude/statusline.exe, animated 9 Hz)'
+Write-Host '    Custom Rust statusline binary (~/.claude/statusline.exe)'
 Write-Host '    Claude Code config: settings + hooks + skills'
 Write-Host '    Claude Code plugins (frontend-design, code-review, superpowers, rust-analyzer-lsp)'
 Write-Host ''
@@ -154,42 +147,6 @@ if ($sacState -eq 2) {
     exit 1
 }
 Write-Ok ("Smart App Control: off (state={0})" -f $sacState)
-
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    Write-Err 'Not running as administrator'
-    Write-Hint ''
-    Write-Hint 'Re-run from an elevated PowerShell (Windows Terminal as Admin).'
-    Write-Hint 'Needed to add a Defender exception on patch-claude-exe.ps1.'
-    exit 1
-}
-Write-Ok 'Elevation: yes'
-
-# ---------------------------------------------------------------------------
-# Defender exclusions (must run BEFORE git clone)
-# ---------------------------------------------------------------------------
-# patch-claude-exe.ps1 is flagged Trojan:Win32/FileFix.BBA!MTB (standard
-# heuristic for binary patchers: ReadAllBytes + IndexOf + WriteAllBytes on
-# a .exe). Without a pre-existing exclusion, Defender quarantines the file
-# as soon as it lands on disk -> git clone "succeeds" but the file silently
-# disappears -> the SessionStart hook never fires.
-#
-# Add-MpPreference accepts paths that don't exist yet: the exclusion is
-# armed BEFORE the file is written, so Defender skips it on arrival.
-
-Write-Step 'Adding Defender exclusions for patch-claude-exe.ps1'
-$exclusions = @(
-    (Join-Path $RepoPath 'claude-code\hooks\patch-claude-exe.ps1'),
-    (Join-Path $env:USERPROFILE '.claude\hooks\patch-claude-exe.ps1')
-)
-foreach ($p in $exclusions) {
-    try {
-        Add-MpPreference -ExclusionPath $p -ErrorAction Stop
-        Write-Ok $p
-    } catch {
-        Write-Warn ("Could not add exclusion for {0}: {1}" -f $p, $_.Exception.Message)
-    }
-}
 
 # ---------------------------------------------------------------------------
 # Git
@@ -308,10 +265,8 @@ if (-not $claudeCmd) {
     Write-Hint 'Restart your shell, then run `claude update`, `claude plugin marketplace update claude-plugins-official`, and `claude plugin install <name>@claude-plugins-official`.'
 } else {
     # `claude update` upgrades to the latest Anthropic release. winget's
-    # Anthropic.ClaudeCode package can lag by a release or two; this catches
-    # us up so the patch-claude-exe hook always sees the current binary
-    # structure (e.g., v2.1.147 removed the idle-freeze code path so the
-    # old tick-force-active patch is no longer needed).
+    # Anthropic.ClaudeCode package can lag by a release or two; this
+    # catches us up to current.
     Write-Info 'claude update (catch up to latest Anthropic release)'
     & $claudeCmd.Source update 2>&1 | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) { Write-Warn ("claude update returned {0}" -f $LASTEXITCODE) }
@@ -354,8 +309,7 @@ Write-Host 'claude' -ForegroundColor Cyan -NoNewline
 Write-Host ' + new profiles.'
 Write-Host '  2. Run ' -NoNewline
 Write-Host 'claude' -ForegroundColor Cyan -NoNewline
-Write-Host ' -- the SessionStart hook patches claude.exe (9 Hz'
-Write-Host '     animation) on first launch. Plugins are already installed.'
+Write-Host ' -- statusline, settings, hooks, skills, and plugins are ready.'
 Write-Host ''
 Write-Host '==> ' -ForegroundColor Blue -NoNewline
 Write-Host 'Docs: ' -ForegroundColor White -NoNewline

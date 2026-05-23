@@ -15,9 +15,7 @@ dev-environment/
 
 ### Windows (one-liner)
 
-**Prerequisites**:
-- **Smart App Control = Off** (Settings > Privacy & security > Smart App Control). ⚠️ Disabling SAC is permanent — re-enabling requires a full Windows reset. Most developers already have SAC off.
-- **Elevated PowerShell**: launch Windows Terminal as administrator. Required to add a Defender exception on `patch-claude-exe.ps1` (flagged `Trojan:Win32/FileFix.BBA!MTB` — the bootstrap adds the exception before `git clone` so the file isn't quarantined silently).
+**Prerequisite**: **Smart App Control = Off** (Settings > Privacy & security > Smart App Control). ⚠️ Disabling SAC is permanent — re-enabling requires a full Windows reset. Most developers already have SAC off.
 
 ```powershell
 $b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.ps1 -OutFile $b; Unblock-File $b; & $b
@@ -25,7 +23,7 @@ $b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahme
 
 > Pattern `irm -OutFile + & file` (download to disk, then execute from the file) instead of `iex (irm ...)` (download + in-memory execute). The latter is the classic ClickFix signature (`Trojan:Win32/ClickFix.DAI!MTB`) — Defender now flags any script that combines `iex` with `irm` on a Github raw payload. The former is harmless (oh-my-posh, scoop, etc. all use it) and lets you inspect the downloaded `.ps1` before execution.
 
-The bootstrap (9 idempotent steps): (1) checks SAC + admin, (2) adds the Defender exception, (3) installs Git, (4) prompts once for `git user.name` / `user.email` if unset, (5) clones the repo to `C:\dev\dev-environment`, (6) installs winget packages (PowerShell 7, Terminal, Fastfetch, Rust toolchain, **Claude Code via `Anthropic.ClaudeCode`**, plus WinLibs/MinGW only if MSVC Build Tools are missing), (7) builds the Rust statusline in `--release` (9 Hz animation), (8) deploys the Claude Code config (statusline + settings + hooks + skills), (9) installs the official Claude plugins listed in `enabledPlugins` (`frontend-design`, `code-review`, `superpowers`, `rust-analyzer-lsp`). `claude.exe` is then patched automatically by the SessionStart hook on first launch.
+The bootstrap (8 idempotent steps): (1) checks SAC, (2) installs Git, (3) prompts once for `git user.name` / `user.email` if unset, (4) clones the repo to `C:\dev\dev-environment`, (5) installs winget packages (PowerShell 7, Terminal, Fastfetch, Rust toolchain, **Claude Code via `Anthropic.ClaudeCode`**, plus WinLibs/MinGW only if MSVC Build Tools are missing), (6) builds the Rust statusline in `--release`, (7) deploys the Claude Code config (statusline + settings + hooks + skills), (8) installs the official Claude plugins listed in `enabledPlugins` (`frontend-design`, `code-review`, `superpowers`, `rust-analyzer-lsp`).
 
 Optional: run `/plugin` inside Claude Code afterward to install `frontend-design`, `code-review`, `superpowers` from the `claude-plugins-official` marketplace.
 
