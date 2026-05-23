@@ -191,16 +191,43 @@ function Install-UserFont {
         }
         $regPath = 'HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
 
+        $installed = @()
         foreach ($ttf in $ttfs) {
             $dest    = Join-Path $userFontsDir $ttf.Name
             Copy-Item -Path $ttf.FullName -Destination $dest -Force
             $regName = "$([IO.Path]::GetFileNameWithoutExtension($ttf.Name)) (TrueType)"
             New-ItemProperty -Path $regPath -Name $regName -Value $dest -PropertyType String -Force | Out-Null
+            $installed += $dest
         }
+
+        # Make the new faces usable in the *current* session without a reboot or
+        # re-login. Registering in HKCU alone is not enough: GDI/DirectWrite font
+        # collections are cached per-session, so a running Windows Terminal would
+        # still report the family as missing. AddFontResource + a WM_FONTCHANGE
+        # broadcast forces every running app to refresh its font list.
+        foreach ($f in $installed) { [void][FontBroadcast]::AddFontResource($f) }
+        $res = [IntPtr]::Zero
+        [void][FontBroadcast]::SendMessageTimeout([IntPtr]0xFFFF, 0x001D, [IntPtr]::Zero, [IntPtr]::Zero, 0, 1000, [ref]$res)
+
         Write-Ok "$DisplayName ($($ttfs.Count) faces)"
     } finally {
         Remove-Item $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
+# Win32 interop for live font registration (see Install-UserFont). Defined once
+# here so Add-Type is not called on every invocation.
+if (-not ('FontBroadcast' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class FontBroadcast {
+    [DllImport("gdi32.dll", CharSet=CharSet.Unicode)]
+    public static extern int AddFontResource(string lpFileName);
+    [DllImport("user32.dll", CharSet=CharSet.Auto)]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+}
+'@
 }
 
 # ---------------------------------------------------------------------------
@@ -266,14 +293,22 @@ Install-UserFont -DisplayName 'Symbols Nerd Font Mono' `
     -MarkerFile  'SymbolsNerdFontMono-Regular.ttf'
 # Noto Color Emoji : la police emoji native Android (Google/Xiaomi/MIUI). On
 # la prefere a Segoe UI Emoji parce que (1) elle gere les drapeaux pays
-# (Windows affiche 'FR' au lieu de 🇫🇷 -- decision politique MS), (2) le
+# (Windows affiche 'FR' au lieu de 🇫🇷 -- decision politique MS) et (2) le
 # style match exactement les emojis du telephone de l'user (coherence
-# cross-device), (3) format COLRv1 supporte par Windows 11 22H2+. Le .ttf
-# vit en permanence dans le source tree du repo officiel googlefonts, donc
-# l'URL raw est stable.
-Install-UserFont -DisplayName 'Noto Color Emoji (Android-style)' `
-    -Url         'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/fonts/NotoColorEmoji.ttf' `
-    -MarkerFile  'NotoColorEmoji.ttf'
+# cross-device).
+#
+# /!\ On telecharge la variante *COLRv1* (Noto-COLRv1.ttf), PAS le
+# NotoColorEmoji.ttf par defaut. Ce dernier est au format bitmap CBDT/CBLC
+# (heritage Android) que DirectWrite -- donc Windows Terminal -- ne sait PAS
+# rendre : la police s'installe et apparait dans Windows, mais WT affiche une
+# pop-up "Impossible de trouver les polices : Noto Color Emoji" au demarrage
+# et retombe en silence sur Segoe UI Emoji. La variante COLRv1 est vectorielle
+# (tables COLR + CPAL), nativement rendue par DirectWrite. Les deux fichiers
+# exposent la meme famille "Noto Color Emoji", donc la chaine font.face dans
+# wt-settings.json reste valable.
+Install-UserFont -DisplayName 'Noto Color Emoji (Android-style, COLRv1)' `
+    -Url         'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/fonts/Noto-COLRv1.ttf' `
+    -MarkerFile  'NotoColorEmoji-COLRv1.ttf'
 Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
 # Rust toolchain : requis pour compiler claude-code/statusline-rs/ -> statusline.exe.
 Install-WingetPackage -Id 'Rustlang.Rustup'               -DisplayName 'Rust toolchain (rustup)'
