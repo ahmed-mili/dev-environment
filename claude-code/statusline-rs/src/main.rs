@@ -685,9 +685,12 @@ fn build_line1(
         // bleu degrade -- les parentheses suffisent a delimiter le bloc git, pas
         // besoin d'un gris distinct qui creait une 2e teinte sur la meme banniere.
         let branch_fg = path_text_fg.clone();
-        // Sync arrows en jaune si fetch_stale : alerte utile, on garde la couleur
-        // distincte uniquement pour ce cas.
-        let branch_sync_fg = if git.fetch_stale { rgb(200, 170, 100) } else { branch_fg.clone() };
+        // Sync arrows ↑/↓ en violet Copilot (#8534F3, https://brand.github.com/
+        // foundations/color) -- couleur signature GitHub, saturee donc visible
+        // sur le fond bleu clair du path, sans avoir l'air d'une alerte (sinon
+        // ça crierait à chaque commit non poussé). Le jaune fetch_stale reste
+        // en alerte distincte (le fetch background est planté = info perimee).
+        let branch_sync_fg = if git.fetch_stale { rgb(200, 170, 100) } else { rgb(133, 52, 243) };
 
         let mut prefix = format!(" ({}", branch);
         if let Some(sha) = &git.sha {
