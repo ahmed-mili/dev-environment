@@ -855,7 +855,9 @@ fn main() {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw).ok();
 
-    let home = std::env::var("USERPROFILE").unwrap_or_default();
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
     let claude_dir = PathBuf::from(&home).join(".claude");
 
     let _ = fs::write(claude_dir.join("statusline-last-input.json"), &raw);
