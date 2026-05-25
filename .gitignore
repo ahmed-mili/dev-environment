@@ -29,3 +29,6 @@ stats-cache.json
 
 # Archive locale (code mort gardé pour historique, pas dans le repo public)
 .archive/
+
+# Plans / docs internes d'exécution (workflow perso, pas pour le repo partageable)
+docs/
