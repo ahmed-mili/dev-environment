@@ -12,56 +12,10 @@ esac
 # ---- UTF-8 environment for child processes ----
 # Termux/Bionic lacks a `locale` command (termux-packages#546), so utilities
 # that probe the encoding via `locale charmap` fall back blindly. Setting
-# LANG/LC_ALL explicitly avoids that for most CLIs. NOTE: ble.sh has its
-# OWN encoding setting (`bleopt input_encoding=UTF-8` below) — exporting
-# LANG here is NOT enough to silence ble.sh's "locale seems broken" warning
-# on its own; you need the bleopt too.
+# LANG/LC_ALL explicitly avoids that.
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 export LESSCHARSET=utf-8
-
-# ---- ble.sh — autosuggestions + syntax highlighting (bash PSReadLine) ----
-# Source with --attach=none here, then ble-attach at the very end of this file
-# so starship/fzf/etc. configure cleanly first. ble.sh is optional — if the
-# file doesn't exist (install step in setup-ssh-client.sh failed), the rest of the
-# bashrc still works.
-if [ -f "$HOME/.local/share/blesh/ble.sh" ]; then
-    source "$HOME/.local/share/blesh/ble.sh" --attach=none
-
-    # Manually declare the character encoding: Termux/Bionic has no `locale`
-    # command for ble.sh to probe, so without this it warns "locale 'C' seems
-    # broken" on every shell start. UTF-8 matches our LANG above and Termux's
-    # default TTY encoding.
-    bleopt input_encoding=UTF-8 2>/dev/null
-
-    # Catppuccin Mocha overlay-1 for the ghost autosuggest, matches fzf hints.
-    ble-face -s auto_complete 'fg=#7f849c' 2>/dev/null
-    ble-face -s syntax_default 'fg=#cdd6f4' 2>/dev/null
-    ble-face -s syntax_command 'fg=#89b4fa' 2>/dev/null
-    ble-face -s syntax_error 'fg=#f38ba8,bold' 2>/dev/null
-
-    # Autosuggest tuning: faster ghost text + compact menu + no annoying bell
-    bleopt complete_auto_complete=1            2>/dev/null
-    bleopt complete_auto_complete_delay=50     2>/dev/null
-    bleopt complete_menu_style=align           2>/dev/null  # compact, not 'desc'
-    bleopt edit_abell=                         2>/dev/null
-
-    # PSReadLine-like keybindings (mimic the Windows experience):
-    #   Tab → accept the inline ghost autosuggest if one is showing;
-    #         else cycle through matches silently (no dump of 200 entries)
-    #   F2  → drop down a menu of all matching completions (ListView)
-    # Graceful fallback: if _ble_complete_auto_complete probe is missing on
-    # a different ble.sh version, Tab still cycles via menu-complete.
-    function ble/widget/psread-tab {
-        if [[ ${_ble_complete_auto_complete-} ]]; then
-            ble/widget/auto_complete-insert
-        else
-            ble/widget/menu-complete
-        fi
-    }
-    ble-bind -f 'TAB' psread-tab           2>/dev/null
-    ble-bind -f 'f2'  complete             2>/dev/null
-fi
 
 # ---- Editor / pager defaults aligned with the Windows side ----
 export EDITOR="${EDITOR:-nano}"
@@ -177,6 +131,3 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 
 # ---- Local overrides — keep machine-specific tweaks out of git ----
 [ -f "$HOME/.bashrc.local" ] && source "$HOME/.bashrc.local"
-
-# ---- ble.sh attach — MUST be last so all other line-editor configs are set first ----
-[[ ${BLE_VERSION-} ]] && ble-attach

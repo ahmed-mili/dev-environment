@@ -4,7 +4,7 @@
 #
 # What this installs:
 #   - A polished Termux (Catppuccin Mocha colours, JetBrainsMono Nerd Font,
-#     starship prompt, fastfetch splash, ble.sh autosuggestions, fzf bindings)
+#     starship prompt, fastfetch splash, fzf bindings)
 #   - The SSH stack needed to reach a remote PC over Tailscale:
 #     openssh client, mosh (resilient over flaky mobile networks), tmux
 #   - An ed25519 SSH key (printed at the end so you can paste it into
@@ -42,11 +42,9 @@ set -u
 # so individual blocks below decide whether to fail-fast on their own.
 
 # Termux/Bionic ships without a working `locale` command (termux-packages#546),
-# which is what makes ble.sh log `locale 'C' seems broken` on startup. The
-# real fix is `bleopt input_encoding=UTF-8` in the bashrc (added by this
-# script). These two exports are still useful: they make sure every child
-# process spawned by setup-ssh-client.sh (make install of ble.sh, git, ssh-keygen…)
-# inherits a sane UTF-8 environment.
+# so tools that probe the encoding fall back blindly. These two exports
+# make sure every child process spawned by setup-ssh-client.sh (git,
+# ssh-keygen, etc.) inherits a sane UTF-8 environment.
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
@@ -180,8 +178,8 @@ PKGS=(
     tmux
     # Termux integrations (clipboard, wake-lock, etc.)
     termux-api
-    # Build deps for ble.sh + base GNU userland
-    coreutils gawk grep sed make
+    # Base GNU userland (some Termux builds ship busybox-flavoured variants)
+    coreutils gawk grep sed
 )
 to_install=()
 for p in "${PKGS[@]}"; do
@@ -243,28 +241,22 @@ ok "$(short_path "$STARSHIP_PATH")"
 ok "$(short_path "$FASTFETCH_PATH")"
 
 # ---------------------------------------------------------------------------
-# 5b) ble.sh — bash autosuggestions + syntax highlighting (PSReadLine equivalent)
+# 5b) Remove any leftover ble.sh install from previous versions of this bundle
 # ---------------------------------------------------------------------------
-# Not in the Termux apt repo, so we install upstream via `make install` into
-# ~/.local. ble.sh is 100% bash — make just copies files, no compilation.
-# bashrc sources $HOME/.local/share/blesh/ble.sh conditionally; if this step
-# fails the shell still works, just without autosuggestions.
-step "ble.sh (autosuggestions + syntax highlighting)"
-BLESH="$HOME/.local/share/blesh/ble.sh"
-if [ -f "$BLESH" ]; then
-    ok "ble.sh already installed at $(short_path "$BLESH")"
+# Earlier versions of this script installed ble.sh (bash autosuggestions +
+# syntax highlighting). It is intentionally dropped now: ble.sh logs a noisy
+# `locale 'C' seems broken` warning on every shell start because Termux/Bionic
+# ships no `locale` command for it to probe (termux-packages#546), and the
+# combo starship + fzf history search is enough for our use. Sweep any
+# leftover install + blerc so the warning disappears on next shell start.
+step "ble.sh cleanup (if previously installed)"
+BLESH_DIR="$HOME/.local/share/blesh"
+if [ -d "$BLESH_DIR" ]; then
+    rm -rf "$BLESH_DIR"
+    rm -f "$HOME/.blerc" 2>/dev/null || true
+    ok "removed $(short_path "$BLESH_DIR")"
 else
-    note "cloning + building ble.sh from upstream (one-time, ~15s)"
-    _tmp=$(mktemp -d)
-    if git clone --recursive --depth 1 --shallow-submodules \
-            https://github.com/akinomyoga/ble.sh.git "$_tmp/ble.sh" >/dev/null 2>&1 \
-        && make -C "$_tmp/ble.sh" install PREFIX="$HOME/.local" >/dev/null 2>&1 \
-        && [ -f "$BLESH" ]; then
-        ok "ble.sh installed at $(short_path "$BLESH")"
-    else
-        note "ble.sh install failed — shell will work without autosuggestions"
-    fi
-    rm -rf "$_tmp"
+    ok "no leftover ble.sh install"
 fi
 
 # ---------------------------------------------------------------------------
@@ -364,7 +356,7 @@ printf '    %s2.%s  Connect:  %smosh <host>%s     (resilient over flaky 4G/5G)\n
 printf '    %s3.%s  Inside the remote shell:  %stmux new -A -s main%s\n\n' "$_dim" "$_reset" "$_dim" "$_reset"
 printf '  Docs: %shttps://github.com/ahmed-mili/dev-environment%s\n\n' "$_dim" "$_reset"
 
-# Auto-reload the shell so the user gets the new look + blesh + starship
+# Auto-reload the shell so the user gets the new look + starship
 # immediately, no `source ~/.bashrc` to remember. exec replaces this script
 # process with a fresh interactive login bash — when the user types `exit`
 # they go back to whatever shell launched the bootstrap (or Termux closes).

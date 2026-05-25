@@ -1,6 +1,6 @@
 # android/
 
-Termux installer for the **"SSH client to a remote dev machine"** workflow: a polished Termux (Catppuccin Mocha colours, JetBrainsMono Nerd Font, starship prompt, fastfetch splash, ble.sh autosuggestions, fzf bindings) wired with the SSH stack you need to reach a remote PC over Tailscale (`openssh`, `mosh`, `tmux`). Nothing more.
+Termux installer for the **"SSH client to a remote dev machine"** workflow: a polished Termux (Catppuccin Mocha colours, JetBrainsMono Nerd Font, starship prompt, fastfetch splash, fzf bindings) wired with the SSH stack you need to reach a remote PC over Tailscale (`openssh`, `mosh`, `tmux`). Nothing more.
 
 ## Files
 
@@ -28,9 +28,9 @@ What each piece does:
 - `pkg install -y wget` — ensures `wget` is present (Termux does not always ship it preinstalled).
 - `bash <(wget -qO- …)` — process substitution rather than `curl … | bash`: keeps `stdin` attached to the TTY so the script's `git user.name / user.email` prompts work.
 
-The script installs the packages listed below, deploys the Catppuccin configs, builds ble.sh from upstream, generates an ed25519 SSH key, and prints the public part at the end (also copied to the Android clipboard if `termux-api` is functional) so you can paste it into the **remote host's** `~/.ssh/authorized_keys`. Everything is non-interactive except `git user.name / user.email` (prompted only if missing).
+The script installs the packages listed below, deploys the Catppuccin configs, generates an ed25519 SSH key, and prints the public part at the end (also copied to the Android clipboard if `termux-api` is functional) so you can paste it into the **remote host's** `~/.ssh/authorized_keys`. Everything is non-interactive except `git user.name / user.email` (prompted only if missing).
 
-**Packages installed:** `git openssh mosh curl wget nano fzf fastfetch starship eza bat fd ripgrep tmux termux-api coreutils gawk grep sed make` — plus `ble.sh` built from source. Nothing else.
+**Packages installed:** `git openssh mosh curl wget nano fzf fastfetch starship eza bat fd ripgrep tmux termux-api coreutils gawk grep sed`. Nothing else.
 
 ## What this bundle is NOT (any more)
 
