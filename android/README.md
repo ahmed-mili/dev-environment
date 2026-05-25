@@ -1,88 +1,80 @@
 # android/
 
-Generic Termux installer: bash + Catppuccin Mocha, starship, fastfetch, Claude Code CLI, auto-pull / auto-push hooks on `~/dev/`.
+Termux installer for the **"SSH client to a remote dev machine"** workflow: a polished Termux (Catppuccin Mocha colours, JetBrainsMono Nerd Font, starship prompt, fastfetch splash, ble.sh autosuggestions, fzf bindings) wired with the SSH stack you need to reach a remote PC over Tailscale (`openssh`, `mosh`, `tmux`). Nothing more.
 
 ## Files
 
 | File | Target |
 | --- | --- |
-| `setup.sh` | One-liner Termux installer |
+| `setup-ssh-client.sh` | One-liner Termux installer |
 | `files/bashrc` | `~/.bashrc` |
 | `files/starship.toml` | `~/.config/starship.toml` |
 | `files/fastfetch-config.jsonc` | `~/.config/fastfetch/config.jsonc` |
 | `files/termux.properties` | `~/.termux/termux.properties` |
 | `files/colors.properties` | `~/.termux/colors.properties` |
-| `files/auto-pull.sh` | Claude Code SessionStart hook |
-| `files/auto-push.sh` | Claude Code SessionEnd hook |
+| `migrate-legacy.sh` | Cleans up any previous install (Ollama/proot **or** native Claude Code + auto-pull/push hooks) before re-running `setup-ssh-client.sh` |
 
 ## Installation
 
+Paste this **as a single line** in a fresh Termux (Termux:F-Droid or Termux:GitHub — the Play Store build is abandoned and frequently broken):
+
 ```bash
-curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 2>/dev/null; \
-pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup.sh)
+curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 2>/dev/null; pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/android/setup-ssh-client.sh)
 ```
 
-The script installs the required packages, deploys the Catppuccin configs, generates an ed25519 SSH key, and installs Claude Code via npm. A single opt-in prompt: sshd (for SSH PC→phone). Everything else is non-interactive.
+What each piece does:
 
-You end up with an empty `~/dev/` and Claude Code available — all that's left is cloning the repos you want.
+- `curl --version >/dev/null 2>&1 || dpkg -r --force-depends libngtcp2-crypto-ossl 2>/dev/null` — preamble that auto-repairs the rare-but-fatal libngtcp2 / OpenSSL ABI mismatch some Termux builds ship with (it breaks `curl`, which breaks `pkg install` itself). A no-op on a healthy Termux.
+- `pkg install -y wget` — ensures `wget` is present (Termux does not always ship it preinstalled).
+- `bash <(wget -qO- …)` — process substitution rather than `curl … | bash`: keeps `stdin` attached to the TTY so the script's `git user.name / user.email` prompts work.
 
-> The `dpkg -r libngtcp2-crypto-ossl` preamble is a no-op on a healthy Termux — it only kicks in on builds where the HTTP/3 lib has an ABI mismatch with OpenSSL and breaks `curl` (and `pkg install` along with it). Process substitution `bash <(...)` rather than `curl ... | bash` because the sshd prompt and the GitHub SSH key prompt need a TTY stdin.
+The script installs the packages listed below, deploys the Catppuccin configs, builds ble.sh from upstream, generates an ed25519 SSH key, and prints the public part at the end (also copied to the Android clipboard if `termux-api` is functional) so you can paste it into the **remote host's** `~/.ssh/authorized_keys`. Everything is non-interactive except `git user.name / user.email` (prompted only if missing).
 
-## Customize after install
+**Packages installed:** `git openssh mosh curl wget nano fzf fastfetch starship eza bat fd ripgrep tmux termux-api coreutils gawk grep sed make` — plus `ble.sh` built from source. Nothing else.
 
-```bash
-# Git identity (the script also prompts if missing)
-git config --global user.name  "Your Name"
-git config --global user.email "you@email"
+## What this bundle is NOT (any more)
 
-# Clone your own repos
-mkdir -p ~/dev
-for r in repo1 repo2 repo3; do
-  git clone git@github.com:YOUR_USER/$r.git ~/dev/$r
-done
+This installer no longer puts Claude Code, Node.js or git-sync hooks on the phone. Claude Code now runs on the **PC** and is reached from Termux via `mosh <host>` + `tmux`.
 
-# If you use sshd: add your PC pubkey
-echo "ssh-ed25519 AAAA... your-pc-comment" >> ~/.ssh/authorized_keys
-```
+If you were on either of the two previous setups (**Ollama + proot-distro Ubuntu**, or **native Claude Code on Termux** with auto-pull/push hooks), run `migrate-legacy.sh` — it detects and cleans up both generations (`~/.npm-global`, the SessionStart/SessionEnd hooks in `~/.claude/settings.json`, the autostart blocks in `~/.bashrc.local`, the empty `/storage/emulated/0/dev` tree if it still hangs around), then re-runs `setup-ssh-client.sh` for you. The top-level `bootstrap.sh` invokes it automatically when it detects either generation.
 
-## Recommended workflow for Claude Code
+## Daily workflow
 
 ```bash
-tmain                          # attach the "main" tmux session (create if absent)
-cd ~/dev/my-repo
-claude                         # SessionStart hook runs auto-pull before handing control back
-# work...
-# Ctrl+B then D                # detach — session keeps running in the background
-# close Termux, switch apps, lock the screen: the session survives
+mosh <host>                    # resilient over 4G / 5G — survives screen-off and network changes
+# inside the remote shell:
+tmux new -A -s main            # attach the "main" tmux session, create if absent
+# work in Claude Code, vim, whatever
+# Ctrl+B then D                # detach — your session keeps running on the PC
+# close Termux, switch apps, lock the screen: nothing dies
 # later:
-tmain                          # you find Claude exactly where you left it
+mosh <host>                    # mosh + tmux pick up exactly where you left off
 ```
 
-The wake-lock is acquired automatically by `~/.bashrc.local` (release with `termux-wake-unlock` or delete the line).
+The wake-lock is acquired automatically by `~/.bashrc.local` on every shell start (release with `termux-wake-unlock` or delete the line).
 
-## Maximize performance on Xiaomi / MIUI
+## Maximize background reliability on Xiaomi / MIUI
 
 Android aggressively kills background processes — especially MIUI. Three manual actions (once per phone) that make a visible difference:
 
 **1. Exempt Termux from battery optimization**
 Android Settings → Apps → Termux → Battery → "Unrestricted".
 
-**2. Disable the phantom process killer** (Xiaomi/Android 12+ kills any child that exceeds 32 processes)
+**2. Disable the phantom process killer** (Xiaomi / Android 12+ kills any child that exceeds 32 processes)
 From a PC with ADB:
 ```bash
 adb shell "settings put global settings_enable_monitor_phantom_procs false"
 adb shell "device_config put activity_manager max_phantom_processes 2147483647"
 ```
-(Both settings reset to zero on every Android update — re-apply if tmux/claude die.)
+(Both settings reset to zero on every Android update — re-apply if Termux sessions die.)
 
-**3. Termux:Boot** (optional) — autostart tmux + sshd when the phone boots
+**3. Termux:Boot** (optional) — re-acquire the wake-lock automatically at boot
 Install the Termux:Boot APK from F-Droid, then:
 ```bash
 mkdir -p ~/.termux/boot
 cat > ~/.termux/boot/start.sh <<'EOF'
 #!/data/data/com.termux/files/usr/bin/sh
 termux-wake-lock
-tmux new-session -d -s main
 EOF
 chmod +x ~/.termux/boot/start.sh
 ```

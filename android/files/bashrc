@@ -9,10 +9,13 @@ case $- in
       *) return ;;
 esac
 
-# ---- UTF-8 console — MUST come before ble.sh source ----
-# Termux ships with a broken `C` locale (see termux-packages#23010); ble.sh
-# refuses to load if LC_CTYPE=C. C.UTF-8 fixes both that and accent/glyph
-# rendering in paths + Nerd Font.
+# ---- UTF-8 environment for child processes ----
+# Termux/Bionic lacks a `locale` command (termux-packages#546), so utilities
+# that probe the encoding via `locale charmap` fall back blindly. Setting
+# LANG/LC_ALL explicitly avoids that for most CLIs. NOTE: ble.sh has its
+# OWN encoding setting (`bleopt input_encoding=UTF-8` below) — exporting
+# LANG here is NOT enough to silence ble.sh's "locale seems broken" warning
+# on its own; you need the bleopt too.
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 export LESSCHARSET=utf-8
@@ -20,10 +23,17 @@ export LESSCHARSET=utf-8
 # ---- ble.sh — autosuggestions + syntax highlighting (bash PSReadLine) ----
 # Source with --attach=none here, then ble-attach at the very end of this file
 # so starship/fzf/etc. configure cleanly first. ble.sh is optional — if the
-# file doesn't exist (install step in setup.sh failed), the rest of the
+# file doesn't exist (install step in setup-ssh-client.sh failed), the rest of the
 # bashrc still works.
 if [ -f "$HOME/.local/share/blesh/ble.sh" ]; then
     source "$HOME/.local/share/blesh/ble.sh" --attach=none
+
+    # Manually declare the character encoding: Termux/Bionic has no `locale`
+    # command for ble.sh to probe, so without this it warns "locale 'C' seems
+    # broken" on every shell start. UTF-8 matches our LANG above and Termux's
+    # default TTY encoding.
+    bleopt input_encoding=UTF-8 2>/dev/null
+
     # Catppuccin Mocha overlay-1 for the ghost autosuggest, matches fzf hints.
     ble-face -s auto_complete 'fg=#7f849c' 2>/dev/null
     ble-face -s syntax_default 'fg=#cdd6f4' 2>/dev/null
@@ -67,9 +77,6 @@ shopt -s checkwinsize
 shopt -s globstar 2>/dev/null
 shopt -s autocd 2>/dev/null
 PROMPT_COMMAND="history -a; history -n; ${PROMPT_COMMAND:-}"
-
-# ---- `dev` jump alias — mirrors `function dev { Set-Location C:\dev }` ----
-dev() { cd "$HOME/dev" || return; }
 
 # ---- ls / cat / find replacements when available (eza/bat/fd/ripgrep) ----
 if command -v eza >/dev/null 2>&1; then

@@ -32,7 +32,7 @@ Optional: run `/plugin` inside Claude Code afterward to install `frontend-design
 pkg install -y wget && bash <(wget -qO- https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.sh)
 ```
 
-`bootstrap.sh` auto-detects the state: fresh install → `android/setup.sh`; legacy Ollama/proot setup detected → `android/migrate-from-ollama.sh` (cleanup, then re-run `setup.sh`). Idempotent either way.
+`bootstrap.sh` auto-detects the state: fresh install → `android/setup-ssh-client.sh`; previous-generation install detected (Ollama/proot **or** native Claude Code + auto-pull/push hooks) → `android/migrate-legacy.sh`, which cleans up then re-runs `setup-ssh-client.sh`. Idempotent either way.
 
 ## License
 
