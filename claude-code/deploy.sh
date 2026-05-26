@@ -14,6 +14,7 @@
 #
 # What it syncs (WSL-relevant, platform-independent only):
 #   - keybindings.json                 (Alt+V image-paste fix; see the Obsidian guide)
+#   - tmux.conf -> ~/.tmux.conf        (truecolor passthrough; see the SSH Android guide)
 #   - the 11 whitelisted custom skills (same list as deploy.ps1)
 #
 # What it deliberately does NOT touch, and why:
@@ -50,7 +51,12 @@ command -v rsync >/dev/null 2>&1 || { echo "rsync required: sudo apt install rsy
 REPO_CLAUDE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOME_CLAUDE="$HOME/.claude"
 
-FILES=( "keybindings.json" )
+# Files that land in ~/.claude/ (basename used as both source and dest).
+CLAUDE_FILES=( "keybindings.json" )
+
+# Files that land in $HOME directly. Format: "<repo-name>:<home-name>"
+# (e.g. tmux.conf in the repo -> ~/.tmux.conf, the leading dot is added).
+HOME_FILES=( "tmux.conf:.tmux.conf" )
 
 # Custom skills tracked in the repo (mirror of deploy.ps1's $CustomSkills).
 SKILLS=(
@@ -82,15 +88,25 @@ copy_skill() {  # src-dir dst-dir
 
 if [ "$MODE" = "pull" ]; then
     echo "=== Pull: $REPO_CLAUDE -> $HOME_CLAUDE  (--update protects newer local files) ==="
-    echo "Files:"
-    for f in "${FILES[@]}"; do copy_file "$REPO_CLAUDE/$f" "$HOME_CLAUDE/$f"; done
+    echo "Files in ~/.claude/:"
+    for f in "${CLAUDE_FILES[@]}"; do copy_file "$REPO_CLAUDE/$f" "$HOME_CLAUDE/$f"; done
+    echo "Files in ~/:"
+    for pair in "${HOME_FILES[@]}"; do
+        src="${pair%%:*}"; dst="${pair##*:}"
+        copy_file "$REPO_CLAUDE/$src" "$HOME/$dst"
+    done
     echo "Skills:"
     for s in "${SKILLS[@]}"; do copy_skill "$REPO_CLAUDE/skills/$s" "$HOME_CLAUDE/skills/$s"; done
-    echo "Done. keybindings.json hot-reloads (no restart). New skills: restart Claude Code."
+    echo "Done. keybindings.json hot-reloads (no restart). tmux: 'tmux source-file ~/.tmux.conf' to apply on a running server. New skills: restart Claude Code."
 else
     echo "=== Push: $HOME_CLAUDE -> $REPO_CLAUDE ==="
-    echo "Files:"
-    for f in "${FILES[@]}"; do copy_file "$HOME_CLAUDE/$f" "$REPO_CLAUDE/$f"; done
+    echo "Files from ~/.claude/:"
+    for f in "${CLAUDE_FILES[@]}"; do copy_file "$HOME_CLAUDE/$f" "$REPO_CLAUDE/$f"; done
+    echo "Files from ~/:"
+    for pair in "${HOME_FILES[@]}"; do
+        src="${pair%%:*}"; dst="${pair##*:}"
+        copy_file "$HOME/$dst" "$REPO_CLAUDE/$src"
+    done
     echo "Skills:"
     for s in "${SKILLS[@]}"; do copy_skill "$HOME_CLAUDE/skills/$s" "$REPO_CLAUDE/skills/$s"; done
     echo "Done. Reminder: cd dev-environment ; git add -A ; git commit ; git push"

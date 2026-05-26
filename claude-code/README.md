@@ -12,8 +12,9 @@ Claude Code config shared between Windows, WSL/Linux and Android. Single source 
 | `hooks/` | `auto-pull.ps1`, `auto-push.ps1`, `resolve-sync-conflicts.ps1` — reserved for manual/future use, no longer called from SessionStart/End |
 | `skills/` | Custom skills: claude-file-recovery, copy-edit, css-layout-check, deploy-safety, edit-block, lucide-icons, release, root-cause-fix, smart-edit, sticky-column-bleed-fix, webapp-deploy |
 | `deploy.ps1` | Manual bidirectional sync between this folder and the **Windows** `~/.claude/` |
-| `deploy.sh` | Same, for the **WSL/Linux** `$HOME/.claude/` (keybindings.json + custom skills). The desktop is WSL-primary. |
+| `deploy.sh` | Same, for the **WSL/Linux** `$HOME/.claude/` (keybindings.json + tmux.conf + custom skills). The desktop is WSL-primary. |
 | `keybindings.json` | Custom Claude Code keybindings (`Alt+V` image paste on WSL — see the Obsidian guide) |
+| `tmux.conf` | Deployed to `~/.tmux.conf` by `deploy.sh`. Lets tmux forward 24-bit color so Claude Code renders truecolor over `mosh`+`tmux` (see the SSH Android guide) |
 
 ## Bootstrap a new machine
 
@@ -52,7 +53,21 @@ cd ~/dev/dev-environment
 ./claude-code/deploy.sh --push     # ~/.claude/ -> repo  (before git commit)
 ```
 
-It syncs only what is platform-independent: `keybindings.json` and the 11 custom skills. It deliberately does **not** touch `settings.json` (diverges: statusline path `/home/...` vs `C:\...`, marketplaces, effortLevel), `statusline.ps1` / `statusline-rs/` or `hooks/` (Windows-only). Pull uses `rsync --update`, so it never overwrites a `~/.claude/` file newer than the repo (deploy-safety). `deploy.ps1` (Windows) is kept frozen for the gaming/admin install.
+It syncs only what is platform-independent: `keybindings.json`, `tmux.conf` (deployed to `~/.tmux.conf`), and the 11 custom skills. It deliberately does **not** touch `settings.json` (diverges: statusline path `/home/...` vs `C:\...`, marketplaces, effortLevel), `statusline.ps1` / `statusline-rs/` or `hooks/` (Windows-only). Pull uses `rsync --update`, so it never overwrites a local file newer than the repo (deploy-safety). `deploy.ps1` (Windows) is kept frozen for the gaming/admin install.
+
+### One-time bashrc snippet (not auto-synced)
+
+Claude Code downgrades to 256-color whenever it sees `$TMUX` (it ignores `COLORTERM` and `FORCE_COLOR` in that case). A small wrapper in `~/.bashrc` makes `claude` always launch without `TMUX`, so it emits real 24-bit again — `tmux.conf` then forwards it untouched. Add this once on a fresh WSL machine:
+
+```bash
+cat >> ~/.bashrc <<'EOF'
+
+# Claude Code rabaisse en 256-color quand $TMUX est defini -> le lancer sans.
+claude() { env -u TMUX claude "$@"; }
+EOF
+```
+
+(`.bashrc` isn't tracked because each machine's bashrc has unrelated history; the snippet is idempotent — running it twice just defines the function twice, harmless.)
 
 ## Statusline — technical details
 
