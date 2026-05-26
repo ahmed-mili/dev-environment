@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Hook Termux : appele par Termux quand l'utilisateur fait
+#   Partager -> Termux -> EDIT
+# sur une image dans Android. Termux passe le chemin du fichier sauvegarde
+# (dans ~/downloads/) comme premier argument. Voir TermuxFileReceiver et
+# https://github.com/termux/termux-app/issues/1888 .
+#
+# Doit etre depose dans ~/bin/termux-file-editor sur le telephone.
+# Delegue toute la logique au coeur d'envoi img2claude.
+
+exec bash "$HOME/img2claude" "$1"
