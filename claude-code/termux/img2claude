@@ -52,6 +52,8 @@ dest="img-$(date +%Y%m%d-%H%M%S).${newest##*.}"
 
 echo "-> $newest"
 scp -q "$newest" "$DESK:$DEST_DIR/$dest"
+# Cote desktop, en une connexion : purge auto (ne garde que les 30 plus recentes,
+# sinon le dossier grossit a l'infini) PUIS injecte le chemin dans le prompt Claude.
 # -l : insere la chaine litteralement (chemin + espace), sans l'executer.
-ssh "$DESK" "tmux send-keys -t '$TMUX_TARGET' -l '$DEST_DIR/$dest '"
+ssh "$DESK" "cd '$DEST_DIR' && ls -t | tail -n +31 | xargs -r rm -f -- ; tmux send-keys -t '$TMUX_TARGET' -l '$DEST_DIR/$dest '"
 echo "OK. Le chemin est dans le prompt Claude -> reviens sur la session et tape Entree."
