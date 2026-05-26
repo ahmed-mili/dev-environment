@@ -53,6 +53,18 @@ mosh <host>                    # mosh + tmux pick up exactly where you left off
 
 The wake-lock is acquired automatically by `~/.bashrc.local` on every shell start (release with `termux-wake-unlock` or delete the line).
 
+## Clipboard: "press c to copy" is silently dropped over mosh
+
+Anything that copies to the clipboard via the **OSC 52** terminal escape — including Claude Code's `/login` "press `c` to copy" — *looks* like it works (the app prints "copied") but nothing lands in the Android clipboard. The copy is lost in transit, not at either end:
+
+- The app emits OSC 52 correctly, and `tmux` is set up to forward it (`set-clipboard external` + the `clipboard` terminal feature on `xterm*`).
+- `mosh` 1.4.0 (the latest stable release) has **no OSC 52 support at all**. Unlike SSH it is not a transparent byte pipe — its server interprets escape sequences and syncs only screen *state* to the client, so the out-of-band "set clipboard" action is dropped. OSC 52 is fire-and-forget, so the app never learns it failed and still says "copied".
+
+No config fixes this while you are on `mosh` — it is a missing feature, not a tunable. Workarounds:
+
+- **Select the text by hand** in Termux (long-press → selection → copy). Always works. For `/login`: select the URL, open it in the phone browser, then paste the returned code back into the session — keystrokes *into* mosh flow normally; only the outbound copy is blocked.
+- **Use plain `ssh <host>` instead of `mosh`** for that one moment. SSH is a transparent pipe, so OSC 52 traverses `tmux` (already configured) and reaches Termux (which supports it). You lose mosh's resilience to network drops, so it is only worth it when you specifically need the copy.
+
 ## Maximize background reliability on Xiaomi / MIUI
 
 Android aggressively kills background processes — especially MIUI. Three manual actions (once per phone) that make a visible difference:
