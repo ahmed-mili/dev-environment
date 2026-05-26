@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# img2claude — envoie l'image (photo OU capture) la plus recente du telephone
+# dans la session Claude Code qui tourne sur le desktop, par-dessus mosh/Tailscale.
+#
+# Pourquoi ce detour : sur Termux -> mosh -> tmux -> Claude, le presse-papier du
+# tel ne traverse pas mosh (OSC 52 avale), donc un "vrai" Alt+V est impossible.
+# A la place : on prend le fichier le plus recent, on le scp au desktop, et on
+# ecrit son chemin dans le prompt Claude via `tmux send-keys`. Claude Code attache
+# l'image quand on valide un chemin de fichier image dans le prompt.
+#
+# Usage (depuis une 2e session Termux) :  bash ~/img2claude
+# Raccourci conseille : alias i='bash ~/img2claude'  (dans ~/.bashrc) -> on tape `i`.
+#
+# Prerequis (one-shot cote tel) :
+#   - termux-setup-storage     (autorise l'acces a ~/storage, aucune app a installer)
+#   - ssh par cle tel->desktop (deja le cas si tu moshes sans taper de mot de passe)
+
+set -euo pipefail
+
+DESK="ahmed@100.66.28.125"        # desktop via Tailscale (IP 100.x)
+DEST_DIR="/home/ahmed/.claude-images"
+TMUX_TARGET="main"                # session tmux ou tourne Claude
+
+# Cherche dans les photos (dcim) ET les captures (pictures, dont Screenshots).
+shopt -s globstar nullglob extglob
+candidates=(
+  "$HOME"/storage/dcim/**/*.@(jpg|jpeg|png|webp|JPG|JPEG|PNG|WEBP)
+  "$HOME"/storage/pictures/**/*.@(jpg|jpeg|png|webp|JPG|JPEG|PNG|WEBP)
+)
+if [ ${#candidates[@]} -eq 0 ]; then
+  echo "Aucune image trouvee dans ~/storage/dcim ni ~/storage/pictures." >&2
+  echo "As-tu lance 'termux-setup-storage' ?" >&2
+  exit 1
+fi
+
+# La plus recente par date de modif.
+img=$(ls -t "${candidates[@]}" | head -1)
+ext="${img##*.}"
+dest="img-$(date +%Y%m%d-%H%M%S).${ext,,}"
+
+echo "-> $img"
+scp -q "$img" "$DESK:$DEST_DIR/$dest"
+# -l : insere la chaine litteralement (chemin + espace), sans l'executer.
+ssh "$DESK" "tmux send-keys -t '$TMUX_TARGET' -l '$DEST_DIR/$dest '"
+echo "OK. Le chemin est dans le prompt Claude -> reviens sur la session et tape Entree."
