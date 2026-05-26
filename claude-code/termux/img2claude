@@ -21,25 +21,37 @@ DESK="ahmed@100.66.28.125"        # desktop via Tailscale (IP 100.x)
 DEST_DIR="/home/ahmed/.claude-images"
 TMUX_TARGET="main"                # session tmux ou tourne Claude
 
-# Cherche dans les photos (dcim) ET les captures (pictures, dont Screenshots).
-shopt -s globstar nullglob extglob
-candidates=(
-  "$HOME"/storage/dcim/**/*.@(jpg|jpeg|png|webp|JPG|JPEG|PNG|WEBP)
-  "$HOME"/storage/pictures/**/*.@(jpg|jpeg|png|webp|JPG|JPEG|PNG|WEBP)
+# On scanne les dossiers d'images sur UN SEUL niveau, volontairement PAS de glob
+# `**` : ~/storage/dcim est un symlink vers tout le DCIM, et `**` le traverserait
+# entierement (des milliers de fichiers, lent, + risque de SIGPIPE sur `| head`).
+# La selection du plus recent se fait par une boucle `-nt` -> aucun pipe, robuste.
+shopt -s nullglob
+dirs=(
+  "$HOME"/storage/dcim "$HOME"/storage/dcim/Camera "$HOME"/storage/dcim/Screenshots
+  "$HOME"/storage/pictures "$HOME"/storage/pictures/Screenshots
+  "$HOME"/storage/downloads
 )
-if [ ${#candidates[@]} -eq 0 ]; then
-  echo "Aucune image trouvee dans ~/storage/dcim ni ~/storage/pictures." >&2
+
+newest=""
+for d in "${dirs[@]}"; do
+  for f in "$d"/*.jpg "$d"/*.jpeg "$d"/*.png "$d"/*.webp \
+           "$d"/*.JPG "$d"/*.JPEG "$d"/*.PNG "$d"/*.WEBP; do
+    [ -f "$f" ] || continue
+    if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then
+      newest="$f"
+    fi
+  done
+done
+if [ -z "$newest" ]; then
+  echo "Aucune image trouvee dans dcim/pictures/downloads." >&2
   echo "As-tu lance 'termux-setup-storage' ?" >&2
   exit 1
 fi
 
-# La plus recente par date de modif.
-img=$(ls -t "${candidates[@]}" | head -1)
-ext="${img##*.}"
-dest="img-$(date +%Y%m%d-%H%M%S).${ext,,}"
+dest="img-$(date +%Y%m%d-%H%M%S).${newest##*.}"
 
-echo "-> $img"
-scp -q "$img" "$DESK:$DEST_DIR/$dest"
+echo "-> $newest"
+scp -q "$newest" "$DESK:$DEST_DIR/$dest"
 # -l : insere la chaine litteralement (chemin + espace), sans l'executer.
 ssh "$DESK" "tmux send-keys -t '$TMUX_TARGET' -l '$DEST_DIR/$dest '"
 echo "OK. Le chemin est dans le prompt Claude -> reviens sur la session et tape Entree."
