@@ -21,31 +21,40 @@ DESK="ahmed@100.66.28.125"        # desktop via Tailscale (IP 100.x)
 DEST_DIR="/home/ahmed/.claude-images"
 TMUX_TARGET="main"                # session tmux ou tourne Claude
 
-# On scanne les dossiers d'images sur UN SEUL niveau, volontairement PAS de glob
-# `**` : ~/storage/dcim est un symlink vers tout le DCIM, et `**` le traverserait
-# entierement (des milliers de fichiers, lent, + risque de SIGPIPE sur `| head`).
+# Si un fichier est passe en argument (cas hook Termux: termux-file-editor), on
+# l'envoie directement. Sinon, on scanne UN seul niveau de dossiers d'images
+# (PAS de glob **: ~/storage/dcim est un symlink -> milliers de fichiers + SIGPIPE).
 # La selection du plus recent se fait par une boucle `-nt` -> aucun pipe, robuste.
-shopt -s nullglob
-dirs=(
-  "$HOME"/storage/dcim "$HOME"/storage/dcim/Camera "$HOME"/storage/dcim/Screenshots
-  "$HOME"/storage/pictures "$HOME"/storage/pictures/Screenshots
-  "$HOME"/storage/downloads
-)
-
-newest=""
-for d in "${dirs[@]}"; do
-  for f in "$d"/*.jpg "$d"/*.jpeg "$d"/*.png "$d"/*.webp \
-           "$d"/*.JPG "$d"/*.JPEG "$d"/*.PNG "$d"/*.WEBP; do
-    [ -f "$f" ] || continue
-    if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then
-      newest="$f"
-    fi
+if [ "$#" -ge 1 ]; then
+  newest="$1"
+  [ -r "$newest" ] || { echo "Fichier illisible: $newest" >&2; exit 1; }
+  ext="${newest##*.}"
+  case "${ext,,}" in
+    jpg|jpeg|png|webp) ;;
+    *) echo "Type non supporte: .$ext (attendu: jpg/jpeg/png/webp)" >&2; exit 1 ;;
+  esac
+else
+  shopt -s nullglob
+  dirs=(
+    "$HOME"/storage/dcim "$HOME"/storage/dcim/Camera "$HOME"/storage/dcim/Screenshots
+    "$HOME"/storage/pictures "$HOME"/storage/pictures/Screenshots
+    "$HOME"/storage/downloads
+  )
+  newest=""
+  for d in "${dirs[@]}"; do
+    for f in "$d"/*.jpg "$d"/*.jpeg "$d"/*.png "$d"/*.webp \
+             "$d"/*.JPG "$d"/*.JPEG "$d"/*.PNG "$d"/*.WEBP; do
+      [ -f "$f" ] || continue
+      if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then
+        newest="$f"
+      fi
+    done
   done
-done
-if [ -z "$newest" ]; then
-  echo "Aucune image trouvee dans dcim/pictures/downloads." >&2
-  echo "As-tu lance 'termux-setup-storage' ?" >&2
-  exit 1
+  if [ -z "$newest" ]; then
+    echo "Aucune image trouvee dans dcim/pictures/downloads." >&2
+    echo "As-tu lance 'termux-setup-storage' ?" >&2
+    exit 1
+  fi
 fi
 
 dest="img-$(date +%Y%m%d-%H%M%S).${newest##*.}"
