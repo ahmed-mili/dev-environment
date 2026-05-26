@@ -15,6 +15,7 @@ Claude Code config shared between Windows, WSL/Linux and Android. Single source 
 | `deploy.sh` | Same, for the **WSL/Linux** `$HOME/.claude/` (keybindings.json + tmux.conf + custom skills). The desktop is WSL-primary. |
 | `keybindings.json` | Custom Claude Code keybindings (`Alt+V` image paste on WSL — see the Obsidian guide) |
 | `tmux.conf` | Deployed to `~/.tmux.conf` by `deploy.sh`. Lets tmux forward 24-bit color so Claude Code renders truecolor over `mosh`+`tmux` (see the SSH Android guide) |
+| `termux/img2claude` | Termux (Android) script: sends the most recent photo/screenshot into the Claude session running on the desktop (`scp` + `tmux send-keys`), bound to the `i` shortcut. Works around mosh not carrying the clipboard (Alt+V can't cross it). Lives on the phone, not synced by `deploy.sh` — installed via the express block in the SSH Android guide. |
 
 ## Bootstrap a new machine
 
