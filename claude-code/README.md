@@ -1,6 +1,6 @@
 # claude-code/
 
-Claude Code config shared between Windows and Android. Single source of truth.
+Claude Code config shared between Windows, WSL/Linux and Android. Single source of truth.
 
 ## Contents
 
@@ -11,7 +11,9 @@ Claude Code config shared between Windows and Android. Single source of truth.
 | `settings.json` | Claude Code config (model, plugins, `.exe` statusline) |
 | `hooks/` | `auto-pull.ps1`, `auto-push.ps1`, `resolve-sync-conflicts.ps1` — reserved for manual/future use, no longer called from SessionStart/End |
 | `skills/` | Custom skills: claude-file-recovery, copy-edit, css-layout-check, deploy-safety, edit-block, lucide-icons, release, root-cause-fix, smart-edit, sticky-column-bleed-fix, webapp-deploy |
-| `deploy.ps1` | Manual bidirectional sync between this folder and `~/.claude/` |
+| `deploy.ps1` | Manual bidirectional sync between this folder and the **Windows** `~/.claude/` |
+| `deploy.sh` | Same, for the **WSL/Linux** `$HOME/.claude/` (keybindings.json + custom skills). The desktop is WSL-primary. |
+| `keybindings.json` | Custom Claude Code keybindings (`Alt+V` image paste on WSL — see the Obsidian guide) |
 
 ## Bootstrap a new machine
 
@@ -39,6 +41,18 @@ git add -A ; git commit -m "<message>" ; git push
 ### To add a new custom skill to the whitelist
 
 Edit `deploy.ps1` line `$CustomSkills = @(...)` and add your skill's folder name.
+
+## WSL / Linux sync (`deploy.sh`)
+
+The desktop runs Claude Code in **WSL**, so the WSL `$HOME/.claude/` is the source of truth for dev. `deploy.sh` is the bash counterpart of `deploy.ps1`:
+
+```bash
+cd ~/dev/dev-environment
+./claude-code/deploy.sh --pull     # repo -> ~/.claude/  (bootstrap a WSL machine)
+./claude-code/deploy.sh --push     # ~/.claude/ -> repo  (before git commit)
+```
+
+It syncs only what is platform-independent: `keybindings.json` and the 11 custom skills. It deliberately does **not** touch `settings.json` (diverges: statusline path `/home/...` vs `C:\...`, marketplaces, effortLevel), `statusline.ps1` / `statusline-rs/` or `hooks/` (Windows-only). Pull uses `rsync --update`, so it never overwrites a `~/.claude/` file newer than the repo (deploy-safety). `deploy.ps1` (Windows) is kept frozen for the gaming/admin install.
 
 ## Statusline — technical details
 
