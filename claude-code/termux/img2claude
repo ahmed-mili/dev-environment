@@ -3,10 +3,14 @@
 # dans la session Claude Code qui tourne sur le desktop, par-dessus mosh/Tailscale.
 #
 # Pourquoi ce detour : sur Termux -> mosh -> tmux -> Claude, le presse-papier du
-# tel ne traverse pas mosh (OSC 52 avale), donc un "vrai" Alt+V est impossible.
-# A la place : on prend le fichier le plus recent, on le scp au desktop, et on
-# ecrit son chemin dans le prompt Claude via `tmux send-keys`. Claude Code attache
-# l'image quand on valide un chemin de fichier image dans le prompt.
+# tel ne traverse pas mosh (OSC 52 avale), donc un "vrai" Alt+V cote tel est
+# impossible. Solution : scp l'image au desktop, la mettre dans le clipboard
+# Wayland du desktop (via wl-copy + WSLg), puis envoyer Alt+V dans la session
+# tmux ou tourne Claude -> chat:imagePaste attache l'image au prompt.
+#
+# Pourquoi pas juste `tmux send-keys -l <path>` : un path brut tape dans le
+# prompt n'est PAS auto-attache par Claude Code (verifie 2026-05-27, v2.1.150).
+# Le clipboard + Alt+V est le seul chemin fiable.
 #
 # Usage (depuis une 2e session Termux) :  bash ~/img2claude
 # Raccourci conseille : alias i='bash ~/img2claude'  (dans ~/.bashrc) -> on tape `i`.
@@ -57,12 +61,29 @@ else
   fi
 fi
 
-dest="img-$(date +%Y%m%d-%H%M%S).${newest##*.}"
+ext="${newest##*.}"
+dest="img-$(date +%Y%m%d-%H%M%S).${ext}"
+case "${ext,,}" in
+  jpg|jpeg) mime="image/jpeg" ;;
+  png)      mime="image/png"  ;;
+  webp)     mime="image/webp" ;;
+  *)        mime="application/octet-stream" ;;
+esac
 
 echo "-> $newest"
 scp -q "$newest" "$DESK:$DEST_DIR/$dest"
-# Cote desktop, en une connexion : purge auto (ne garde que les 30 plus recentes,
-# sinon le dossier grossit a l'infini) PUIS injecte le chemin dans le prompt Claude.
-# -l : insere la chaine litteralement (chemin + espace), sans l'executer.
-ssh "$DESK" "cd '$DEST_DIR' && ls -t | tail -n +31 | xargs -r rm -f -- ; tmux send-keys -t '$TMUX_TARGET' -l '$DEST_DIR/$dest '"
-echo "OK. Le chemin est dans le prompt Claude -> reviens sur la session et tape Entree."
+# Cote desktop, en une connexion :
+#   1. purge auto (ne garde que les 30 plus recentes)
+#   2. wl-copy l'image dans le clipboard Wayland (WSLg le bridge avec Windows)
+#   3. tmux send-keys M-v -> Alt+V dans Claude -> chat:imagePaste attache l'image
+# WAYLAND_DISPLAY + XDG_RUNTIME_DIR sont indispensables : la session ssh n'herite
+# pas de l'env Wayland de la session graphique.
+ssh "$DESK" "
+  set -e
+  cd '$DEST_DIR'
+  ls -t | tail -n +31 | xargs -r rm -f --
+  export WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/\$(id -u)
+  wl-copy --type '$mime' < '$DEST_DIR/$dest'
+  tmux send-keys -t '$TMUX_TARGET' M-v
+"
+echo "OK. Image envoyee dans le prompt Claude (Alt+V auto)."
