@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Wrapper Termux:Boot pour screenshot-watcher.
+# A deposer en ~/.termux/boot/screenshot-watcher sur le telephone (chmod +x).
+#
+# termux-wake-lock : sans ca, Android tue le process des que l'ecran s'eteint.
+# Le wake lock se voit dans la notif Termux ("Acquired wakelock") -> permet
+# d'arreter d'un swipe si besoin. Cout batterie reel : negligeable pour un
+# polling 2s qui ne fait qu'un find toutes les 2s.
+
+termux-wake-lock
+exec bash "$HOME/bin/screenshot-watcher"
