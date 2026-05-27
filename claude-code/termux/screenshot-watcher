@@ -24,7 +24,7 @@ mkdir -p "$(dirname "$STATE")"
 # Baseline au demarrage : le mtime du fichier le plus recent existant. Sinon,
 # on re-enverrait les 2000+ captures historiques au premier passage.
 if [ ! -s "$STATE" ]; then
-  baseline=$(find "$DIR" -maxdepth 1 -type f \
+  baseline=$(find "$DIR" -maxdepth 1 -type f ! -name '.*' \
                \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
                -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
   echo "${baseline:-0}" > "$STATE"
@@ -39,6 +39,10 @@ while :; do
   cutoff=$(cat "$STATE")
   # Nouveaux fichiers depuis cutoff, tries par mtime croissant pour preserver
   # l'ordre chronologique si plusieurs captures dans la meme fenetre de 2s.
+  # `! -name '.*'` exclut les fichiers temporaires que MIUI/Android ecrit AVANT
+  # le renommage final (ex: `.pending-<ts>-Screenshot_xxx.jpg`). Sans ca, une
+  # seule capture est vue 2x (le .pending PUIS le fichier final) -> image collee
+  # en double dans Claude (observe 2026-05-27).
   while IFS=$'\t' read -r mtime file; do
     [ -n "$file" ] || continue
     # Pause courte pour laisser Android finir l'ecriture du fichier (atomicite
@@ -46,7 +50,7 @@ while :; do
     sleep 0.3
     bash "$HOME/img2claude" "$file" </dev/null >/dev/null 2>&1 || true
     echo "$mtime" > "$STATE"
-  done < <(find "$DIR" -maxdepth 1 -type f \
+  done < <(find "$DIR" -maxdepth 1 -type f ! -name '.*' \
               \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
               -newermt "@$cutoff" -printf '%T@\t%p\n' 2>/dev/null | sort -n)
 
