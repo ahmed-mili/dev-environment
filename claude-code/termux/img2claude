@@ -5,8 +5,16 @@
 # Pourquoi ce detour : sur Termux -> mosh -> tmux -> Claude, le presse-papier du
 # tel ne traverse pas mosh (OSC 52 avale), donc un "vrai" Alt+V cote tel est
 # impossible. Solution : scp l'image au desktop, la mettre dans le clipboard
-# Wayland du desktop (via wl-copy + WSLg), puis envoyer Alt+V dans la session
-# tmux ou tourne Claude -> chat:imagePaste attache l'image au prompt.
+# Windows (via PowerShell SetImage), puis envoyer Alt+V dans la session tmux
+# ou tourne Claude -> chat:imagePaste attache l'image au prompt.
+#
+# Pourquoi PAS wl-copy (Wayland) malgre WSLg : Claude Code v2.1.150+ extrait
+# le clipboard avec cette chaine (cli.js, branche linux) :
+#     wl-paste --type image/png || wl-paste --type image/bmp || powershell...
+# Il ne demande JAMAIS image/jpeg. Si on wl-copy --type image/jpeg, wl-paste
+# pour png/bmp renvoie rc=1 et le fichier reste a 0 byte -> Claude abandonne
+# silencieusement. Le fallback PowerShell (Get-Clipboard -Format Image) est
+# le seul qui accepte tous les formats source -> on cible directement celui-la.
 #
 # Pourquoi pas juste `tmux send-keys -l <path>` : un path brut tape dans le
 # prompt n'est PAS auto-attache par Claude Code (verifie 2026-05-27, v2.1.150).
@@ -63,27 +71,26 @@ fi
 
 ext="${newest##*.}"
 dest="img-$(date +%Y%m%d-%H%M%S).${ext}"
-case "${ext,,}" in
-  jpg|jpeg) mime="image/jpeg" ;;
-  png)      mime="image/png"  ;;
-  webp)     mime="image/webp" ;;
-  *)        mime="application/octet-stream" ;;
-esac
 
 echo "-> $newest"
 scp -q "$newest" "$DESK:$DEST_DIR/$dest"
 # Cote desktop, en une connexion :
 #   1. purge auto (ne garde que les 30 plus recentes)
-#   2. wl-copy l'image dans le clipboard Wayland (WSLg le bridge avec Windows)
-#   3. tmux send-keys M-v -> Alt+V dans Claude -> chat:imagePaste attache l'image
-# WAYLAND_DISPLAY + XDG_RUNTIME_DIR sont indispensables : la session ssh n'herite
-# pas de l'env Wayland de la session graphique.
-ssh "$DESK" "
-  set -e
-  cd '$DEST_DIR'
-  ls -t | tail -n +31 | xargs -r rm -f --
-  export WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/\$(id -u)
-  wl-copy --type '$mime' < '$DEST_DIR/$dest'
-  tmux send-keys -t '$TMUX_TARGET' M-v
-"
+#   2. wslpath convertit /home/ahmed/... -> \\wsl.localhost\Ubuntu\home\ahmed\...
+#      (powershell.exe tourne cote Windows et lit le FS WSL via UNC)
+#   3. PowerShell -Sta SetImage met l'image (jpg/png/etc.) dans le clipboard
+#      Windows. -Sta est obligatoire : System.Windows.Forms.Clipboard exige
+#      un thread en apartment STA.
+#   4. tmux send-keys M-v -> Alt+V dans Claude -> chat:imagePaste -> claude
+#      essaie xclip png (fail), wl-paste png (fail), xclip bmp (fail), wl-paste
+#      bmp (fail), puis powershell Get-Clipboard -Format Image -> SUCCES.
+ssh "$DESK" bash <<REMOTE
+set -e
+cd '$DEST_DIR'
+ls -t | tail -n +31 | xargs -r rm -f --
+export CLAUDE_IMG_WIN_PATH=\$(wslpath -w '$DEST_DIR/$dest')
+ps_exe=\$(command -v powershell.exe 2>/dev/null || echo /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe)
+"\$ps_exe" -Sta -NoProfile -NonInteractive -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \$img = [System.Drawing.Image]::FromFile(\$env:CLAUDE_IMG_WIN_PATH); [System.Windows.Forms.Clipboard]::SetImage(\$img); \$img.Dispose()' >&2
+tmux send-keys -t '$TMUX_TARGET' M-v
+REMOTE
 echo "OK. Image envoyee dans le prompt Claude (Alt+V auto)."
