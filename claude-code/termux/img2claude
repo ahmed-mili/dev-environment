@@ -4,20 +4,25 @@
 #
 # Pourquoi ce detour : sur Termux -> mosh -> tmux -> Claude, le presse-papier du
 # tel ne traverse pas mosh (OSC 52 avale), donc un "vrai" Alt+V cote tel est
-# impossible. Solution : scp l'image au desktop, la mettre dans le clipboard
-# Windows (via PowerShell SetImage), puis envoyer Alt+V dans la session tmux
-# ou tourne Claude -> chat:imagePaste attache l'image au prompt.
+# impossible. Solution : scp l'image au desktop, la poser dans le presse-papier
+# du desktop, puis envoyer Alt+V dans la session tmux ou tourne Claude ->
+# chat:imagePaste attache l'image au prompt.
 #
-# Pourquoi PAS wl-copy (Wayland) malgre WSLg : Claude Code v2.1.150+ extrait
-# le clipboard avec cette chaine (cli.js, branche linux) :
-#     wl-paste --type image/png || wl-paste --type image/bmp || powershell...
-# Il ne demande JAMAIS image/jpeg. Si on wl-copy --type image/jpeg, wl-paste
-# pour png/bmp renvoie rc=1 et le fichier reste a 0 byte -> Claude abandonne
-# silencieusement. Le fallback PowerShell (Get-Clipboard -Format Image) est
-# le seul qui accepte tous les formats source -> on cible directement celui-la.
+# Quel presse-papier ? Claude Code v2.1.152 lit l'image avec cette chaine (cli.js,
+# branche WSL), DANS CET ORDRE :
+#     wl-paste --type image/png || wl-paste --type image/bmp || powershell Get-Clipboard
+# Subtilite WSLg : si on ne met l'image QUE dans le presse-papier Windows
+# (PowerShell SetImage), le bridge WSLg l'expose cote Wayland UNIQUEMENT en
+# image/bmp -> un BMP 32-bit BI_BITFIELDS que le sharp/libvips de Claude NE SAIT
+# PAS decoder -> "No image found in clipboard". Et comme wl-paste image/bmp
+# reussit (exit 0), Claude n'atteint jamais le fallback PowerShell.
+# => On pose donc l'image en image/png dans le presse-papier WAYLAND via wl-copy :
+#    Claude la prend au 1er maillon (wl-paste --type image/png), avec des octets
+#    propres (le JPEG est re-sniffe par sharp, peu importe l'etiquette png).
+#    On garde EN PLUS le SetImage Windows pour que Discord & co puissent coller.
 #
 # Pourquoi pas juste `tmux send-keys -l <path>` : un path brut tape dans le
-# prompt n'est PAS auto-attache par Claude Code (verifie 2026-05-27, v2.1.150).
+# prompt n'est PAS auto-attache par Claude Code (verifie 2026-05-27, v2.1.152).
 # Le clipboard + Alt+V est le seul chemin fiable.
 #
 # Usage (depuis une 2e session Termux) :  bash ~/img2claude
@@ -101,17 +106,25 @@ export CLAUDE_IMG_WIN_PATH=\$(wslpath -w '$DEST_DIR/$dest')
 # est vide cote PowerShell -> FromFile('') -> \$img null -> SetImage(null) echoue.
 export WSLENV=CLAUDE_IMG_WIN_PATH:\$WSLENV
 ps_exe=\$(command -v powershell.exe 2>/dev/null || echo /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe)
-# SetImage + VERIFICATION (retry x3) : le clipboard Windows est une ressource
-# verrouillable ; si Claude (ou un autre img2claude rapproche) lit pendant qu'on
-# ecrit, l'ecriture peut echouer silencieusement. On re-essaie tant que GetImage
-# ne confirme pas, et on sort en erreur sinon -> grace a `set -e`, le M-v ci-dessous
-# n'est PAS tire si le clipboard n'a pas l'image (evite un Alt+V "a vide" qui
-# afficherait "No image found in clipboard" cote Claude).
+# 1. Presse-papier WINDOWS (bonus : Discord & autres apps Windows peuvent coller).
 # </dev/null est CRITIQUE : powershell.exe herite du stdin du heredoc et AVALE
-# toutes les lignes restantes (dont le `tmux send-keys` ci-dessous) -> sans ca,
-# le M-v n'est JAMAIS envoye et aucune image n'est collee (diagnostique 2026-05-27
-# via instrumentation : le bloc distant s'arretait pile apres SetImage).
-"\$ps_exe" -Sta -NoProfile -NonInteractive -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \$img = [System.Drawing.Image]::FromFile(\$env:CLAUDE_IMG_WIN_PATH); \$ok = \$false; for (\$i = 0; \$i -lt 3; \$i++) { try { [System.Windows.Forms.Clipboard]::SetImage(\$img); Start-Sleep -Milliseconds 150; if (\$null -ne [System.Windows.Forms.Clipboard]::GetImage()) { \$ok = \$true; break } } catch { Start-Sleep -Milliseconds 150 } }; \$img.Dispose(); if (-not \$ok) { exit 1 }' </dev/null >&2
+# les lignes restantes (dont le wl-copy + le M-v plus bas) -> sans ca rien ne
+# suit. || true : Claude ne depend PAS de ce maillon (il lit le Wayland), donc
+# un echec PowerShell ne doit pas bloquer la suite.
+"\$ps_exe" -Sta -NoProfile -NonInteractive -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \$img = [System.Drawing.Image]::FromFile(\$env:CLAUDE_IMG_WIN_PATH); [System.Windows.Forms.Clipboard]::SetImage(\$img); \$img.Dispose()' </dev/null >&2 || true
+# 2. Presse-papier WAYLAND en image/png : LE maillon que Claude lit en premier
+# (wl-paste --type image/png), AVANT le image/bmp casse du bridge WSLg.
+# Detache ( ... & ) + fds rediriges : le serveur persistant de wl-copy ne doit
+# pas garder le canal ssh ouvert, sinon ssh ne rend jamais la main et gele le
+# watcher (hang observe le 2026-05-27).
+( wl-copy --type image/png < '$DEST_DIR/$dest' >/dev/null 2>&1 & )
+# Attendre que l'offre image/png soit prete avant le M-v, sinon Alt+V lit un
+# presse-papier pas encore pose -> "No image found".
+ok=0; for i in 1 2 3 4 5 6 7 8 9 10; do
+  if wl-paste -l 2>/dev/null | grep -qx 'image/png'; then ok=1; break; fi
+  sleep 0.2
+done
+[ "\$ok" = 1 ] || { echo "wl-copy image/png pas pret" >&2; exit 1; }
 tmux send-keys -t '$TMUX_TARGET' M-v
 REMOTE
 echo "OK. Image envoyee dans le prompt Claude (Alt+V auto)."
