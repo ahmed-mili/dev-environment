@@ -33,6 +33,13 @@ DESK="ahmed@100.66.28.125"        # desktop via Tailscale (IP 100.x)
 DEST_DIR="/home/ahmed/.claude-images"
 TMUX_TARGET="main"                # session tmux ou tourne Claude
 
+# Tout appel reseau est borne par `timeout` : sans ca, un cote desktop qui ne
+# rend jamais la main (cf. l'ancien `wl-copy` qui forkait un serveur clipboard
+# persistant tenant le canal SSH ouvert) gele indefiniment le screenshot-watcher
+# qui nous appelle en boucle synchrone. BatchMode evite tout prompt interactif.
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+NET_TIMEOUT=30
+
 # Si un fichier est passe en argument (cas hook Termux: termux-file-editor), on
 # l'envoie directement. Sinon, on scanne UN seul niveau de dossiers d'images
 # (PAS de glob **: ~/storage/dcim est un symlink -> milliers de fichiers + SIGPIPE).
@@ -73,7 +80,7 @@ ext="${newest##*.}"
 dest="img-$(date +%Y%m%d-%H%M%S).${ext}"
 
 echo "-> $newest"
-scp -q "$newest" "$DESK:$DEST_DIR/$dest"
+timeout "$NET_TIMEOUT" scp "${SSH_OPTS[@]}" -q "$newest" "$DESK:$DEST_DIR/$dest"
 # Cote desktop, en une connexion :
 #   1. purge auto (ne garde que les 30 plus recentes)
 #   2. wslpath convertit /home/ahmed/... -> \\wsl.localhost\Ubuntu\home\ahmed\...
@@ -84,11 +91,15 @@ scp -q "$newest" "$DESK:$DEST_DIR/$dest"
 #   4. tmux send-keys M-v -> Alt+V dans Claude -> chat:imagePaste -> claude
 #      essaie xclip png (fail), wl-paste png (fail), xclip bmp (fail), wl-paste
 #      bmp (fail), puis powershell Get-Clipboard -Format Image -> SUCCES.
-ssh "$DESK" bash <<REMOTE
+timeout "$NET_TIMEOUT" ssh "${SSH_OPTS[@]}" "$DESK" bash <<REMOTE
 set -e
 cd '$DEST_DIR'
 ls -t | tail -n +31 | xargs -r rm -f --
 export CLAUDE_IMG_WIN_PATH=\$(wslpath -w '$DEST_DIR/$dest')
+# WSLENV est OBLIGATOIRE : WSL ne propage AUCUNE variable d'env Linux a un
+# process Windows (powershell.exe) sans l'y declarer. Sans ca, \$env:CLAUDE_IMG_WIN_PATH
+# est vide cote PowerShell -> FromFile('') -> \$img null -> SetImage(null) echoue.
+export WSLENV=CLAUDE_IMG_WIN_PATH:\$WSLENV
 ps_exe=\$(command -v powershell.exe 2>/dev/null || echo /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe)
 "\$ps_exe" -Sta -NoProfile -NonInteractive -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \$img = [System.Drawing.Image]::FromFile(\$env:CLAUDE_IMG_WIN_PATH); [System.Windows.Forms.Clipboard]::SetImage(\$img); \$img.Dispose()' >&2
 tmux send-keys -t '$TMUX_TARGET' M-v
