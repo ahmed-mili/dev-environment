@@ -25,8 +25,11 @@
 # prompt n'est PAS auto-attache par Claude Code (verifie 2026-05-27, v2.1.152).
 # Le clipboard + Alt+V est le seul chemin fiable.
 #
-# Usage (depuis une 2e session Termux) :  bash ~/img2claude
-# Raccourci conseille : alias i='bash ~/img2claude'  (dans ~/.bashrc) -> on tape `i`.
+# Usage :  bash ~/img2claude <fichier-image>
+# Appele uniquement avec un chemin : par screenshot-watcher (auto-push des captures)
+# et par le hook Share -> Termux -> EDIT (termux-file-editor, choix galerie).
+# Le mode sans argument (scan de la + recente, alias `i`) a ete RETIRE le 2026-05-27 :
+# l'auto-push du watcher le rend superflu.
 #
 # Prerequis (one-shot cote tel) :
 #   - termux-setup-storage     (autorise l'acces a ~/storage, aucune app a installer)
@@ -45,41 +48,21 @@ TMUX_TARGET="main"                # session tmux ou tourne Claude
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
 NET_TIMEOUT=30
 
-# Si un fichier est passe en argument (cas hook Termux: termux-file-editor), on
-# l'envoie directement. Sinon, on scanne UN seul niveau de dossiers d'images
-# (PAS de glob **: ~/storage/dcim est un symlink -> milliers de fichiers + SIGPIPE).
-# La selection du plus recent se fait par une boucle `-nt` -> aucun pipe, robuste.
-if [ "$#" -ge 1 ]; then
-  newest="$1"
-  [ -r "$newest" ] || { echo "Fichier illisible: $newest" >&2; exit 1; }
-  ext="${newest##*.}"
-  case "${ext,,}" in
-    jpg|jpeg|png|webp) ;;
-    *) echo "Type non supporte: .$ext (attendu: jpg/jpeg/png/webp)" >&2; exit 1 ;;
-  esac
-else
-  shopt -s nullglob
-  dirs=(
-    "$HOME"/storage/dcim "$HOME"/storage/dcim/Camera "$HOME"/storage/dcim/Screenshots
-    "$HOME"/storage/pictures "$HOME"/storage/pictures/Screenshots
-    "$HOME"/storage/downloads
-  )
-  newest=""
-  for d in "${dirs[@]}"; do
-    for f in "$d"/*.jpg "$d"/*.jpeg "$d"/*.png "$d"/*.webp \
-             "$d"/*.JPG "$d"/*.JPEG "$d"/*.PNG "$d"/*.WEBP; do
-      [ -f "$f" ] || continue
-      if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then
-        newest="$f"
-      fi
-    done
-  done
-  if [ -z "$newest" ]; then
-    echo "Aucune image trouvee dans dcim/pictures/downloads." >&2
-    echo "As-tu lance 'termux-setup-storage' ?" >&2
-    exit 1
-  fi
+# Un fichier image DOIT etre passe en argument (par screenshot-watcher ou par le
+# hook termux-file-editor). Plus de mode "sans argument" (scan de la + recente) :
+# retire le 2026-05-27, l'auto-push du watcher le remplace.
+if [ "$#" -lt 1 ]; then
+  echo "Usage: img2claude <fichier-image>" >&2
+  echo "(le mode 'i' sans argument a ete retire : le screenshot-watcher pousse les captures tout seul)" >&2
+  exit 1
 fi
+newest="$1"
+[ -r "$newest" ] || { echo "Fichier illisible: $newest" >&2; exit 1; }
+ext="${newest##*.}"
+case "${ext,,}" in
+  jpg|jpeg|png|webp) ;;
+  *) echo "Type non supporte: .$ext (attendu: jpg/jpeg/png/webp)" >&2; exit 1 ;;
+esac
 
 ext="${newest##*.}"
 dest="img-$(date +%Y%m%d-%H%M%S).${ext}"
