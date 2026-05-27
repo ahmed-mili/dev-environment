@@ -1,6 +1,14 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/bash
 # Wrapper Termux:Boot pour screenshot-watcher.
 # A deposer en ~/.termux/boot/screenshot-watcher sur le telephone (chmod +x).
+#
+# Shebang ABSOLU obligatoire (pas `#!/usr/bin/env bash`) : Termux:Boot execute
+# ses scripts SANS termux-exec (le LD_PRELOAD qui reecrit /usr/bin/env -> chemin
+# Termux). Au boot, le noyau cherche donc litteralement /usr/bin/env, qui
+# n'existe pas dans Termux -> le script ne demarre jamais. En interactif ca
+# marche (termux-exec present), d'ou un bug invisible jusqu'au 1er vrai boot.
+# Confirme 2026-05-27 : start-sshd (shebang absolu) montait au boot, ce script
+# (env) non. Cf. le meme shebang absolu sur start-sshd.
 #
 # termux-wake-lock : sans ca, Android tue le process des que l'ecran s'eteint.
 # Le wake lock se voit dans la notif Termux ("Acquired wakelock") -> permet

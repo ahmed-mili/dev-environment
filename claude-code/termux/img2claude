@@ -4,9 +4,10 @@
 #
 # Pourquoi ce detour : sur Termux -> mosh -> tmux -> Claude, le presse-papier du
 # tel ne traverse pas mosh (OSC 52 avale), donc un "vrai" Alt+V cote tel est
-# impossible. Solution : scp l'image au desktop, la poser dans le presse-papier
-# du desktop, puis envoyer Alt+V dans la session tmux ou tourne Claude ->
-# chat:imagePaste attache l'image au prompt.
+# impossible. Solution : scp l'image au desktop, la STAGER dans le presse-papier
+# Wayland du desktop. L'user appuie Alt+V quand il veut envoyer (controle manuel,
+# decision retiree d'img2claude 2026-05-27 : auto-paste = trop intrusif pour
+# les photos perso, on rend la main a l'user).
 #
 # Quel presse-papier ? Claude Code v2.1.152 lit l'image avec cette chaine (cli.js,
 # branche WSL), DANS CET ORDRE :
@@ -39,7 +40,6 @@ set -euo pipefail
 
 DESK="ahmed@100.66.28.125"        # desktop via Tailscale (IP 100.x)
 DEST_DIR="/home/ahmed/.claude-images"
-TMUX_TARGET="main"                # session tmux ou tourne Claude
 
 # Tout appel reseau est borne par `timeout` : sans ca, un cote desktop qui ne
 # rend jamais la main (cf. l'ancien `wl-copy` qui forkait un serveur clipboard
@@ -79,7 +79,8 @@ timeout "$NET_TIMEOUT" scp "${SSH_OPTS[@]}" -q "$newest" "$DESK:$DEST_DIR/$dest"
 #   4. wl-copy --type image/png pose l'image dans le clipboard WAYLAND : c'est CE
 #      maillon que Claude lit en premier (wl-paste --type image/png), avant le
 #      image/bmp casse du bridge WSLg.
-#   5. tmux send-keys M-v -> Alt+V dans Claude -> chat:imagePaste attache l'image.
+# L'image est juste STAGEE : pas d'envoi auto, l'user tape Alt+V quand il decide
+# (cf. comment d'entete pour le pourquoi).
 timeout "$NET_TIMEOUT" ssh "${SSH_OPTS[@]}" "$DESK" bash <<REMOTE
 set -e
 cd '$DEST_DIR'
@@ -102,13 +103,12 @@ ps_exe=\$(command -v powershell.exe 2>/dev/null || echo /mnt/c/Windows/System32/
 # pas garder le canal ssh ouvert, sinon ssh ne rend jamais la main et gele le
 # watcher (hang observe le 2026-05-27).
 ( wl-copy --type image/png < '$DEST_DIR/$dest' >/dev/null 2>&1 & )
-# Attendre que l'offre image/png soit prete avant le M-v, sinon Alt+V lit un
-# presse-papier pas encore pose -> "No image found".
+# Attendre que l'offre image/png soit prete : l'user va taper Alt+V juste apres,
+# autant garantir que le presse-papier est arme avant de rendre la main.
 ok=0; for i in 1 2 3 4 5 6 7 8 9 10; do
   if wl-paste -l 2>/dev/null | grep -qx 'image/png'; then ok=1; break; fi
   sleep 0.2
 done
 [ "\$ok" = 1 ] || { echo "wl-copy image/png pas pret" >&2; exit 1; }
-tmux send-keys -t '$TMUX_TARGET' M-v
 REMOTE
-echo "OK. Image envoyee dans le prompt Claude (Alt+V auto)."
+echo "OK. Image stagee dans le presse-papier desktop. Tape Alt+V dans Claude pour l'envoyer."
