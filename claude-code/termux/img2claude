@@ -107,7 +107,11 @@ ps_exe=\$(command -v powershell.exe 2>/dev/null || echo /mnt/c/Windows/System32/
 # ne confirme pas, et on sort en erreur sinon -> grace a `set -e`, le M-v ci-dessous
 # n'est PAS tire si le clipboard n'a pas l'image (evite un Alt+V "a vide" qui
 # afficherait "No image found in clipboard" cote Claude).
-"\$ps_exe" -Sta -NoProfile -NonInteractive -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \$img = [System.Drawing.Image]::FromFile(\$env:CLAUDE_IMG_WIN_PATH); \$ok = \$false; for (\$i = 0; \$i -lt 3; \$i++) { try { [System.Windows.Forms.Clipboard]::SetImage(\$img); Start-Sleep -Milliseconds 150; if (\$null -ne [System.Windows.Forms.Clipboard]::GetImage()) { \$ok = \$true; break } } catch { Start-Sleep -Milliseconds 150 } }; \$img.Dispose(); if (-not \$ok) { exit 1 }' >&2
+# </dev/null est CRITIQUE : powershell.exe herite du stdin du heredoc et AVALE
+# toutes les lignes restantes (dont le `tmux send-keys` ci-dessous) -> sans ca,
+# le M-v n'est JAMAIS envoye et aucune image n'est collee (diagnostique 2026-05-27
+# via instrumentation : le bloc distant s'arretait pile apres SetImage).
+"\$ps_exe" -Sta -NoProfile -NonInteractive -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \$img = [System.Drawing.Image]::FromFile(\$env:CLAUDE_IMG_WIN_PATH); \$ok = \$false; for (\$i = 0; \$i -lt 3; \$i++) { try { [System.Windows.Forms.Clipboard]::SetImage(\$img); Start-Sleep -Milliseconds 150; if (\$null -ne [System.Windows.Forms.Clipboard]::GetImage()) { \$ok = \$true; break } } catch { Start-Sleep -Milliseconds 150 } }; \$img.Dispose(); if (-not \$ok) { exit 1 }' </dev/null >&2
 tmux send-keys -t '$TMUX_TARGET' M-v
 REMOTE
 echo "OK. Image envoyee dans le prompt Claude (Alt+V auto)."
