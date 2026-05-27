@@ -101,7 +101,13 @@ export CLAUDE_IMG_WIN_PATH=\$(wslpath -w '$DEST_DIR/$dest')
 # est vide cote PowerShell -> FromFile('') -> \$img null -> SetImage(null) echoue.
 export WSLENV=CLAUDE_IMG_WIN_PATH:\$WSLENV
 ps_exe=\$(command -v powershell.exe 2>/dev/null || echo /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe)
-"\$ps_exe" -Sta -NoProfile -NonInteractive -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \$img = [System.Drawing.Image]::FromFile(\$env:CLAUDE_IMG_WIN_PATH); [System.Windows.Forms.Clipboard]::SetImage(\$img); \$img.Dispose()' >&2
+# SetImage + VERIFICATION (retry x3) : le clipboard Windows est une ressource
+# verrouillable ; si Claude (ou un autre img2claude rapproche) lit pendant qu'on
+# ecrit, l'ecriture peut echouer silencieusement. On re-essaie tant que GetImage
+# ne confirme pas, et on sort en erreur sinon -> grace a `set -e`, le M-v ci-dessous
+# n'est PAS tire si le clipboard n'a pas l'image (evite un Alt+V "a vide" qui
+# afficherait "No image found in clipboard" cote Claude).
+"\$ps_exe" -Sta -NoProfile -NonInteractive -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \$img = [System.Drawing.Image]::FromFile(\$env:CLAUDE_IMG_WIN_PATH); \$ok = \$false; for (\$i = 0; \$i -lt 3; \$i++) { try { [System.Windows.Forms.Clipboard]::SetImage(\$img); Start-Sleep -Milliseconds 150; if (\$null -ne [System.Windows.Forms.Clipboard]::GetImage()) { \$ok = \$true; break } } catch { Start-Sleep -Milliseconds 150 } }; \$img.Dispose(); if (-not \$ok) { exit 1 }' >&2
 tmux send-keys -t '$TMUX_TARGET' M-v
 REMOTE
 echo "OK. Image envoyee dans le prompt Claude (Alt+V auto)."
