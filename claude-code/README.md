@@ -17,6 +17,8 @@ Claude Code config shared between Windows, WSL/Linux and Android. Single source 
 | `tmux.conf` | Deployed to `~/.tmux.conf` by `deploy.sh`. Lets tmux forward 24-bit color so Claude Code renders truecolor over `mosh`+`tmux` (see the SSH Android guide) |
 | `termux/img2claude` | Termux (Android) script: sends an image (photo/screenshot) into the Claude session running on the desktop (`scp` + `tmux send-keys`). Two entry points: with a file argument (called by the share hook) or no-arg (sends the most recent — bound to the `i` shortcut). Works around mosh not carrying the clipboard (Alt+V can't cross it). |
 | `termux/termux-file-editor` | Termux built-in hook (deployed to `~/bin/`): triggered by **Share → Termux → EDIT** on any image, delegates to `img2claude`. Requires the Android permission *Display over other apps* on Termux. Lives on the phone, not synced by `deploy.sh` — installed via the express block in the SSH Android guide. |
+| `termux/screenshot-watcher` | Polling watcher (every 2s) on `~/storage/dcim/Screenshots/` — every new screenshot is auto-pushed through `img2claude` into the desktop Claude session (clipboard + Alt+V). Hands-free flow: take a screenshot, it appears in Claude's prompt ~2s later. Polling vs inotify because FUSE on `/sdcard` doesn't deliver inotify events from other apps. Toggle without killing via `touch ~/.screenshot-watcher.on` (ON) / `rm` (OFF). Deployed to `~/bin/screenshot-watcher` on the phone. |
+| `termux/boot-screenshot-watcher` | Termux:Boot wrapper that starts `screenshot-watcher` at phone boot (acquires `termux-wake-lock` first). Deployed to `~/.termux/boot/screenshot-watcher` on the phone — Termux:Boot APK from F-Droid required. |
 
 ## Bootstrap a new machine
 

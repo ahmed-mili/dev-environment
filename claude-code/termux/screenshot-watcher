@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# screenshot-watcher — pousse automatiquement chaque NOUVELLE capture d'ecran
+# du telephone dans la session Claude Code du desktop, via img2claude.
+#
+# Pourquoi polling et pas inotify : sur /sdcard (FUSE), inotify ne recoit pas
+# les events des autres apps (l'app Screenshot Android ecrit sous la couche
+# emulee). Polling 2s = compromis reactivite/batterie.
+#
+# Toggle sans tuer le service :  touch ~/.screenshot-watcher.on   (ON)
+#                                 rm    ~/.screenshot-watcher.on   (OFF)
+#
+# Lancement manuel : nohup bash ~/bin/screenshot-watcher >/dev/null 2>&1 &
+# Autostart boot   : via ~/.termux/boot/screenshot-watcher (Termux:Boot).
+
+set -uo pipefail
+
+DIR="$HOME/storage/dcim/Screenshots"
+FLAG="$HOME/.screenshot-watcher.on"
+STATE="$HOME/.cache/screenshot-watcher.last-mtime"
+INTERVAL=2
+
+mkdir -p "$(dirname "$STATE")"
+
+# Baseline au demarrage : le mtime du fichier le plus recent existant. Sinon,
+# on re-enverrait les 2000+ captures historiques au premier passage.
+if [ ! -s "$STATE" ]; then
+  baseline=$(find "$DIR" -maxdepth 1 -type f \
+               \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+               -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
+  echo "${baseline:-0}" > "$STATE"
+fi
+
+while :; do
+  if [ ! -e "$FLAG" ]; then
+    sleep "$INTERVAL"
+    continue
+  fi
+
+  cutoff=$(cat "$STATE")
+  # Nouveaux fichiers depuis cutoff, tries par mtime croissant pour preserver
+  # l'ordre chronologique si plusieurs captures dans la meme fenetre de 2s.
+  while IFS=$'\t' read -r mtime file; do
+    [ -n "$file" ] || continue
+    # Pause courte pour laisser Android finir l'ecriture du fichier (atomicite
+    # pas garantie sur tous les telephones).
+    sleep 0.3
+    bash "$HOME/img2claude" "$file" </dev/null >/dev/null 2>&1 || true
+    echo "$mtime" > "$STATE"
+  done < <(find "$DIR" -maxdepth 1 -type f \
+              \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+              -newermt "@$cutoff" -printf '%T@\t%p\n' 2>/dev/null | sort -n)
+
+  sleep "$INTERVAL"
+done
