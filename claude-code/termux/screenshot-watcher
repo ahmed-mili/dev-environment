@@ -1,34 +1,67 @@
 #!/usr/bin/env bash
-# screenshot-watcher — pousse automatiquement chaque NOUVELLE capture d'ecran
-# du telephone dans la session Claude Code du desktop, via img2claude.
+# screenshot-watcher — pousse automatiquement chaque NOUVELLE image du telephone
+# dans la session Claude Code du desktop, via img2claude.
 #
-# Pourquoi polling et pas inotify : sur /sdcard (FUSE), inotify ne recoit pas
-# les events des autres apps (l'app Screenshot Android ecrit sous la couche
-# emulee). Polling 2s = compromis reactivite/batterie.
+# Deux flux, deux flags :
+#   ~/.screenshot-watcher.on       -> surveille les CAPTURES  (dcim/Screenshots)
+#   ~/.screenshot-watcher.photos   -> surveille EN PLUS les PHOTOS (dcim/Camera)
+# Le flux captures est le defaut ; le flux photos s'active a la demande (ex : en
+# stage technico-commercial, ou on veut que chaque photo prise parte dans Claude),
+# et reste OFF a la maison (sinon chaque photo perso partirait).
 #
-# Toggle sans tuer le service :  touch ~/.screenshot-watcher.on   (ON)
-#                                 rm    ~/.screenshot-watcher.on   (OFF)
+# Toggle sans tuer le service :
+#   touch ~/.screenshot-watcher.on      (captures ON)    / rm = OFF
+#   touch ~/.screenshot-watcher.photos  (photos ON)      / rm = OFF
+#   (alias pratiques cote Termux : photos-on / photos-off)
+#
+# Pourquoi polling et pas inotify : sur /sdcard (FUSE), inotify ne recoit pas les
+# events des autres apps (l'app Camera/Screenshot ecrit sous la couche emulee).
+# Polling 2s = compromis reactivite/batterie.
 #
 # Lancement manuel : nohup bash ~/bin/screenshot-watcher >/dev/null 2>&1 &
 # Autostart boot   : via ~/.termux/boot/screenshot-watcher (Termux:Boot).
 
 set -uo pipefail
 
-DIR="$HOME/storage/dcim/Screenshots"
+SHOTS_DIR="$HOME/storage/dcim/Screenshots"
+PHOTOS_DIR="$HOME/storage/dcim/Camera"
 FLAG="$HOME/.screenshot-watcher.on"
-STATE="$HOME/.cache/screenshot-watcher.last-mtime"
+PHOTOS_FLAG="$HOME/.screenshot-watcher.photos"
+SHOTS_STATE="$HOME/.cache/screenshot-watcher.last-mtime"
+PHOTOS_STATE="$HOME/.cache/screenshot-watcher.photos-mtime"
 INTERVAL=2
 
-mkdir -p "$(dirname "$STATE")"
+mkdir -p "$(dirname "$SHOTS_STATE")"
 
-# Baseline au demarrage : le mtime du fichier le plus recent existant. Sinon,
-# on re-enverrait les 2000+ captures historiques au premier passage.
-if [ ! -s "$STATE" ]; then
-  baseline=$(find "$DIR" -maxdepth 1 -type f ! -name '.*' \
-               \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
-               -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
-  echo "${baseline:-0}" > "$STATE"
-fi
+# mtime du fichier image le plus recent d'un dossier (0 si vide). Sert de baseline
+# pour ne pas re-envoyer tout l'historique au 1er passage / a l'activation d'un flux.
+# `! -name '.*'` exclut les fichiers temporaires que MIUI/Android ecrit AVANT le
+# renommage final (ex: `.pending-<ts>-Screenshot_xxx.jpg`) -> sinon une seule prise
+# est vue 2x (le .pending PUIS le fichier final) -> image collee en double.
+baseline_of() {
+  find "$1" -maxdepth 1 -type f ! -name '.*' \
+       \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+       -printf '%T@\n' 2>/dev/null | sort -rn | head -1
+}
+
+# Envoie chaque image d'un dossier plus recente que son cutoff (stocke dans son
+# fichier STATE), triee par mtime croissant pour preserver l'ordre chronologique.
+process_dir() {
+  local dir="$1" state="$2" cutoff mtime file
+  cutoff=$(cat "$state" 2>/dev/null || echo 0)
+  while IFS=$'\t' read -r mtime file; do
+    [ -n "$file" ] || continue
+    # Pause courte pour laisser Android finir l'ecriture (atomicite pas garantie).
+    sleep 0.3
+    bash "$HOME/img2claude" "$file" </dev/null >/dev/null 2>&1 || true
+    echo "$mtime" > "$state"
+  done < <(find "$dir" -maxdepth 1 -type f ! -name '.*' \
+              \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+              -newermt "@$cutoff" -printf '%T@\t%p\n' 2>/dev/null | sort -n)
+}
+
+# Baseline captures au demarrage.
+[ -s "$SHOTS_STATE" ] || echo "$(baseline_of "$SHOTS_DIR" || echo 0)" > "$SHOTS_STATE"
 
 while :; do
   if [ ! -e "$FLAG" ]; then
@@ -36,23 +69,20 @@ while :; do
     continue
   fi
 
-  cutoff=$(cat "$STATE")
-  # Nouveaux fichiers depuis cutoff, tries par mtime croissant pour preserver
-  # l'ordre chronologique si plusieurs captures dans la meme fenetre de 2s.
-  # `! -name '.*'` exclut les fichiers temporaires que MIUI/Android ecrit AVANT
-  # le renommage final (ex: `.pending-<ts>-Screenshot_xxx.jpg`). Sans ca, une
-  # seule capture est vue 2x (le .pending PUIS le fichier final) -> image collee
-  # en double dans Claude (observe 2026-05-27).
-  while IFS=$'\t' read -r mtime file; do
-    [ -n "$file" ] || continue
-    # Pause courte pour laisser Android finir l'ecriture du fichier (atomicite
-    # pas garantie sur tous les telephones).
-    sleep 0.3
-    bash "$HOME/img2claude" "$file" </dev/null >/dev/null 2>&1 || true
-    echo "$mtime" > "$STATE"
-  done < <(find "$DIR" -maxdepth 1 -type f ! -name '.*' \
-              \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
-              -newermt "@$cutoff" -printf '%T@\t%p\n' 2>/dev/null | sort -n)
+  # --- Flux CAPTURES (toujours actif tant que FLAG present) ---
+  process_dir "$SHOTS_DIR" "$SHOTS_STATE"
+
+  # --- Flux PHOTOS (seulement si le flag photos est present) ---
+  if [ -e "$PHOTOS_FLAG" ]; then
+    # A l'activation (state absent) : baseline sur la photo la plus recente, pour
+    # NE PAS deverser tout l'historique Camera d'un coup. Seules les photos prises
+    # APRES l'activation partiront.
+    [ -s "$PHOTOS_STATE" ] || echo "$(baseline_of "$PHOTOS_DIR" || echo 0)" > "$PHOTOS_STATE"
+    process_dir "$PHOTOS_DIR" "$PHOTOS_STATE"
+  else
+    # Flag retire -> on oublie le cutoff pour re-baseliner a la prochaine activation.
+    rm -f "$PHOTOS_STATE"
+  fi
 
   sleep "$INTERVAL"
 done
