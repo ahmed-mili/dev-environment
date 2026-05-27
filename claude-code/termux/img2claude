@@ -90,12 +90,13 @@ timeout "$NET_TIMEOUT" scp "${SSH_OPTS[@]}" -q "$newest" "$DESK:$DEST_DIR/$dest"
 #   1. purge auto (ne garde que les 30 plus recentes)
 #   2. wslpath convertit /home/ahmed/... -> \\wsl.localhost\Ubuntu\home\ahmed\...
 #      (powershell.exe tourne cote Windows et lit le FS WSL via UNC)
-#   3. PowerShell -Sta SetImage met l'image (jpg/png/etc.) dans le clipboard
-#      Windows. -Sta est obligatoire : System.Windows.Forms.Clipboard exige
-#      un thread en apartment STA.
-#   4. tmux send-keys M-v -> Alt+V dans Claude -> chat:imagePaste -> claude
-#      essaie xclip png (fail), wl-paste png (fail), xclip bmp (fail), wl-paste
-#      bmp (fail), puis powershell Get-Clipboard -Format Image -> SUCCES.
+#   3. PowerShell -Sta SetImage met l'image dans le clipboard WINDOWS (bonus
+#      Discord & co). -Sta est obligatoire : System.Windows.Forms.Clipboard
+#      exige un thread en apartment STA.
+#   4. wl-copy --type image/png pose l'image dans le clipboard WAYLAND : c'est CE
+#      maillon que Claude lit en premier (wl-paste --type image/png), avant le
+#      image/bmp casse du bridge WSLg.
+#   5. tmux send-keys M-v -> Alt+V dans Claude -> chat:imagePaste attache l'image.
 timeout "$NET_TIMEOUT" ssh "${SSH_OPTS[@]}" "$DESK" bash <<REMOTE
 set -e
 cd '$DEST_DIR'
