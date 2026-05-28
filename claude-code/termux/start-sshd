@@ -1,0 +1,21 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# Wrapper Termux:Boot pour sshd (port 8022) AVEC SUPERVISOR.
+# A deposer en ~/.termux/boot/start-sshd sur le telephone (chmod +x).
+#
+# Shebang ABSOLU obligatoire (Termux:Boot n'a pas termux-exec, donc
+# `/usr/bin/env` ne resoudrait pas — meme regle que boot-screenshot-watcher).
+#
+# Pourquoi un supervisor : sshd peut crasher (OOM, sigpipe sur connexion
+# avortee, etc.). Sans supervisor, sshd reste mort jusqu'au prochain boot —
+# l'user se retrouve sans `ssh phone` en plein milieu d'une session. La
+# boucle relance sshd s'il meurt, polling 30s = compromis reactivite/CPU.
+#
+# termux-wake-lock : indispensable pour que Termux ne soit pas tue par Doze
+# quand l'ecran est eteint > quelques minutes.
+
+termux-wake-lock 2>/dev/null
+
+while true; do
+    pgrep -x sshd >/dev/null 2>&1 || sshd
+    sleep 30
+done
