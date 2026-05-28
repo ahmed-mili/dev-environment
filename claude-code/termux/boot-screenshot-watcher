@@ -21,11 +21,20 @@
 
 LOG="$HOME/.screenshot-watcher.log"
 WATCHER="$HOME/bin/screenshot-watcher"
+PIDFILE="$HOME/.screenshot-watcher.pid"
 
 log() { echo "[$(date +%Y-%m-%d_%H:%M:%S)] $*" >> "$LOG"; }
 
+# PID file pour le fallback bashrc (cf. android/files/bashrc) : detecte si le
+# supervisor tourne sans matcher la cmdline (qui contient 'screenshot-watcher'
+# et risquerait l'auto-match du shell qui execute pgrep, cf.
+# reference_pkill-f-self-match). Cleanup au exit pour ne pas laisser un PID
+# fantome bloquer le relancement au prochain demarrage de l'app Termux.
+echo $$ > "$PIDFILE"
+trap 'rm -f "$PIDFILE"' EXIT INT TERM
+
 termux-wake-lock
-log "BOOT supervisor demarre - wake-lock acquis"
+log "BOOT supervisor demarre - wake-lock acquis (PID $$)"
 
 while true; do
     log "Lancement watcher (PID parent $$)"

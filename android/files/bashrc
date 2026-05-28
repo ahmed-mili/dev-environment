@@ -17,6 +17,25 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 export LESSCHARSET=utf-8
 
+# ---- Anti force-kill : redemarrer sshd + screenshot-watcher si necessaire ----
+# Termux:Boot ne tire qu'au boot Android. Si l'app Termux est force-killed
+# (HyperOS task manager, swipe-up dans le recent apps, MIUI memory cleanup,
+# OOM), les services lances au boot disparaissent et Termux:Boot ne les rejoue
+# PAS a la prochaine ouverture de l'app -- la doc Termux:Boot est explicite la
+# dessus. Sans ce bloc, le pipeline tel -> PC (img2claude pour screenshots et
+# photos, ssh phone pour debug) reste casse jusqu'au prochain reboot Android.
+# Idempotent : si deja vivants, no-op.
+# Constate 2026-05-28 apres force-stop+relance Termux pour recharger les aliases.
+if ! pgrep -x sshd >/dev/null 2>&1; then
+    sshd 2>/dev/null
+fi
+_sw_pid=$(cat "$HOME/.screenshot-watcher.pid" 2>/dev/null)
+if [ -z "$_sw_pid" ] || ! kill -0 "$_sw_pid" 2>/dev/null; then
+    nohup bash "$HOME/.termux/boot/screenshot-watcher" >/dev/null 2>&1 &
+    disown
+fi
+unset _sw_pid
+
 # ---- Editor / pager defaults aligned with the Windows side ----
 export EDITOR="${EDITOR:-nano}"
 export PAGER="less -R"
