@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# clip-watcher-supervisor — relance le watcher PS et le bridge bash s'ils meurent.
+#
+# CAUSE RACINE corrigée 2026-05-27 : quand ce script est lancé par Windows Task
+# Scheduler (`wsl.exe -d Ubuntu -- bash -c ...`), l'environnement N'A PAS
+# WAYLAND_DISPLAY (WSLg ne l'injecte que dans les sessions interactives). Sans
+# lui, `wl-copy` du bridge échoue silencieusement → le PNG n'est jamais poussé
+# dans le clipboard Wayland → Alt+V dit "no image". En session interactive ça
+# marchait (WAYLAND_DISPLAY=wayland-0 présent), d'où le bug "marche après fix
+# manuel mais pas après reboot". On force donc l'environnement Wayland de façon
+# déterministe ici — tous les enfants (PS, bridge) en héritent.
+
+set -uo pipefail
+
+# --- Environnement Wayland déterministe (indépendant du lanceur) -------------
+export WAYLAND_DISPLAY=wayland-0
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+WAYLAND_SOCK="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+
+PS_SCRIPT="$HOME/.local/bin/clip-watcher.ps1"
+PID_PS="$HOME/.clip-watcher.ps.pid"
+PID_BR="$HOME/.clip-watcher.br.pid"
+LOG="$HOME/.clip-watcher.log"
+POWERSHELL="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+
+log() { echo "[$(date +%H:%M:%S)] $*" >> "$LOG"; }
+
+is_alive() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
+
+# Attendre que le socket Wayland WSLg soit prêt (au boot il peut tarder qqs s).
+wait_for_wayland() {
+    local tries=0
+    until [[ -S "$WAYLAND_SOCK" ]]; do
+        (( tries++ ))
+        if (( tries > 120 )); then   # 120 × 1s = 2 min max
+            log "ATTENTION: socket Wayland $WAYLAND_SOCK absent après 120s"
+            return 1
+        fi
+        sleep 1
+    done
+    return 0
+}
+
+start_ps() {
+    "$POWERSHELL" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden \
+        -File "$(wslpath -w "$PS_SCRIPT")" >> "$LOG" 2>&1 &
+    echo $! > "$PID_PS"
+    log "PS clip-watcher (re)démarré (PID $!)"
+}
+
+start_bridge() {
+    nohup "$HOME/.local/bin/clip-watcher-bridge" >> "$LOG" 2>&1 &
+    echo $! > "$PID_BR"
+    log "Bridge clip-watcher (re)démarré (PID $!)"
+}
+
+log "Supervisor démarré (PID $$) — WAYLAND_DISPLAY=$WAYLAND_DISPLAY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+wait_for_wayland && log "Socket Wayland prêt: $WAYLAND_SOCK"
+
+while true; do
+    is_alive "$PID_PS" || start_ps
+    is_alive "$PID_BR" || start_bridge
+    sleep 3
+done

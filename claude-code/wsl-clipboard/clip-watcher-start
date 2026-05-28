@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# clip-watcher-start — lance le supervisor s'il n'est pas déjà actif.
+#
+# Appelé depuis DEUX sources qui peuvent se déclencher quasi simultanément au
+# boot : (1) Windows Task Scheduler AtLogOn, (2) .bashrc du 1er terminal WSL.
+# Sans verrou, les deux passent le test PID avant que l'autre n'écrive → 2
+# supervisors lancés (doublon observé 2026-05-27). flock rend l'opération
+# atomique : un seul gagne le verrou, l'autre attend puis voit le PID actif.
+
+set -euo pipefail
+
+PID_SUP="$HOME/.clip-watcher.sup.pid"
+LOCK="$HOME/.clip-watcher.start.lock"
+
+is_alive() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
+
+# Section critique sérialisée par flock (fd 9)
+exec 9>"$LOCK"
+flock 9
+
+if ! is_alive "$PID_SUP"; then
+    nohup "$HOME/.local/bin/clip-watcher-supervisor" >/dev/null 2>&1 &
+    echo $! > "$PID_SUP"
+fi
+
+flock -u 9
