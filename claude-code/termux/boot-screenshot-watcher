@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Wrapper Termux:Boot pour screenshot-watcher.
+# Wrapper Termux:Boot pour screenshot-watcher AVEC SUPERVISOR.
 # A deposer en ~/.termux/boot/screenshot-watcher sur le telephone (chmod +x).
 #
 # Shebang ABSOLU obligatoire (pas `#!/usr/bin/env bash`) : Termux:Boot execute
@@ -14,6 +14,23 @@
 # Le wake lock se voit dans la notif Termux ("Acquired wakelock") -> permet
 # d'arreter d'un swipe si besoin. Cout batterie reel : negligeable pour un
 # polling 2s qui ne fait qu'un find toutes les 2s.
+#
+# SUPERVISOR : relance le watcher s'il meurt (crash, OOM, etc). Log chaque
+# redemarrage dans ~/.screenshot-watcher.log pour debug post-mortem. Backoff
+# 5s entre tentatives pour eviter une boucle d'enfer si bug recurrent.
+
+LOG="$HOME/.screenshot-watcher.log"
+WATCHER="$HOME/bin/screenshot-watcher"
+
+log() { echo "[$(date +%Y-%m-%d_%H:%M:%S)] $*" >> "$LOG"; }
 
 termux-wake-lock
-exec bash "$HOME/bin/screenshot-watcher"
+log "BOOT supervisor demarre - wake-lock acquis"
+
+while true; do
+    log "Lancement watcher (PID parent $$)"
+    bash "$WATCHER"
+    EXIT_CODE=$?
+    log "Watcher MORT (exit=$EXIT_CODE) - relance dans 5s"
+    sleep 5
+done
