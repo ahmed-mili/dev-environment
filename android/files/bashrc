@@ -142,7 +142,7 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 #   sleep-pc : met le desktop en veille (SetSuspendState via rundll32).
 #
 # Les deux pc / pcs attachent la session tmux "main" (creation si absente).
-alias pc='mosh desktop'
+alias pc='mosh desktop -- tmux new-session -A -s main'
 alias pcs='ssh -t desktop "tmux new-session -A -s main"'
 alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,SetSuspendState 0,1,0"'
 
