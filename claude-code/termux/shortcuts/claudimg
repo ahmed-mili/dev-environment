@@ -1,0 +1,42 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Termux:Widget - "Envoyer une image a Claude"
+#
+# Quand l'user tap le widget home screen, ce script ouvre le file picker
+# natif Android (Storage Access Framework), l'user choisit une image dans
+# galerie / Drive / Telegram / WhatsApp / n'importe quel provider de
+# fichiers Android, et l'image est envoyee a Claude Code (PC) via le
+# pipeline img2claude existant.
+#
+# Cote PC : un Alt+V dans Claude attache l'image. Zero typing depuis le
+# tap du widget jusqu'au prompt Claude.
+#
+# Pourquoi pas un filtre MIME image/* dans termux-storage-get : l'API
+# termux-storage-get utilise ACTION_GET_CONTENT avec type "*/*" en dur,
+# pas de flag pour restreindre. L'user choisit a son intention -- en
+# pratique le widget s'appelle "claudimg" donc l'intention est claire.
+# Si fichier non-image choisi, img2claude wl-copy en image/png echouera
+# et Alt+V ne montrera rien. Pas de garde-fou ici, juste un toast erreur.
+
+set -uo pipefail
+
+TMP="$HOME/.cache/claudimg-$(date +%s%N).bin"
+mkdir -p "$(dirname "$TMP")"
+
+# termux-storage-get est synchrone : retourne quand l'user a choisi (ou annule)
+termux-storage-get "$TMP"
+
+# Si annulation / fichier vide : nettoyer et sortir
+if [ ! -s "$TMP" ]; then
+    termux-toast -b "#333" -c "#fff" "Annule"
+    rm -f "$TMP"
+    exit 0
+fi
+
+# Envoyer au PC via le pipeline existant
+if bash "$HOME/img2claude" "$TMP" >/dev/null 2>&1; then
+    termux-toast -b "#1e7e34" -c "#fff" "Image -> Alt+V dans Claude"
+else
+    termux-toast -b "#c82333" -c "#fff" "Erreur envoi (verif log)"
+fi
+
+rm -f "$TMP"
