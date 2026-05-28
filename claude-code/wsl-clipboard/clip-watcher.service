@@ -1,0 +1,15 @@
+[Unit]
+Description=Claude Code clipboard watcher (Win+Shift+S -> Wayland clipboard -> Alt+V)
+# Pourquoi pas d'After=wslg-* : wslg-session.service est inactive jusqu'a la
+# 1re GUI app — non bloquant ici, le supervisor lui-meme boucle sur le socket
+# Wayland (wait_for_wayland, 120s timeout). On evite donc un ordering qui
+# n'apporte rien et risquerait de bloquer si WSLg traine.
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/clip-watcher-supervisor
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
