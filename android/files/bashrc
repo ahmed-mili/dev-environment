@@ -129,5 +129,22 @@ fi
 # ---- Termux-specific: refresh PATH for ~/.local/bin and npm-global ----
 export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 
+# ---- Connexion au desktop (Tailscale, host alias `desktop` dans ~/.ssh/config) ----
+#
+#   pc       : mosh — robuste a la coupure reseau (Wi-Fi <-> 4G, ecran eteint),
+#              MAIS pas de scroll au doigt (mosh n'achemine pas la souris ;
+#              swipe = arrow keys ; scroll = touches PGUP/PGDN extra-keys).
+#   pcs      : ssh -- scroll au doigt OK quand connexion stable (Termux bascule
+#              en mouse mode si Claude fullscreen demande mouse tracking et
+#              SSH forward). Si SSH coupe : reconnecter avec `pcs`, et `/resume`
+#              dans Claude reprend exactement la session (qui tourne dans le
+#              tmux PC, donc survit aux deconnexions cote tel).
+#   sleep-pc : met le desktop en veille (SetSuspendState via rundll32).
+#
+# Les deux pc / pcs attachent la session tmux "main" (creation si absente).
+alias pc='mosh desktop'
+alias pcs='ssh -t desktop "tmux new-session -A -s main"'
+alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,SetSuspendState 0,1,0"'
+
 # ---- Local overrides — keep machine-specific tweaks out of git ----
 [ -f "$HOME/.bashrc.local" ] && source "$HOME/.bashrc.local"
