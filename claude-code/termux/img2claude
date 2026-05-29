@@ -65,7 +65,11 @@ case "${ext,,}" in
 esac
 
 ext="${newest##*.}"
-dest="img-$(date +%Y%m%d-%H%M%S).${ext}"
+# dest DETERMINISTE (hash du chemin source) : le watcher re-appelle avec la meme
+# source sur echec -> meme dest -> rsync --partial REPREND le partiel au lieu de
+# repartir de zero (cf plan rsync). Avant : un timestamp neuf a chaque appel cassait
+# la reprise. Effet de bord mineur : ~/.claude-images contient img-<hash>.ext.
+dest="img-$(printf '%s' "$newest" | md5sum | cut -c1-12).${ext}"
 
 echo "-> $newest"
 
