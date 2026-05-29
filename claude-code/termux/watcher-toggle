@@ -1,0 +1,68 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# watcher-toggle — notif persistante Termux:API a 2 boutons pour piloter les flux
+# du screenshot-watcher (captures + photos) SANS taper de commande.
+#
+# Source de verite = les MEMES flags fichiers que le watcher / les alias photos-on/off :
+#   ~/.screenshot-watcher.on      -> flux CAPTURES (dcim/Screenshots)
+#   ~/.screenshot-watcher.photos  -> flux PHOTOS   (dcim/Camera)
+# Le screenshot-watcher relit ces flags a chaque tour de boucle (2s) -> un tap prend
+# effet en <=2s sans redemarrer le watcher.
+#
+# Sous-commandes :
+#   watcher-toggle show     -> (re)poste la notif selon l'etat courant des flags
+#   watcher-toggle photos   -> bascule le flag PHOTOS puis show
+#   watcher-toggle shots    -> bascule le flag CAPTURES puis show
+#
+# Les boutons de la notif rappellent ce script en CHEMIN ABSOLU, via un bash lui aussi
+# en CHEMIN ABSOLU ($BASH_BIN) : l'action s'execute dans un env PATH minimal (comme
+# Termux:Boot, sans termux-exec) ou un `bash` nu ne serait pas forcement resolu ->
+# aucune resolution relative possible. cf. reference_termux-boot-shebang et
+# reference_wsl-task-scheduler-path (meme piege : forcer les binaires en dur).
+#
+# Persistance : --ongoing (non balayable) -> la notif est LE point de controle, elle
+# ne doit jamais disparaitre par accident. Re-postee a l'install et a chaque boot
+# (cf. boot-screenshot-watcher). --priority low + --alert-once : silencieuse, pas de
+# re-buzz a chaque mise a jour.
+#
+# Dependance : app Termux:API + package termux-api. Si termux-notification est absent,
+# `show` est un no-op silencieux MAIS les bascules de flag s'appliquent quand meme
+# (les flags restent pilotables en CLI via photos-on/off).
+
+set -uo pipefail
+
+SELF="/data/data/com.termux/files/home/bin/watcher-toggle"
+BASH_BIN="/data/data/com.termux/files/usr/bin/bash"
+ON_FLAG="$HOME/.screenshot-watcher.on"
+PHOTOS_FLAG="$HOME/.screenshot-watcher.photos"
+NOTIF_ID="watcher-toggle"
+
+# bascule un flag fichier : present -> absent, absent -> present.
+toggle_flag() {
+  if [ -e "$1" ]; then rm -f "$1"; else touch "$1"; fi
+}
+
+state_label() { [ -e "$1" ] && printf 'ON' || printf 'OFF'; }
+
+show() {
+  command -v termux-notification >/dev/null 2>&1 || return 0
+  local shots photos
+  shots=$(state_label "$ON_FLAG")
+  photos=$(state_label "$PHOTOS_FLAG")
+  termux-notification \
+    --id "$NOTIF_ID" \
+    --title "🛰️ Watcher images → Claude" \
+    --content "Tap un bouton pour basculer le flux" \
+    --ongoing \
+    --priority low \
+    --alert-once \
+    --button1 "📸 Captures: $shots" --button1-action "$BASH_BIN $SELF shots" \
+    --button2 "🖼️ Photos: $photos"  --button2-action "$BASH_BIN $SELF photos" \
+    >/dev/null 2>&1 || true
+}
+
+case "${1:-show}" in
+  photos) toggle_flag "$PHOTOS_FLAG"; show ;;
+  shots)  toggle_flag "$ON_FLAG";     show ;;
+  show)   show ;;
+  *) echo "Usage: watcher-toggle {show|photos|shots}" >&2; exit 1 ;;
+esac
