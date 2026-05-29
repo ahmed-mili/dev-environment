@@ -99,7 +99,41 @@ if command -v termux-notification >/dev/null 2>&1; then
   trap 'rc=$?; [ "$staged" = 1 ] || { command -v termux-notification-remove >/dev/null 2>&1 && termux-notification-remove img2claude >/dev/null 2>&1; }; exit $rc' EXIT
 fi
 
-timeout "$NET_TIMEOUT" scp "${SSH_OPTS[@]}" -q "$newest" "$DESK:$DEST_DIR/$dest"
+# --- Transfert vers le desktop : rsync (% live + reprise) si dispo, sinon scp -----
+# rsync present -> % live (--info=progress2) + REPRISE apres coupure (--partial). rsync
+# ABSENT -> repli sur le scp d'avant, INCHANGE (zero regression ; le % "s'active" le
+# jour d'un `pkg install rsync`). rsync present mais transfert qui ECHOUE -> on NE
+# bascule PAS sur scp : on laisse echouer (set -e) -> le watcher re-essaie -> rsync
+# REPREND (sinon --partial ne servirait a rien). cf spec rsync 2026-05-29.
+if command -v rsync >/dev/null 2>&1; then
+  SSH_E="ssh ${SSH_OPTS[*]}"   # reutilise les memes options ssh, en chaine pour rsync -e
+  pf=$(mktemp)
+  # --partial : garde le partiel pour reprendre. --append-verify : reprend en
+  # re-checksummant le prefixe deja transfere (sur pour une image immuable re-envoyee,
+  # cf dest deterministe). --timeout=30 : timeout d'INACTIVITE (survit a la lenteur
+  # d'un tunnel, ne tue que le vrai blocage). --info=progress2 : % global.
+  rsync -e "$SSH_E" --partial --append-verify --timeout=30 --info=progress2 \
+        "$newest" "$DESK:$DEST_DIR/$dest" >"$pf" 2>&1 &
+  rpid=$!
+  while kill -0 "$rpid" 2>/dev/null; do
+    # `|| true` OBLIGATOIRE : tant qu'aucun % n'est sorti grep exit 1 -> sous
+    # set -e+pipefail l'affectation tuerait le script en plein transfert.
+    pct=$(tr '\r' '\n' < "$pf" | grep -oE '[0-9]+%' | tail -1 || true)
+    # MAJ silencieuse (--alert-once) : sinon chaque % re-buzzerait. Le buzz "depart"
+    # vient du ⏳ initial (deja poste) et le buzz "prete" du ✅ final (sans --alert-once).
+    [ -n "$pct" ] && [ "$have_notif" = 1 ] && \
+      termux-notification --id img2claude "${img_channel[@]}" --alert-once \
+        --title "⏳ Transfert… $pct" --content "$dest" >/dev/null 2>&1 || true
+    sleep 1
+  done
+  # `rc=0; wait || rc=$?` OBLIGATOIRE : sous set -e un wait non-zero sortirait AVANT
+  # la capture de rc. Le trap nettoiera de toute facon ; on veut l'exit explicite.
+  rc=0; wait "$rpid" || rc=$?
+  rm -f "$pf"
+  [ "$rc" = 0 ] || exit "$rc"   # echec -> trap retire ⏳ + curseur watcher NON avance -> reprise
+else
+  timeout "$NET_TIMEOUT" scp "${SSH_OPTS[@]}" -q "$newest" "$DESK:$DEST_DIR/$dest"
+fi
 # Cote desktop, en une connexion :
 #   1. purge auto (ne garde que les 30 plus recentes)
 #   2. wslpath convertit /home/ahmed/... -> \\wsl.localhost\Ubuntu\home\ahmed\...
