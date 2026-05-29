@@ -24,6 +24,13 @@
 # (cf. boot-screenshot-watcher). --priority low + --alert-once : silencieuse, pas de
 # re-buzz a chaque mise a jour.
 #
+# Channel dedie : la notif est postee sur un channel Termux:API a part
+# ("watcher-control"), cree a la volee (best-effort). Effet : elle apparait comme une
+# CATEGORIE distincte dans Reglages HyperOS > Apps > Termux:API > Notifications,
+# separee des "Image prete a coller" (qui restent sur le channel par defaut). L'user
+# peut la passer en silencieux cote HyperOS pour la faire descendre en bas du volet.
+# Repli sans --channel si la creation echoue (cf show) -> aucune notif perdue.
+#
 # Dependance : app Termux:API + package termux-api. Si termux-notification est absent,
 # `show` est un no-op silencieux MAIS les bascules de flag s'appliquent quand meme
 # (les flags restent pilotables en CLI via photos-on/off).
@@ -35,6 +42,8 @@ BASH_BIN="/data/data/com.termux/files/usr/bin/bash"
 ON_FLAG="$HOME/.screenshot-watcher.on"
 PHOTOS_FLAG="$HOME/.screenshot-watcher.photos"
 NOTIF_ID="watcher-toggle"
+CHANNEL_ID="watcher-control"
+CHANNEL_NAME="🛰️ Contrôle des flux"
 
 # bascule un flag fichier : present -> absent, absent -> present.
 toggle_flag() {
@@ -48,8 +57,23 @@ show() {
   local shots photos
   shots=$(state_label "$ON_FLAG")
   photos=$(state_label "$PHOTOS_FLAG")
+
+  # Channel dedie (best-effort) : isole cette notif permanente des autres notifs
+  # Termux:API (ex "Image prete a coller" d'img2claude), qui restent sur le channel
+  # par defaut. termux-notification-channel est idempotent et NE reinitialise PAS les
+  # reglages user d'un channel deja existant (importance/silence regles cote HyperOS
+  # sont preserves). On n'ajoute --channel QUE si la creation reussit : un --channel
+  # invalide -> notif NON envoyee (cf --help), donc en cas d'echec on retombe sur le
+  # comportement d'avant (channel par defaut). Jamais de notif perdue = non-regression.
+  local channel_args=()
+  if command -v termux-notification-channel >/dev/null 2>&1 \
+     && termux-notification-channel "$CHANNEL_ID" "$CHANNEL_NAME" >/dev/null 2>&1; then
+    channel_args=(--channel "$CHANNEL_ID")
+  fi
+
   termux-notification \
     --id "$NOTIF_ID" \
+    "${channel_args[@]}" \
     --title "🛰️ Watcher images → Claude" \
     --content "Tap un bouton pour basculer le flux" \
     --ongoing \
