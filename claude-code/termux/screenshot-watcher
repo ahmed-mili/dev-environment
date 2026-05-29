@@ -38,11 +38,26 @@ mkdir -p "$(dirname "$SHOTS_STATE")"
 # `! -name '.*'` exclut les fichiers temporaires que MIUI/Android ecrit AVANT le
 # renommage final (ex: `.pending-<ts>-Screenshot_xxx.jpg`) -> sinon une seule prise
 # est vue 2x (le .pending PUIS le fichier final) -> image collee en double.
+#
+# Le max est calcule par awk (PAS `sort -rn | head -1`) pour une raison structurelle :
+# sous `set -o pipefail`, le `head -1` ferme le pipe -> `sort` recoit SIGPIPE ->
+# le pipeline sort en non-zero. Combine au `... || echo 0` de l'appelant, ca
+# AJOUTAIT un "0" en 2e ligne au fichier d'etat (valeur deja emise + echo 0) ->
+# cutoff multi-ligne "<ts>\n0" -> `find -newermt "@<ts>\n0"` echoue ("cannot
+# interpret as date") -> watcher FIGE, plus aucune capture livree (diagnostique
+# 2026-05-29, declenche par un reset du state). awk consomme tout le flux (pas de
+# SIGPIPE) et imprime TOUJOURS exactement une valeur (0 si vide) -> plus besoin
+# du `|| echo 0`, plus de corruption possible.
 baseline_of() {
   find "$1" -maxdepth 1 -type f ! -name '.*' \
        \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
-       -printf '%T@\n' 2>/dev/null | sort -rn | head -1
+       -printf '%T@\n' 2>/dev/null \
+    | awk 'NR==1 || $1>m {m=$1; s=$1} END {print (NR ? s : "0")}'
 }
+# NB awk : on compare numeriquement ($1>m) mais on imprime la CHAINE d'origine (s),
+# jamais `m+0`. Sinon awk convertit en nombre et printf %s applique CONVFMT=%.6g ->
+# le %T@ fractionnaire (ex 1780050672.6538521200) sort en "1.78005e+09" (notation
+# scientifique) que `find -newermt` refuse. `NR ? s : "0"` -> "0" si dossier vide.
 
 # Stage UNIQUEMENT l'image la plus recente plus neuve que le cutoff, et avance le
 # curseur par-dessus toutes les autres (les intermediaires sont volontairement
@@ -62,15 +77,20 @@ process_dir() {
   [ -n "$file" ] || return 0
   # Pause courte pour laisser Android finir l'ecriture (atomicite pas garantie).
   sleep 0.3
-  bash "$HOME/img2claude" "$file" </dev/null >/dev/null 2>&1 || true
-  # Curseur sur le mtime de la plus recente -> les intermediaires plus anciennes
-  # sont definitivement sautees (et au prochain tour, seules les captures encore
-  # plus neuves que celle-ci partiront).
-  echo "$mtime" > "$state"
+  # Curseur avance UNIQUEMENT si img2claude reussit. Sinon (scp timeout en
+  # tunnel/RER...) on garde le cutoff -> la capture sera RE-tentee au prochain
+  # tour, jamais perdue silencieusement. Comme on vise toujours la PLUS recente,
+  # une capture encore plus neuve qui arrive entre-temps prend la priorite (la
+  # bloquee est sautee naturellement, pas de wedge permanent).
+  if bash "$HOME/img2claude" "$file" </dev/null >/dev/null 2>&1; then
+    echo "$mtime" > "$state"
+  fi
 }
 
-# Baseline captures au demarrage.
-[ -s "$SHOTS_STATE" ] || echo "$(baseline_of "$SHOTS_DIR" || echo 0)" > "$SHOTS_STATE"
+# Baseline captures au demarrage. baseline_of imprime toujours une seule valeur
+# propre (0 si vide) -> ecriture directe, PAS de `$(... || echo 0)` (cf. l'entete
+# de baseline_of : c'est ce fallback qui corrompait le state en multi-ligne).
+[ -s "$SHOTS_STATE" ] || baseline_of "$SHOTS_DIR" > "$SHOTS_STATE"
 
 while :; do
   if [ ! -e "$FLAG" ]; then
@@ -86,7 +106,7 @@ while :; do
     # A l'activation (state absent) : baseline sur la photo la plus recente, pour
     # NE PAS deverser tout l'historique Camera d'un coup. Seules les photos prises
     # APRES l'activation partiront.
-    [ -s "$PHOTOS_STATE" ] || echo "$(baseline_of "$PHOTOS_DIR" || echo 0)" > "$PHOTOS_STATE"
+    [ -s "$PHOTOS_STATE" ] || baseline_of "$PHOTOS_DIR" > "$PHOTOS_STATE"
     process_dir "$PHOTOS_DIR" "$PHOTOS_STATE"
   else
     # Flag retire -> on oublie le cutoff pour re-baseliner a la prochaine activation.
