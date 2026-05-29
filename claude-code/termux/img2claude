@@ -120,7 +120,22 @@ echo "OK. Image stagee dans le presse-papier desktop. Tape Alt+V dans Claude pou
 # que le presse-papier desktop est arme. Garde command -v : pas de hard-dep a
 # termux-api (degrade en bell silencieux si absent).
 if command -v termux-notification >/dev/null 2>&1; then
-  termux-notification --id img2claude --title "Image prete a coller" \
+  # Channel dedie (best-effort) : "Image prete a coller" sur son propre channel
+  # watcher-images -> categorie distincte de la toggle (watcher-control) dans les
+  # Reglages. --channel SEULEMENT si la creation reussit, sinon repli sur le channel
+  # par defaut (un --channel invalide = notif NON envoyee, cf --help) -> on ne perd
+  # jamais le signal "pret a coller". Importance : termux-api cree le channel en mode
+  # SONORE par defaut (verifie 2026-05-29 : la notif vibre) -> rien a regler.
+  # Nom SANS espace : termux-notification-channel expanse $ARGS NON quote, donc un nom
+  # avec espace est tronque a son 1er mot (bug du script termux-api). Emoji + accents
+  # OK. set -e : creation dans un `if` (pas un && nu) pour ne pas tuer le script ; pas
+  # de `local` (top-level). cf reference_termux-notification-channels.
+  img_channel=()
+  if command -v termux-notification-channel >/dev/null 2>&1 \
+     && termux-notification-channel watcher-images "🖼️Image-prête" >/dev/null 2>&1; then
+    img_channel=(--channel watcher-images)
+  fi
+  termux-notification --id img2claude "${img_channel[@]}" --title "Image prete a coller" \
     --content "Alt+V dans Claude ($dest)" --priority high --vibrate 200 >/dev/null 2>&1 || true
 else
   printf '\a' >&2
