@@ -57,6 +57,17 @@ for entry in "${DEPLOY_MAP[@]}"; do
     ok "$src_name -> $dst_path"
 done
 
+# Flux par défaut : CAPTURES et PHOTOS tous deux ON. Les flags sont des fichiers
+# persistants dans $HOME (survivent aux reboots ET à un redéploiement de scripts,
+# qui ne touche pas $HOME). On ne les (re)crée QUE s'ils sont absents -> idempotent :
+# un `photos-off` (ou un `rm` du flag) explicite par l'user n'est PAS ré-écrasé à la
+# prochaine exécution. Photos ON par défaut est sûr depuis qu'img2claude ne fait que
+# STAGER (envoi = Alt+V manuel) -> aucune photo ne part toute seule dans Claude.
+# Pour désactiver durablement les photos : `photos-off` (rm ~/.screenshot-watcher.photos).
+say "Flux par défaut (captures + photos)"
+[[ -e "$HOME/.screenshot-watcher.on" ]]     || { touch "$HOME/.screenshot-watcher.on";     ok "flux CAPTURES activé (défaut)"; }
+[[ -e "$HOME/.screenshot-watcher.photos" ]] || { touch "$HOME/.screenshot-watcher.photos"; ok "flux PHOTOS activé (défaut)"; }
+
 # Démarrage immédiat de sshd et screenshot-watcher (sans attendre reboot)
 say "Démarrage immédiat des daemons (sans attendre reboot)"
 if ! pgrep -x sshd >/dev/null 2>&1; then
