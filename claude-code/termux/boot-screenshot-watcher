@@ -36,6 +36,12 @@ trap 'rm -f "$PIDFILE"' EXIT INT TERM
 termux-wake-lock
 log "BOOT supervisor demarre - wake-lock acquis (PID $$)"
 
+# Re-poste la notif-toggle au boot : c'est LE point de controle des flux, elle doit
+# toujours etre presente. termux-wake-lock ci-dessus a deja prouve que Termux:API
+# repond, donc termux-notification marchera aussi. Guarde par || true.
+"$HOME/bin/watcher-toggle" show 2>/dev/null || true
+log "notif-toggle (re)postee au boot"
+
 while true; do
     log "Lancement watcher (PID parent $$)"
     bash "$WATCHER"
