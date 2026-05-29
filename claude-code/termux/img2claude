@@ -112,3 +112,16 @@ done
 [ "\$ok" = 1 ] || { echo "wl-copy image/png pas pret" >&2; exit 1; }
 REMOTE
 echo "OK. Image stagee dans le presse-papier desktop. Tape Alt+V dans Claude pour l'envoyer."
+
+# Signal "pret a coller" : sous connexion lente (RER/tunnel/cellulaire) le scp peut
+# prendre 10-20 s ; sans signal l'user devine quand Alt+V est sur et tombe sur une
+# image en retard. La notif ne part qu'APRES le bloc REMOTE reussi (set -e plus
+# haut : un scp/stage rate n'atteint jamais cette ligne) -> elle atteste vraiment
+# que le presse-papier desktop est arme. Garde command -v : pas de hard-dep a
+# termux-api (degrade en bell silencieux si absent).
+if command -v termux-notification >/dev/null 2>&1; then
+  termux-notification --id img2claude --title "Image prete a coller" \
+    --content "Alt+V dans Claude ($dest)" --priority high --vibrate 200 >/dev/null 2>&1 || true
+else
+  printf '\a' >&2
+fi
