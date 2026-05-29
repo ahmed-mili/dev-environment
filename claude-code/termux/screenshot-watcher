@@ -5,11 +5,14 @@
 # Deux flux, deux flags :
 #   ~/.screenshot-watcher.on       -> surveille les CAPTURES  (dcim/Screenshots)
 #   ~/.screenshot-watcher.photos   -> surveille EN PLUS les PHOTOS (dcim/Camera)
-# Le flux captures est le defaut ; le flux photos s'active a la demande (ex : en
-# stage technico-commercial, ou on veut que chaque photo prise parte dans Claude),
-# et reste OFF a la maison (sinon chaque photo perso partirait).
+# Les DEUX flux sont ON par defaut (crees par install.sh, flags persistants dans
+# $HOME). Le flux photos etait historiquement OFF "pour ne pas que chaque photo
+# perso parte dans Claude" -- ce motif a DISPARU : img2claude ne fait plus que
+# STAGER l'image dans le presse-papier desktop (l'envoi reste un Alt+V MANUEL de
+# l'user, cf. img2claude). Une photo stagee n'entre donc dans Claude que si l'user
+# le decide -> aucun risque de deversement automatique, photos ON par defaut est sur.
 #
-# Toggle sans tuer le service :
+# Toggle sans tuer le service (la boucle relit le flag a chaque tour) :
 #   touch ~/.screenshot-watcher.on      (captures ON)    / rm = OFF
 #   touch ~/.screenshot-watcher.photos  (photos ON)      / rm = OFF
 #   (alias pratiques cote Termux : photos-on / photos-off)
