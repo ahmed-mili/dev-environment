@@ -29,12 +29,14 @@ export LESSCHARSET=utf-8
 if ! pgrep -x sshd >/dev/null 2>&1; then
     sshd 2>/dev/null
 fi
-_sw_pid=$(cat "$HOME/.screenshot-watcher.pid" 2>/dev/null)
-if [ -z "$_sw_pid" ] || ! kill -0 "$_sw_pid" 2>/dev/null; then
-    nohup bash "$HOME/.termux/boot/screenshot-watcher" >/dev/null 2>&1 &
-    disown
-fi
-unset _sw_pid
+# Le superviseur se protege desormais lui-meme par un verrou flock (cf.
+# boot-screenshot-watcher) : on peut donc le (re)lancer inconditionnellement.
+# S'il tourne deja, ce lancement sort aussitot en no-op (flock echoue avant tout
+# effet de bord). On NE reimplemente PAS de check ici : l'ancien check PID-file
+# etait TOCTOU et lancait un 2e superviseur en course avec Termux:Boot -> double
+# watcher (constate 2026-05-29).
+nohup bash "$HOME/.termux/boot/screenshot-watcher" >/dev/null 2>&1 &
+disown
 
 # ---- Editor / pager defaults aligned with the Windows side ----
 export EDITOR="${EDITOR:-nano}"

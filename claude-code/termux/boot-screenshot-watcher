@@ -21,17 +21,29 @@
 
 LOG="$HOME/.screenshot-watcher.log"
 WATCHER="$HOME/bin/screenshot-watcher"
-PIDFILE="$HOME/.screenshot-watcher.pid"
+LOCKFILE="$HOME/.screenshot-watcher.lock"
 
 log() { echo "[$(date +%Y-%m-%d_%H:%M:%S)] $*" >> "$LOG"; }
 
-# PID file pour le fallback bashrc (cf. android/files/bashrc) : detecte si le
-# supervisor tourne sans matcher la cmdline (qui contient 'screenshot-watcher'
-# et risquerait l'auto-match du shell qui execute pgrep, cf.
-# reference_pkill-f-self-match). Cleanup au exit pour ne pas laisser un PID
-# fantome bloquer le relancement au prochain demarrage de l'app Termux.
-echo $$ > "$PIDFILE"
-trap 'rm -f "$PIDFILE"' EXIT INT TERM
+# VERROU EXCLUSIF anti-double-superviseur (remplace l'ancien PID file, qui etait
+# TOCTOU : le fallback bashrc et le replay Termux:Boot pouvaient lire le PID file
+# vide/mort au meme instant et lancer CHACUN un superviseur -> 2 watchers en
+# parallele, double notif + double envoi de la meme capture, constate 2026-05-29).
+#
+# flock rend le double IMPOSSIBLE par construction, quelle que soit la source du
+# lancement (bashrc, Termux:Boot, install.sh, manuel) :
+#   - `exec 9>` ouvre le lockfile sur le FD 9 ; le FD reste ouvert toute la vie
+#     du process -> le verrou est tenu tant que CE superviseur vit.
+#   - `flock -n 9` est atomique (acquire-or-fail), pas de fenetre TOCTOU. Si un
+#     autre superviseur tient deja le verrou, on sort en no-op silencieux (exit 0
+#     AVANT tout log) -> aucun effet de bord, aucune ligne parasite dans le log.
+#   - Liberation AUTOMATIQUE a la mort du process, meme SIGKILL/OOM par HyperOS
+#     (le kernel ferme le FD) -> fini les PID fantomes/recycles du PID file.
+# Le watcher enfant herite le FD 9 : voulu. Le verrou couvre alors superviseur +
+# watcher, donc le double watcher reste impossible meme si le superviseur seul
+# etait tue (un nouveau ne demarre qu'une fois l'orphelin mort).
+exec 9>"$LOCKFILE" || exit 1
+flock -n 9 || exit 0
 
 termux-wake-lock
 log "BOOT supervisor demarre - wake-lock acquis (PID $$)"
