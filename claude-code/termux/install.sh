@@ -32,6 +32,7 @@ DEPLOY_MAP=(
     "start-sshd:$BOOT_DIR/start-sshd"
     "screenshot-watcher:$BIN_DIR/screenshot-watcher"
     "termux-file-editor:$BIN_DIR/termux-file-editor"
+    "watcher-toggle:$BIN_DIR/watcher-toggle"
     "img2claude:$HOME/img2claude"
 )
 
@@ -67,6 +68,11 @@ done
 say "Flux par défaut (captures + photos)"
 [[ -e "$HOME/.screenshot-watcher.on" ]]     || { touch "$HOME/.screenshot-watcher.on";     ok "flux CAPTURES activé (défaut)"; }
 [[ -e "$HOME/.screenshot-watcher.photos" ]] || { touch "$HOME/.screenshot-watcher.photos"; ok "flux PHOTOS activé (défaut)"; }
+
+# Poste la notif-toggle tout de suite (point de controle des flux). Guarde : si
+# termux-api absent, le script est un no-op et l'install continue.
+"$BIN_DIR/watcher-toggle" show 2>/dev/null || true
+ok "notif-toggle postee (si termux-api dispo)"
 
 # Démarrage immédiat de sshd et screenshot-watcher (sans attendre reboot)
 say "Démarrage immédiat des daemons (sans attendre reboot)"
