@@ -68,6 +68,33 @@ ext="${newest##*.}"
 dest="img-$(date +%Y%m%d-%H%M%S).${ext}"
 
 echo "-> $newest"
+
+# --- Notif "Transfert en cours" (etat 1/2) -------------------------------------
+# Approche 2 etats : on poste "⏳ Transfert en cours" AVANT le scp, puis le bloc
+# "Image prete" plus bas RE-poste sur le MEME id (img2claude) -> Android remplace la
+# notif EN PLACE (⏳ -> ✅). Utile sur lien lent (scp 10-20 s) : feedback "ca avance"
+# puis "c'est arme". Channel watcher-images calcule UNE fois ici, reutilise par les
+# deux posts. Buzz (choix A1) : le 1er post (⏳) alerte via le channel sonore = petit
+# buzz "c'est parti" assume ; le ✅ (sans --alert-once) re-alerte = buzz "prete" garde.
+have_notif=0; img_channel=(); staged=0
+if command -v termux-notification >/dev/null 2>&1; then
+  have_notif=1
+  # Channel dedie (best-effort) : nom SANS espace (termux-notification-channel expanse
+  # $ARGS non-quote -> tronque a la 1re espace, cf reference_termux-notification-channels).
+  if command -v termux-notification-channel >/dev/null 2>&1 \
+     && termux-notification-channel watcher-images "🖼️Image-prête" >/dev/null 2>&1; then
+    img_channel=(--channel watcher-images)
+  fi
+  termux-notification --id img2claude "${img_channel[@]}" --title "⏳ Transfert en cours…" \
+    --content "$dest" >/dev/null 2>&1 || true
+  # SECURITE : si on sort AVANT le succes (scp/stage rate, timeout), le ⏳ ne doit pas
+  # rester fige. trap EXIT -> retire la notif tant que staged != 1. On capture puis
+  # re-emet $? (exit $rc) pour NE PAS masquer le code d'echec : le watcher gate
+  # l'avancement du curseur sur le code retour d'img2claude (`if bash img2claude; then
+  # avance-curseur`). Masquer un echec = curseur avance = image RATEE crue envoyee.
+  trap 'rc=$?; [ "$staged" = 1 ] || { command -v termux-notification-remove >/dev/null 2>&1 && termux-notification-remove img2claude >/dev/null 2>&1; }; exit $rc' EXIT
+fi
+
 timeout "$NET_TIMEOUT" scp "${SSH_OPTS[@]}" -q "$newest" "$DESK:$DEST_DIR/$dest"
 # Cote desktop, en une connexion :
 #   1. purge auto (ne garde que les 30 plus recentes)
@@ -111,30 +138,17 @@ ok=0; for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ "\$ok" = 1 ] || { echo "wl-copy image/png pas pret" >&2; exit 1; }
 REMOTE
+# Staging desktop reussi : on marque le succes AVANT le post ✅. Si on est arrive ici,
+# le scp ET le bloc REMOTE ont reussi (set -e) -> le trap ne retirera plus le ⏳.
+staged=1
 echo "OK. Image stagee dans le presse-papier desktop. Tape Alt+V dans Claude pour l'envoyer."
 
-# Signal "pret a coller" : sous connexion lente (RER/tunnel/cellulaire) le scp peut
-# prendre 10-20 s ; sans signal l'user devine quand Alt+V est sur et tombe sur une
-# image en retard. La notif ne part qu'APRES le bloc REMOTE reussi (set -e plus
-# haut : un scp/stage rate n'atteint jamais cette ligne) -> elle atteste vraiment
-# que le presse-papier desktop est arme. Garde command -v : pas de hard-dep a
-# termux-api (degrade en bell silencieux si absent).
-if command -v termux-notification >/dev/null 2>&1; then
-  # Channel dedie (best-effort) : "Image prete a coller" sur son propre channel
-  # watcher-images -> categorie distincte de la toggle (watcher-control) dans les
-  # Reglages. --channel SEULEMENT si la creation reussit, sinon repli sur le channel
-  # par defaut (un --channel invalide = notif NON envoyee, cf --help) -> on ne perd
-  # jamais le signal "pret a coller". Importance : termux-api cree le channel en mode
-  # SONORE par defaut (verifie 2026-05-29 : la notif vibre) -> rien a regler.
-  # Nom SANS espace : termux-notification-channel expanse $ARGS NON quote, donc un nom
-  # avec espace est tronque a son 1er mot (bug du script termux-api). Emoji + accents
-  # OK. set -e : creation dans un `if` (pas un && nu) pour ne pas tuer le script ; pas
-  # de `local` (top-level). cf reference_termux-notification-channels.
-  img_channel=()
-  if command -v termux-notification-channel >/dev/null 2>&1 \
-     && termux-notification-channel watcher-images "🖼️Image-prête" >/dev/null 2>&1; then
-    img_channel=(--channel watcher-images)
-  fi
+# Signal "pret a coller" (etat 2/2) : RE-poste sur le MEME id img2claude -> remplace
+# le ⏳ par le ✅ EN PLACE. On n'arrive ici qu'apres le bloc REMOTE reussi (staged=1
+# ci-dessus ; set -e : un scp/stage rate n'atteint jamais cette ligne, et le trap a
+# deja retire le ⏳). Le channel + la garde notif sont calcules tout en haut (etat
+# 1/2), on les REUTILISE ici. --vibrate 200 = buzz "prete". Repli cloche si absent.
+if [ "$have_notif" = 1 ]; then
   termux-notification --id img2claude "${img_channel[@]}" --title "Image prete a coller" \
     --content "Alt+V dans Claude ($dest)" --priority high --vibrate 200 >/dev/null 2>&1 || true
 else
