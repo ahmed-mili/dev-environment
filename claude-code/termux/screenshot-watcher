@@ -44,20 +44,29 @@ baseline_of() {
        -printf '%T@\n' 2>/dev/null | sort -rn | head -1
 }
 
-# Envoie chaque image d'un dossier plus recente que son cutoff (stocke dans son
-# fichier STATE), triee par mtime croissant pour preserver l'ordre chronologique.
+# Stage UNIQUEMENT l'image la plus recente plus neuve que le cutoff, et avance le
+# curseur par-dessus toutes les autres (les intermediaires sont volontairement
+# sautees). Pourquoi PAS un FIFO de tout le backlog : le presse-papier Wayland ne
+# tient qu'UNE image (Alt+V n'en colle qu'une), et chaque scp ~1 Mo prend 10-20 s
+# sur cellulaire. Rejouer le backlog en serie faisait que le presse-papier
+# refletait une capture vieille de plusieurs crans au moment du Alt+V (retard
+# observe + diagnostique 2026-05-29 : clipboard = avant-derniere capture pendant
+# que la derniere etait encore en upload). En convergeant direct vers la plus
+# recente, le retard devient impossible par construction.
 process_dir() {
   local dir="$1" state="$2" cutoff mtime file
   cutoff=$(cat "$state" 2>/dev/null || echo 0)
-  while IFS=$'\t' read -r mtime file; do
-    [ -n "$file" ] || continue
-    # Pause courte pour laisser Android finir l'ecriture (atomicite pas garantie).
-    sleep 0.3
-    bash "$HOME/img2claude" "$file" </dev/null >/dev/null 2>&1 || true
-    echo "$mtime" > "$state"
-  done < <(find "$dir" -maxdepth 1 -type f ! -name '.*' \
+  IFS=$'\t' read -r mtime file < <(find "$dir" -maxdepth 1 -type f ! -name '.*' \
               \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
-              -newermt "@$cutoff" -printf '%T@\t%p\n' 2>/dev/null | sort -n)
+              -newermt "@$cutoff" -printf '%T@\t%p\n' 2>/dev/null | sort -rn | head -1)
+  [ -n "$file" ] || return 0
+  # Pause courte pour laisser Android finir l'ecriture (atomicite pas garantie).
+  sleep 0.3
+  bash "$HOME/img2claude" "$file" </dev/null >/dev/null 2>&1 || true
+  # Curseur sur le mtime de la plus recente -> les intermediaires plus anciennes
+  # sont definitivement sautees (et au prochain tour, seules les captures encore
+  # plus neuves que celle-ci partiront).
+  echo "$mtime" > "$state"
 }
 
 # Baseline captures au demarrage.
