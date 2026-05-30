@@ -74,6 +74,77 @@ EOF
 
 (`.bashrc` isn't tracked because each machine's bashrc has unrelated history; the snippet is idempotent — running it twice just defines the function twice, harmless.)
 
+### Shell autosuggestions: ble.sh + atuin + zoxide (opt-in, not auto-synced)
+
+PSReadLine-style inline "ghost text" autosuggestions, fuzzy history search and a
+frecency `cd`, so WSL/Termux feels like the Windows PowerShell 7 profile:
+
+| Tool | Role | Install |
+| --- | --- | --- |
+| [ble.sh](https://github.com/akinomyoga/ble.sh) | Line editor: grey ghost-text autosuggestion, syntax highlight, completion menu | `git clone --recursive --depth 1 --shallow-submodules https://github.com/akinomyoga/ble.sh ~/ble.sh && make -C ~/ble.sh && bash ~/ble.sh/ble.sh --install ~/.local/share` |
+| [atuin](https://atuin.sh) | History DB + `Ctrl+R` fuzzy search | `curl --proto '=https' --tlsv1.2 -LsSf https://setup.atuin.sh \| sh` |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) | `cd` by frecency | `curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh \| sh` |
+
+Then add this to `~/.bashrc`. Order matters: ble.sh is sourced **early** with
+`--attach=none`, and `ble-attach` is the **last** statement of the file.
+
+```bash
+# ── ble.sh: line editor. Source EARLY with --attach=none (ble-attach goes last).
+if [[ $- == *i* ]] && [[ -f ~/.local/share/blesh/ble.sh ]]; then
+  source ~/.local/share/blesh/ble.sh --attach=none
+fi
+
+# ... (the rest of your ~/.bashrc) ...
+
+# ── atuin: history DB. --disable-up-arrow leaves the Up key to ble.sh (history
+#    + ghost text); Ctrl+R stays atuin's fuzzy-search UI.
+. "$HOME/.atuin/bin/env"
+eval "$(atuin init bash --disable-up-arrow)"
+
+# atuin registers itself as ble.sh's inline-suggestion source by default. Remove
+# it so the ghost text comes from ~/.bash_history (clean) rather than the atuin
+# DB — which gets polluted by the multi-line commands Claude Code records via the
+# `atuin hook claude-code` hook (parasitic multi-line suggestions on `cd`).
+[[ ${BLE_VERSION-} ]] && ble/util/import/eval-after-load core-complete '
+    ble/array#remove _ble_complete_auto_source atuin-history'
+
+# ── zoxide: smarter `cd` (frecency). Needs the ble.sh integration module, else
+#    ble.sh short-circuits zoxide's `cd` function → "cd: too many arguments".
+eval "$(zoxide init bash --cmd cd)"
+[[ ${BLE_VERSION-} ]] && ble-import contrib/integration/zoxide
+
+# ── ble.sh: PSReadLine-style behaviour ──
+if [[ ${BLE_VERSION-} ]]; then
+  ble-face auto_complete='fg=#6C7086'   # grey ghost text, no background
+  ble-face syntax_error='fg=default'    # don't paint unknown commands red
+  ble-bind -m auto_complete -f 'TAB' 'auto_complete/@end insert'  # Tab accepts
+  ble-bind -m auto_complete -f 'C-i' 'auto_complete/@end insert'  # the suggestion
+  ble-bind -f 'f2' 'menu-complete'      # F2 = navigable completion menu
+fi
+
+# ble-attach MUST be the last statement of ~/.bashrc.
+[[ ${BLE_VERSION-} ]] && ble-attach
+```
+
+#### Optional: feed Claude Code's own commands into atuin
+
+To record the `Bash` commands Claude Code runs into your atuin history, add these
+hooks to `~/.claude/settings.json`. They are kept **out** of the shared
+`settings.json` on purpose: without atuin installed, every Bash call would fail
+with `atuin: command not found`.
+
+```json
+"hooks": {
+  "PreToolUse":        [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "atuin hook claude-code" }] }],
+  "PostToolUse":       [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "atuin hook claude-code" }] }],
+  "PostToolUseFailure":[{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "atuin hook claude-code" }] }]
+}
+```
+
+> The bashrc snippet above intentionally drops atuin as ble.sh's *inline* ghost-text
+> source (the multi-line commands Claude records would otherwise pollute the
+> suggestion on `cd`). `Ctrl+R` still searches the full atuin DB, Claude's commands included.
+
 ## Statusline — technical details
 
 Private Claude Code endpoint for live usage:
