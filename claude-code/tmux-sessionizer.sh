@@ -9,6 +9,7 @@
 # Affiche un menu fzf qui fusionne, en une seule liste :
 #   ● sessions tmux DÉJÀ actives   -> on s'y rattache (attach)
 #   ○ projets ~/dev sans session   -> crée la session DANS le bon dossier
+#   ◆ vaults Obsidian              -> crée la session DANS le vault
 #   ＋ nouveau (nom libre)          -> crée une session ad hoc
 #
 # À la CRÉATION, lance `env -u TMUX claude` :
@@ -27,6 +28,7 @@
 set -euo pipefail
 
 DEV_DIR="${PC_DEV_DIR:-$HOME/dev}"
+VAULTS_DIR="${PC_VAULTS_DIR:-/mnt/c/obsidian-vaults}"
 
 # fzf : binaire local (installé sans sudo dans ~/.fzf/bin), repli sur le PATH.
 FZF="$HOME/.fzf/bin/fzf"
@@ -39,12 +41,17 @@ mapfile -t actives < <(tmux list-sessions -F '#{session_name}' 2>/dev/null | sor
 projects=()
 mapfile -t projects < <(find "$DEV_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort || true)
 
+# vaults Obsidian = sous-dossiers de VAULTS_DIR qui contiennent un .obsidian/
+# (c'est ce qui distingue un vrai vault d'un simple dossier).
+vaults=()
+mapfile -t vaults < <(find "$VAULTS_DIR" -mindepth 1 -maxdepth 1 -type d -exec test -d '{}/.obsidian' ';' -printf '%f\n' 2>/dev/null | sort || true)
+
 # couleurs ANSI (interprétées par fzf --ansi)
-G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'
+G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[35m'
 
 # --- menu (TSV : type <TAB> name <TAB> label affiché) --------------------
 build_menu() {
-  local s p has
+  local s p v has
   for s in "${actives[@]}"; do
     printf 'active\t%s\t%s● %s%s  %s(active)%s\n' "$s" "$G" "$s" "$R" "$D" "$R"
   done
@@ -52,6 +59,11 @@ build_menu() {
     has=0
     for s in "${actives[@]}"; do [[ "$s" == "$p" ]] && { has=1; break; }; done
     (( has )) || printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
+  done
+  for v in "${vaults[@]}"; do
+    has=0
+    for s in "${actives[@]}"; do [[ "$s" == "$v" ]] && { has=1; break; }; done
+    (( has )) || printf 'vault\t%s\t%s◆%s %s %s(vault)%s\n' "$v" "$M" "$R" "$v" "$D" "$R"
   done
   printf 'new\t\t%s＋ nouveau (nom libre)%s\n' "$G" "$R"
 }
@@ -88,6 +100,9 @@ case "$type" in
     ;;
   project)
     run tmux new-session -A -s "$name" -c "$DEV_DIR/$name" "env -u TMUX claude; exec bash"
+    ;;
+  vault)
+    run tmux new-session -A -s "$name" -c "$VAULTS_DIR/$name" "env -u TMUX claude; exec bash"
     ;;
   new)
     if [[ -z "$name" ]]; then
