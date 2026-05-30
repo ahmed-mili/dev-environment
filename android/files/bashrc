@@ -162,9 +162,12 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 #              swipe = arrow keys ; scroll = touches PGUP/PGDN extra-keys).
 #   sleep-pc : met le desktop en veille (SetSuspendState via rundll32).
 #
-# Les deux pc / pcm attachent la session tmux "main" (creation si absente).
-alias pc='ssh -t desktop "tmux new-session -A -s main"'
-alias pcm='mosh desktop -- tmux new-session -A -s main'
+# pc / pcm ouvrent un MENU fzf de sessions tmux (sessionizer) sur le desktop :
+#   * sessions actives -> on rattache   o projets ~/dev -> on cree   + nom libre
+# Le script vit dans le repo (versionne, donc present aussi sur le laptop) et est
+# appele par chemin. Fonctions (pas alias) pour gerer l'expansion de ~ avec mosh.
+pc()  { ssh -t desktop  "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; }
+pcm() { mosh   desktop -- bash -c "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; }
 alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,SetSuspendState 0,1,0"'
 
 # ---- Local overrides — keep machine-specific tweaks out of git ----
