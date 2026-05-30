@@ -49,29 +49,29 @@ mapfile -t vaults < <(find "$VAULTS_DIR" -mindepth 1 -maxdepth 1 -type d -exec t
 # couleurs ANSI (interprétées par fzf --ansi)
 G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[38;5;141m'   # M = violet (vaults Obsidian)
 
+# Dédup : on ne montre un projet/vault que s'il n'a pas déjà une session active.
+# (On calcule les listes affichées ici pour connaître aussi les POSITIONS, dont
+# se servent les binds de navigation fzf plus bas.)
+in_actives() { local x="$1" s; for s in "${actives[@]}"; do [[ "$s" == "$x" ]] && return 0; done; return 1; }
+shown_projects=(); for _x in "${projects[@]}"; do in_actives "$_x" || shown_projects+=("$_x"); done
+shown_vaults=();   for _x in "${vaults[@]}";   do in_actives "$_x" || shown_vaults+=("$_x"); done
+n_active=${#actives[@]}; n_proj=${#shown_projects[@]}; n_vault=${#shown_vaults[@]}
+
 # --- menu (TSV : type <TAB> name <TAB> label affiché) --------------------
 build_menu() {
-  local s p v has
+  local s p v
   for s in "${actives[@]}"; do
     printf 'active\t%s\t%s● %s%s  %s(active)%s\n' "$s" "$G" "$s" "$R" "$D" "$R"
   done
-  for p in "${projects[@]}"; do
-    has=0
-    for s in "${actives[@]}"; do [[ "$s" == "$p" ]] && { has=1; break; }; done
-    (( has )) || printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
+  for p in "${shown_projects[@]}"; do
+    printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
   done
   # vaults Obsidian : leur propre section, sous un séparateur, items en ○ normal.
-  # On n'imprime la section que s'il reste au moins un vault non déjà ouvert.
-  local -a show=()
-  for v in "${vaults[@]}"; do
-    has=0
-    for s in "${actives[@]}"; do [[ "$s" == "$v" ]] && { has=1; break; }; done
-    (( has )) || show+=("$v")
-  done
-  if (( ${#show[@]} )); then
-    # type 'sep' : ligne décorative, non sélectionnable (rouvre le menu si touchée)
+  if (( n_vault )); then
+    # type 'sep' : ligne décorative ; les flèches la sautent (binds), et un clic
+    # dessus rouvre le menu (dispatch 'sep') — on ne peut donc pas la "choisir".
     printf 'sep\t\t%s──────  %s◆ Obsidian Vaults%s  ──────%s\n' "$D" "$M" "$D" "$R"
-    for v in "${show[@]}"; do
+    for v in "${shown_vaults[@]}"; do
       printf 'vault\t%s\t%s○%s %s\n' "$v" "$M" "$R" "$v"
     done
   fi
@@ -89,11 +89,27 @@ else
   # -> la frappe filtre sur ce qu'on voit (WYSIWYG). Pas de --nth : fzf réécrit
   # la ligne avant d'appliquer --nth, donc --nth=2,3 chercherait des champs
   # disparus -> zéro match. La VALEUR retournée reste la ligne d'origine (3 champs).
+  # Navigation : sauter le séparateur (down/up) et basculer projets ⇄ vaults (Tab).
+  # Positions 1-based (layout reverse, liste NON filtrée) :
+  #   [sessions 1..n_active] [projets ..] [sep] [vaults ..] [nouveau]
+  # Le garde `[ -z {q} ]` désactive saut/bascule dès qu'un filtre est tapé : une
+  # fois la liste filtrée, ces positions absolues ne veulent plus rien dire.
+  nav=(); hdr='↑↓ choisir · tape = filtrer · Entrée = ouvrir · Échap = annuler'
+  if (( n_vault )); then
+    sep=$(( n_active + n_proj + 1 )); vfirst=$(( sep + 1 ))
+    nav=(
+      --bind "down:transform:[ -z {q} ] && [ \$((FZF_POS+1)) -eq $sep ] && echo down+down || echo down"
+      --bind "up:transform:[ -z {q} ] && [ \$((FZF_POS-1)) -eq $sep ] && echo up+up || echo up"
+      --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos(1)' )"
+    )
+    hdr='↑↓ choisir · Tab = projets ⇄ vaults · tape = filtrer · Entrée = ouvrir'
+  fi
   choice="$(build_menu | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
       --prompt='pc ❯ ' \
-      --header='↑↓ choisir · tape = filtrer · Entrée = ouvrir · Échap = annuler' \
+      --header="$hdr" \
+      "${nav[@]}" \
     )" || exit 0
 fi
 [[ -z "$choice" ]] && exit 0
