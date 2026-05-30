@@ -47,7 +47,7 @@ vaults=()
 mapfile -t vaults < <(find "$VAULTS_DIR" -mindepth 1 -maxdepth 1 -type d -exec test -d '{}/.obsidian' ';' -printf '%f\n' 2>/dev/null | sort || true)
 
 # couleurs ANSI (interprétées par fzf --ansi)
-G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[35m'
+G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[38;5;141m'   # M = violet (vaults Obsidian)
 
 # --- menu (TSV : type <TAB> name <TAB> label affiché) --------------------
 build_menu() {
@@ -60,11 +60,21 @@ build_menu() {
     for s in "${actives[@]}"; do [[ "$s" == "$p" ]] && { has=1; break; }; done
     (( has )) || printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
   done
+  # vaults Obsidian : leur propre section, sous un séparateur, items en ○ normal.
+  # On n'imprime la section que s'il reste au moins un vault non déjà ouvert.
+  local -a show=()
   for v in "${vaults[@]}"; do
     has=0
     for s in "${actives[@]}"; do [[ "$s" == "$v" ]] && { has=1; break; }; done
-    (( has )) || printf 'vault\t%s\t%s◆%s %s %s(vault)%s\n' "$v" "$M" "$R" "$v" "$D" "$R"
+    (( has )) || show+=("$v")
   done
+  if (( ${#show[@]} )); then
+    # type 'sep' : ligne décorative, non sélectionnable (rouvre le menu si touchée)
+    printf 'sep\t\t%s──────  %s◆ Obsidian Vaults%s  ──────%s\n' "$D" "$M" "$D" "$R"
+    for v in "${show[@]}"; do
+      printf 'vault\t%s\t%s○%s %s\n' "$v" "$M" "$R" "$v"
+    done
+  fi
   printf 'new\t\t%s＋ nouveau (nom libre)%s\n' "$G" "$R"
 }
 
@@ -95,6 +105,10 @@ name="$(cut -f2 <<<"$choice")"
 run() { if [[ -n "${PC_DRYRUN:-}" ]]; then printf 'DRYRUN: '; printf '%q ' "$@"; echo; else exec "$@"; fi; }
 
 case "$type" in
+  sep)
+    [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0   # pas de boucle en mode test
+    exec "$0"                                          # séparateur : rouvre le menu
+    ;;
   active)
     run tmux attach-session -t "$name"
     ;;
