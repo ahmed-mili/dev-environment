@@ -129,8 +129,10 @@ else
   # $seps = positions de TOUS les titres présents (les ↑↓ les enjambent, via `case`).
   # Le garde `[ -z {q} ]` désactive saut/bascule dès qu'un filtre est tapé : une fois
   # la liste filtrée, ces positions absolues ne veulent plus rien dire.
-  # hdr = aide COMPLÈTE, mais CACHÉE par défaut (menu épuré) ; Ctrl-G la toggle.
-  nav=(); hdr='↑↓ naviguer · ⏎ ouvrir · ^N nouveau · ^R renommer · ^X supprimer · ^G aide'
+  # Aide : header minimal « ^G commandes » TOUJOURS visible ; Ctrl-G le bascule
+  # avec la liste COMPLÈTE (hdr_full).
+  nav=(); hdr_min='^G  commandes'
+  hdr_full='↑↓ naviguer · ⏎ ouvrir · ^N nouveau · ^R renommer · ^X supprimer · ^G masquer'
   ssep=0; psep=0; vsep=0; pfirst=0; vfirst=0; pos=0
   (( n_orphan )) && { ssep=$(( pos + 1 )); pos=$(( pos + 1 + n_orphan )); }
   (( n_proj ))   && { psep=$(( pos + 1 )); pfirst=$(( psep + 1 )); pos=$(( pos + 1 + n_proj )); }
@@ -151,15 +153,14 @@ else
     )
     if (( n_proj && n_vault )); then
       nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
-      hdr='↑↓ naviguer · Tab projets⇄vaults · ⏎ ouvrir · ^N nouveau · ^R renommer · ^X supprimer · ^G aide'
+      hdr_full='↑↓ naviguer · Tab projets⇄vaults · ⏎ ouvrir · ^N nouveau · ^R renommer · ^X supprimer · ^G masquer'
     fi
   fi
-  # Header caché au démarrage (menu propre, rien de collé) ; Ctrl-G = toggle.
-  # ^G choisi car Ctrl-H = Backspace (même octet 0x08) -> casserait l'effacement.
-  nav+=(
-    --bind "start:hide-header"
-    --bind "ctrl-g:toggle-header"
-  )
+  # Aide togglable SANS jamais perdre l'indice : header minimal « ^G commandes »
+  # par défaut, Ctrl-G bascule vers/depuis la liste complète. fzf n'ayant pas de
+  # variable d'état, on mémorise min/full dans un fichier. ^G (pas ^H = Backspace).
+  HSTATE="${TMPDIR:-/tmp}/.pc-sessionizer-hdr.$(id -u)"; printf min > "$HSTATE"
+  nav+=( --bind "ctrl-g:transform-header:if [ \"\$(cat '$HSTATE' 2>/dev/null)\" = full ]; then printf min > '$HSTATE'; printf '%s' \"$hdr_min\"; else printf full > '$HSTATE'; printf '%s' \"$hdr_full\"; fi" )
   # --color=pointer:8 : par défaut fzf peint son pointeur (le ▌ de la ligne
   # courante) en rose-rouge (couleur 161), seule couleur hors palette
   # (vert/violet/gris). On le met en gris neutre (8 = le $D des ○)
@@ -177,7 +178,7 @@ else
       --layout=reverse --no-multi \
       --color=pointer:8 \
       --prompt='pc ❯ ' \
-      --header="$hdr" \
+      --header="$hdr_min" \
       --expect=ctrl-n,ctrl-x,ctrl-r \
       "${nav[@]}" \
     )" || exit 0
