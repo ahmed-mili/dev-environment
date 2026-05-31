@@ -115,7 +115,7 @@ build_menu() {
 if [[ -n "${PC_PICK:-}" ]]; then
   key="${PC_KEY:-}"; choice="$PC_PICK"
 else
-  [[ -x "$FZF" ]] || { echo "fzf introuvable (~/.fzf/bin/fzf) — lance: ~/.fzf/install --bin" >&2; exit 1; }
+  [[ -x "$FZF" ]] || { echo "fzf not found (~/.fzf/bin/fzf) — run: ~/.fzf/install --bin" >&2; exit 1; }
   # --with-nth=3 : on n'AFFICHE que le label (champ 3), qui contient déjà le nom
   # -> la frappe filtre sur ce qu'on voit (WYSIWYG). Pas de --nth : fzf réécrit
   # la ligne avant d'appliquer --nth, donc --nth=2,3 chercherait des champs
@@ -131,8 +131,8 @@ else
   # la liste filtrée, ces positions absolues ne veulent plus rien dire.
   # Aide : header minimal « ^G commandes » TOUJOURS visible ; Ctrl-G le bascule
   # avec la liste COMPLÈTE (hdr_full).
-  nav=(); hdr_min='Ctrl+G  commandes'
-  hdr_full='↑↓ naviguer · ⏎ ouvrir · Ctrl+N nouveau · Ctrl+R renommer · Ctrl+X supprimer · Ctrl+G masquer'
+  nav=(); hdr_min='Ctrl+G  help'
+  hdr_full='↑↓ navigate · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
   ssep=0; psep=0; vsep=0; pfirst=0; vfirst=0; pos=0
   (( n_orphan )) && { ssep=$(( pos + 1 )); pos=$(( pos + 1 + n_orphan )); }
   (( n_proj ))   && { psep=$(( pos + 1 )); pfirst=$(( psep + 1 )); pos=$(( pos + 1 + n_proj )); }
@@ -153,7 +153,7 @@ else
     )
     if (( n_proj && n_vault )); then
       nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
-      hdr_full='↑↓ naviguer · Tab projets ⇄ vaults · ⏎ ouvrir · Ctrl+N nouveau · Ctrl+R renommer · Ctrl+X supprimer · Ctrl+G masquer'
+      hdr_full='↑↓ navigate · Tab switch category · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
     fi
   fi
   # Aide togglable SANS jamais perdre l'indice : header minimal « ^G commandes »
@@ -252,7 +252,7 @@ open_wt_pwsh() {  # $1 = dossier WSL du vault
 case "$key" in
   ctrl-x)
     if [[ "$type" == "active" ]]; then
-      printf 'Tuer la session « %s » ? [y/N] ' "$name" >&2
+      printf "Kill session '%s'? [y/N] " "$name" >&2
       read -r ans </dev/tty 2>/dev/null || ans=""
       [[ "$ans" == [yY]* ]] && step tmux kill-session -t "$name"
     fi
@@ -261,7 +261,7 @@ case "$key" in
     ;;
   ctrl-r)
     if [[ "$type" == "active" ]]; then
-      printf 'Nouveau nom pour « %s » : ' "$name" >&2
+      printf "New name for '%s': " "$name" >&2
       read -r newname </dev/tty 2>/dev/null || newname=""
       [[ -n "$newname" ]] && step tmux rename-session -t "$name" "$newname"
     fi
@@ -290,13 +290,13 @@ case "$type" in
     ;;
   new)
     if [[ -z "$name" ]]; then
-      read -rp "Nom de la session : " name || exit 0   # Ctrl-D = annule proprement
+      read -rp "Session name: " name || exit 0   # Ctrl-D = annule proprement
       [[ -z "$name" ]] && exit 0
     fi
     [[ -d "$DEV_DIR/$name" ]] && start="$DEV_DIR/$name" || start="$HOME"
     create_session "$name" "$start"
     ;;
   *)
-    echo "choix non reconnu : $type" >&2; exit 1
+    echo "unknown choice: $type" >&2; exit 1
     ;;
 esac
