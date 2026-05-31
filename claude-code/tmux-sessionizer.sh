@@ -12,13 +12,11 @@
 #   ◆ vaults Obsidian              -> crée la session DANS le vault
 #   ＋ nouveau (nom libre)          -> crée une session ad hoc
 #
-# À la CRÉATION, lance `env -u TMUX claude` :
-#   - `env -u TMUX` car Claude Code se rabaisse en 256 couleurs dès qu'il voit
-#     $TMUX (cf. ~/.tmux.conf + mémoire claude-truecolor-tmux). Le wrapper bash
-#     claude() ne s'applique pas ici (commande directe, pas de shell interactif)
-#     -> on reproduit le `env -u TMUX` à la main.
-#   - `; exec bash` derrière : quand Claude quitte, on retombe sur un shell au
-#     lieu de fermer la session.
+# À la CRÉATION, ouvre juste un shell (bash interactif) dans le bon dossier —
+# PAS de `claude` auto : l'user le lance lui-même pour choisir ses options
+# (--resume, --model, etc.). Le wrapper claude() du ~/.bashrc fait alors le
+# `env -u TMUX` qui rend le truecolor à Claude (il se rabaisse en 256 couleurs
+# s'il voit $TMUX ; cf. ~/.tmux.conf + mémoire claude-truecolor-tmux).
 #
 # Hooks de debug (sans effet en usage normal) :
 #   --list        : imprime le menu généré puis sort
@@ -128,10 +126,10 @@ type="$(cut -f1 <<<"$choice")"
 name="$(cut -f2 <<<"$choice")"
 
 # --- action --------------------------------------------------------------
-# Commande lancée dans le pane à la création : `env -u TMUX` rend le truecolor à
-# Claude (il se rabaisse en 256 couleurs s'il voit $TMUX) ; `exec bash` → on
-# retombe sur un shell quand Claude quitte, au lieu de fermer la session.
-CLAUDE_CMD='env -u TMUX claude; exec bash'
+# À la création on n'injecte AUCUNE commande : tmux ouvre le shell par défaut
+# (bash interactif), qui source ~/.bashrc → le wrapper claude() est dispo. L'user
+# tape `claude` lui-même quand il veut, avec les options qu'il veut. Le wrapper
+# fait le `env -u TMUX` qui rend le truecolor (cf. mémoire claude-truecolor-tmux).
 
 # run  : DERNIÈRE commande — `exec` (remplace le process) ; en PC_DRYRUN, imprime.
 # step : commande de PRÉPARATION — exécute sans `exec` ; en PC_DRYRUN, imprime.
@@ -150,10 +148,10 @@ attach_session() {  # $1 = nom de session
 # (idempotent : `|| true` si la session existe déjà) puis `switch-client`.
 create_session() {  # $1 = nom   $2 = dossier de départ
   if [[ -n "${TMUX:-}" ]]; then
-    step tmux new-session -d -s "$1" -c "$2" "$CLAUDE_CMD" || true
+    step tmux new-session -d -s "$1" -c "$2" || true
     run  tmux switch-client -t "$1"
   else
-    run tmux new-session -A -s "$1" -c "$2" "$CLAUDE_CMD"
+    run tmux new-session -A -s "$1" -c "$2"
   fi
 }
 
