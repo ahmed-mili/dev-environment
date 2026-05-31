@@ -148,6 +148,41 @@ with `atuin: command not found`.
 > source (the multi-line commands Claude records would otherwise pollute the
 > suggestion on `cd`). `Ctrl+R` still searches the full atuin DB, Claude's commands included.
 
+### Phone: continuous block bars in Termux (one-time font patch, not synced)
+
+The `pc` sessionizer menu draws fzf's gutter as one `▌` (U+2588 family) per line. On the desktop they tile into a solid vertical bar; in **Termux** the same bytes render with a ~1px gap between rows. The cause is **Termux's sub-pixel rounding**, *not* the font: JetBrainsMono Nerd Font's block glyphs already fill the cell exactly (`yMax == ascent`, `yMin == descent`), so there's no overshoot to absorb the rounding. (Swapping the font is the wrong fix — verified with fontTools.)
+
+The fix overshoots the **full-height block glyphs** so they bleed past the cell (like DejaVu Sans Mono, whose blocks overshoot by ~25 units and never gap). Patch the phone's `~/.termux/font.ttf` once, on the desktop, then `scp` it back — the family name is unchanged, so Nerd Font icons are untouched:
+
+```bash
+pip install --user --break-system-packages fonttools   # PEP 668 override, user-site only
+scp phone:~/.termux/font.ttf /tmp/f.ttf                 # thin-client: patch on desktop, not phone
+python3 - /tmp/f.ttf /tmp/f-patched.ttf <<'PY'
+import sys
+from fontTools.ttLib import TTFont
+src, dst = sys.argv[1], sys.argv[2]
+f = TTFont(src); asc, desc = f['hhea'].ascent, f['hhea'].descent
+cmap, glyf = f.getBestCmap(), f['glyf']
+DELTA = 64   # overshoot top+bottom; bump to 96/128 if a residual gap remains
+for cp in (0x2588,0x2589,0x258A,0x258B,0x258C,0x258D,0x258E,0x258F,0x2590,0x2595):
+    gn = cmap.get(cp)
+    if not gn or gn not in glyf: continue
+    g = glyf[gn]
+    if g.isComposite() or g.numberOfContours < 1: continue
+    if abs(g.yMax-asc) > 2 or abs(g.yMin-desc) > 2: continue   # full-height bars only
+    for i,(x,y) in enumerate(g.coordinates):
+        if   y >= g.yMax-1: g.coordinates[i] = (x, y+DELTA)
+        elif y <= g.yMin+1: g.coordinates[i] = (x, y-DELTA)
+    g.recalcBounds(glyf)
+f.save(dst)
+PY
+ssh phone 'cp ~/.termux/font.ttf ~/.termux/font.ttf.bak'  # backup -> rollback in one line
+scp /tmp/f-patched.ttf phone:~/.termux/font.ttf
+ssh phone 'termux-reload-settings'
+```
+
+Rollback: `ssh phone 'cp ~/.termux/font.ttf.bak ~/.termux/font.ttf && termux-reload-settings'`. Re-run the patch if a Termux font update overwrites it.
+
 ## Statusline — technical details
 
 Private Claude Code endpoint for live usage:
