@@ -129,7 +129,8 @@ else
   # $seps = positions de TOUS les titres présents (les ↑↓ les enjambent, via `case`).
   # Le garde `[ -z {q} ]` désactive saut/bascule dès qu'un filtre est tapé : une fois
   # la liste filtrée, ces positions absolues ne veulent plus rien dire.
-  nav=(); hdr='↑↓ choisir · ^N nouveau · tape = filtrer · Entrée = ouvrir'
+  # hdr = aide COMPLÈTE, mais CACHÉE par défaut (menu épuré) ; Ctrl-G la toggle.
+  nav=(); hdr='↑↓ naviguer · ⏎ ouvrir · ^N nouveau · ^R renommer · ^X supprimer · ^G aide'
   ssep=0; psep=0; vsep=0; pfirst=0; vfirst=0; pos=0
   (( n_orphan )) && { ssep=$(( pos + 1 )); pos=$(( pos + 1 + n_orphan )); }
   (( n_proj ))   && { psep=$(( pos + 1 )); pfirst=$(( psep + 1 )); pos=$(( pos + 1 + n_proj )); }
@@ -143,16 +144,22 @@ else
   (( psep )) && seps="$seps $psep"
   (( vsep )) && seps="$seps $vsep"
   if (( ssep || psep || vsep )); then
-    nav=(
+    nav+=(
       --bind "load:pos($cursor0)"
       --bind "down:transform:[ -z {q} ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac"
       --bind "up:transform:[ -z {q} ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac"
     )
     if (( n_proj && n_vault )); then
       nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
-      hdr='↑↓ · Tab projets⇄vaults · ^N nouveau · tape=filtrer · ⏎ ouvrir'
+      hdr='↑↓ naviguer · Tab projets⇄vaults · ⏎ ouvrir · ^N nouveau · ^R renommer · ^X supprimer · ^G aide'
     fi
   fi
+  # Header caché au démarrage (menu propre, rien de collé) ; Ctrl-G = toggle.
+  # ^G choisi car Ctrl-H = Backspace (même octet 0x08) -> casserait l'effacement.
+  nav+=(
+    --bind "start:hide-header"
+    --bind "ctrl-g:toggle-header"
+  )
   # --color=pointer:8 : par défaut fzf peint son pointeur (le ▌ de la ligne
   # courante) en rose-rouge (couleur 161), seule couleur hors palette
   # (vert/violet/gris). On le met en gris neutre (8 = le $D des ○)
@@ -162,15 +169,16 @@ else
   # fzf — --color=pointer est global, aucune action change-color n'existe, et
   # l'ANSI dans le pointeur est rejeté (largeur uniseg ≤ 2). Vérifié dans le
   # source 0.73.1 (terminal.go:7952, options.go:3605). Ne pas retenter.
-  # --expect=ctrl-n : Ctrl-N quitte fzf en mettant la touche sur la 1re ligne de
-  # sortie (vide pour Entrée), la sélection sur la 2e -> raccourci « nouvelle session ».
+  # --expect : ces touches font quitter fzf en mettant la touche sur la 1re ligne de
+  # sortie (vide pour Entrée), la sélection sur la 2e. ^N = créer, ^X = tuer,
+  # ^R = renommer. (^G toggle l'aide SANS quitter fzf -> pas dans --expect.)
   out="$(build_menu | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
       --color=pointer:8 \
       --prompt='pc ❯ ' \
       --header="$hdr" \
-      --expect=ctrl-n \
+      --expect=ctrl-n,ctrl-x,ctrl-r \
       "${nav[@]}" \
     )" || exit 0
   key="$(sed -n '1p' <<<"$out")"
@@ -236,6 +244,30 @@ is_remote() { [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]]; }
 open_wt_pwsh() {  # $1 = dossier WSL du vault
   run wt.exe -w 0 nt -p "PowerShell" -d "$(wslpath -w "$1")"
 }
+
+# Méta-actions clavier (--expect) sur une session ACTIVE : Ctrl-X tuer, Ctrl-R
+# renommer. Sans effet sur un projet/vault non démarré — on rouvre juste le menu
+# pour refléter l'état. `read </dev/tty` car fzf a rendu le terminal.
+case "$key" in
+  ctrl-x)
+    if [[ "$type" == "active" ]]; then
+      printf 'Tuer la session « %s » ? [y/N] ' "$name" >&2
+      read -r ans </dev/tty 2>/dev/null || ans=""
+      [[ "$ans" == [yY]* ]] && step tmux kill-session -t "$name"
+    fi
+    [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0   # pas de boucle en mode test
+    exec "$0"                                          # rafraîchir le menu
+    ;;
+  ctrl-r)
+    if [[ "$type" == "active" ]]; then
+      printf 'Nouveau nom pour « %s » : ' "$name" >&2
+      read -r newname </dev/tty 2>/dev/null || newname=""
+      [[ -n "$newname" ]] && step tmux rename-session -t "$name" "$newname"
+    fi
+    [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0
+    exec "$0"
+    ;;
+esac
 
 case "$type" in
   sep)
