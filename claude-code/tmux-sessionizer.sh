@@ -61,7 +61,7 @@ n_active=${#actives[@]}; n_proj=${#shown_projects[@]}; n_vault=${#shown_vaults[@
 build_menu() {
   local s p v
   for s in "${actives[@]}"; do
-    printf 'active\t%s\t%s● %s%s  %s(active)%s\n' "$s" "$G" "$s" "$R" "$D" "$R"
+    printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$s" "$G" "$R" "$s" "$G" "$R"
   done
   for p in "${shown_projects[@]}"; do
     printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
@@ -106,7 +106,7 @@ else
   fi
   # --color=pointer:8 : par défaut fzf peint son pointeur (le ▌ de la ligne
   # courante) en rose-rouge (couleur 161), seule couleur hors palette
-  # (vert/violet/gris). On le met en gris neutre (8 = le $D des ○ et «(active)»)
+  # (vert/violet/gris). On le met en gris neutre (8 = le $D des ○)
   # pour qu'il lise comme un pur curseur ; le TYPE est déjà porté par la pastille
   # colorée à sa droite (● vert / ○ gris / ○ violet).
   # NB : un pointeur "caméléon" (couleur selon l'item visé) est IMPOSSIBLE dans
