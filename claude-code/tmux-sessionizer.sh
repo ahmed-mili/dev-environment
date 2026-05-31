@@ -153,7 +153,9 @@ else
     )
     if (( n_proj && n_vault )); then
       nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
-      hdr_full='↑↓ navigate · ⇥ switch category · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
+      # 󰌒 = U+F0312 md-keyboard_tab (icône de touche Tab, Nerd Font ; couverte
+      # par JetBrainsMono Nerd Font côté desktop ET tél — vérifié).
+      hdr_full='↑↓ navigate · 󰌒 switch category · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
     fi
   fi
   # Aide togglable SANS jamais perdre l'indice : header minimal « ^G commandes »
