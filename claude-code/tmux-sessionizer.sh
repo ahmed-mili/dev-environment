@@ -104,15 +104,19 @@ else
     )
     hdr='↑↓ choisir · Tab = projets ⇄ vaults · tape = filtrer · Entrée = ouvrir'
   fi
-  # --color=pointer:green : sans ça, fzf colore son pointeur (le ▌ de la ligne
-  # courante) en rose-rouge (couleur 161 de son thème par défaut) — la SEULE
-  # couleur hors de la palette du menu (vert/violet/gris). On le ramène au vert
-  # des sessions actives/＋ : reste distinct sur toutes les lignes (y compris les
-  # vaults en violet, où un pointeur violet se fondrait dans le ○).
+  # --color=pointer:8 : par défaut fzf peint son pointeur (le ▌ de la ligne
+  # courante) en rose-rouge (couleur 161), seule couleur hors palette
+  # (vert/violet/gris). On le met en gris neutre (8 = le $D des ○ et «(active)»)
+  # pour qu'il lise comme un pur curseur ; le TYPE est déjà porté par la pastille
+  # colorée à sa droite (● vert / ○ gris / ○ violet).
+  # NB : un pointeur "caméléon" (couleur selon l'item visé) est IMPOSSIBLE dans
+  # fzf — --color=pointer est global, aucune action change-color n'existe, et
+  # l'ANSI dans le pointeur est rejeté (largeur uniseg ≤ 2). Vérifié dans le
+  # source 0.73.1 (terminal.go:7952, options.go:3605). Ne pas retenter.
   choice="$(build_menu | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
-      --color=pointer:green \
+      --color=pointer:8 \
       --prompt='pc ❯ ' \
       --header="$hdr" \
       "${nav[@]}" \
