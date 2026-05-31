@@ -77,14 +77,18 @@ build_menu() {
   for s in "${orphans[@]}"; do
     printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$s" "$G" "$R" "$s" "$G" "$R"
   done
-  # 2) projets ~/dev — chacun à SA place ; actif -> ● (active), sinon ○ gris
-  for p in "${projects[@]}"; do
-    if is_active "$p"; then
-      printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$p" "$G" "$R" "$p" "$G" "$R"
-    else
-      printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
-    fi
-  done
+  # 2) projets ~/dev : section propre sous un titre « ◆ Projects » (texte clair sur
+  #    tirets gris) ; chacun à SA place ; actif -> ● (active), sinon ○ gris.
+  if (( n_proj )); then
+    printf 'sep\t\t%s──────  %s◆ Projects%s  ──────%s\n' "$D" "$R" "$D" "$R"
+    for p in "${projects[@]}"; do
+      if is_active "$p"; then
+        printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$p" "$G" "$R" "$p" "$G" "$R"
+      else
+        printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
+      fi
+    done
+  fi
   # 3) vaults Obsidian : leur propre section sous un séparateur ; même règle d'actif.
   if (( n_vault )); then
     # type 'sep' : ligne décorative ; les flèches la sautent (binds), et un clic
@@ -112,20 +116,31 @@ else
   # -> la frappe filtre sur ce qu'on voit (WYSIWYG). Pas de --nth : fzf réécrit
   # la ligne avant d'appliquer --nth, donc --nth=2,3 chercherait des champs
   # disparus -> zéro match. La VALEUR retournée reste la ligne d'origine (3 champs).
-  # Navigation : sauter le séparateur (down/up) et basculer projets ⇄ vaults (Tab).
+  # Navigation : sauter les titres « ◆ … » (↑↓) et basculer projets ⇄ vaults (Tab).
   # Positions 1-based (layout reverse, liste NON filtrée) :
-  #   [orphelines 1..n_orphan] [projets ..] [sep] [vaults ..] [nouveau]
-  # Le garde `[ -z {q} ]` désactive saut/bascule dès qu'un filtre est tapé : une
-  # fois la liste filtrée, ces positions absolues ne veulent plus rien dire.
+  #   [orphelines 1..n_orphan] [« ◆ Projects »] [projets ..] [« ◆ Vaults »] [vaults ..] [nouveau]
+  # psep/vsep = lignes-titres (sautées) ; pfirst/vfirst = 1er item de chaque section ;
+  # cursor0 = 1er item SÉLECTIONNABLE (où démarre le curseur — jamais sur un titre).
+  # Le garde `[ -z {q} ]` désactive saut/bascule dès qu'un filtre est tapé : une fois
+  # la liste filtrée, ces positions absolues ne veulent plus rien dire.
   nav=(); hdr='↑↓ choisir · tape = filtrer · Entrée = ouvrir · Échap = annuler'
-  if (( n_vault )); then
-    sep=$(( n_orphan + n_proj + 1 )); vfirst=$(( sep + 1 )); pfirst=$(( n_orphan + 1 ))
+  psep=0; vsep=0; pfirst=0; vfirst=0
+  (( n_proj ))  && { psep=$(( n_orphan + 1 )); pfirst=$(( psep + 1 )); }
+  (( n_vault )) && { vsep=$(( n_orphan + (n_proj ? n_proj + 1 : 0) + 1 )); vfirst=$(( vsep + 1 )); }
+  if   (( n_orphan )); then cursor0=1
+  elif (( n_proj ));   then cursor0=$pfirst
+  elif (( n_vault ));  then cursor0=$vfirst
+  else                      cursor0=1; fi
+  if (( psep || vsep )); then
     nav=(
-      --bind "down:transform:[ -z {q} ] && [ \$((FZF_POS+1)) -eq $sep ] && echo down+down || echo down"
-      --bind "up:transform:[ -z {q} ] && [ \$((FZF_POS-1)) -eq $sep ] && echo up+up || echo up"
-      --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )"
+      --bind "load:pos($cursor0)"
+      --bind "down:transform:[ -z {q} ] && { [ \$((FZF_POS+1)) -eq $psep ] || [ \$((FZF_POS+1)) -eq $vsep ]; } && echo down+down || echo down"
+      --bind "up:transform:[ -z {q} ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); if [ $psep -gt 0 ] && [ \$p -eq $psep ]; then [ $psep -eq 1 ] && echo ignore || echo up+up; elif [ $vsep -gt 0 ] && [ \$p -eq $vsep ]; then echo up+up; else echo up; fi"
     )
-    hdr='↑↓ choisir · Tab = projets ⇄ vaults · tape = filtrer · Entrée = ouvrir'
+    if (( n_proj && n_vault )); then
+      nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
+      hdr='↑↓ choisir · Tab = projets ⇄ vaults · tape = filtrer · Entrée = ouvrir'
+    fi
   fi
   # --color=pointer:8 : par défaut fzf peint son pointeur (le ▌ de la ligne
   # courante) en rose-rouge (couleur 161), seule couleur hors palette
