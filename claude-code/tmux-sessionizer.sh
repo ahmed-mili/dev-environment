@@ -9,14 +9,21 @@
 # Affiche un menu fzf qui fusionne, en une seule liste :
 #   ● sessions tmux DÉJÀ actives   -> on s'y rattache (attach)
 #   ○ projets ~/dev sans session   -> crée la session DANS le bon dossier
-#   ◆ vaults Obsidian              -> crée la session DANS le vault
+#   ◆ vaults Obsidian              -> PowerShell natif dans le vault (voir plus bas)
 #   ＋ nouveau (nom libre)          -> crée une session ad hoc
 #
-# À la CRÉATION, ouvre juste un shell (bash interactif) dans le bon dossier —
-# PAS de `claude` auto : l'user le lance lui-même pour choisir ses options
+# À la CRÉATION (projets / new), ouvre juste un shell (bash interactif) dans le bon
+# dossier — PAS de `claude` auto : l'user le lance lui-même pour choisir ses options
 # (--resume, --model, etc.). Le wrapper claude() du ~/.bashrc fait alors le
 # `env -u TMUX` qui rend le truecolor à Claude (il se rabaisse en 256 couleurs
 # s'il voit $TMUX ; cf. ~/.tmux.conf + mémoire claude-truecolor-tmux).
+#
+# CAS À PART — vaults Obsidian : ils vivent sur C: (NTFS), où l'I/O natif Windows
+# est ~7,5× plus rapide que via /mnt/c depuis WSL (cf. mémoire
+# feedback_claude-side-matches-filesystem) -> on ouvre un PowerShell natif, pas bash :
+#   - desktop (F2)  : nouvel onglet Windows Terminal (`wt.exe -w 0 nt`, pwsh natif)
+#   - tél (pc/ssh)  : `pwsh.exe` dans un pane tmux (seul affichage joignable à distance)
+# Détection via SSH_CONNECTION (is_remote). L'user tape `claude` (sa config PowerShell).
 #
 # Hooks de debug (sans effet en usage normal) :
 #   --list        : imprime le menu généré puis sort
@@ -146,13 +153,30 @@ attach_session() {  # $1 = nom de session
 # Créer (ou rejoindre si déjà là) une session dans $2. Hors tmux : `new-session -A`
 # (attach-or-create) en une fois. Dans tmux : on ne peut pas attach → créer détaché
 # (idempotent : `|| true` si la session existe déjà) puis `switch-client`.
-create_session() {  # $1 = nom   $2 = dossier de départ
+# $3 = commande optionnelle lancée dans la session (string passée à sh -c par tmux) ;
+# absente -> tmux ouvre le shell par défaut (bash interactif). Sert au vault distant
+# qui lance `pwsh.exe` au lieu du shell.
+create_session() {  # $1 = nom   $2 = dossier   $3 = commande (optionnel)
   if [[ -n "${TMUX:-}" ]]; then
-    step tmux new-session -d -s "$1" -c "$2" || true
+    step tmux new-session -d -s "$1" -c "$2" ${3:+"$3"} || true
     run  tmux switch-client -t "$1"
   else
-    run tmux new-session -A -s "$1" -c "$2"
+    run tmux new-session -A -s "$1" -c "$2" ${3:+"$3"}
   fi
+}
+
+# is_remote : suis-je lancé depuis le tél (via `pc` = `ssh -t desktop …`) plutôt que
+# depuis le desktop physique (F2 / ble.sh) ? ssh exporte SSH_CONNECTION ; F2 ne l'a
+# pas. Sert à choisir le rendu d'un vault Obsidian : onglet Windows Terminal natif
+# (desktop, GUI visible) vs pwsh dans un pane tmux (tél, seul affichage joignable).
+is_remote() { [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]]; }
+
+# open_wt_pwsh : ouvre un vault dans un NOUVEL ONGLET Windows Terminal (fenêtre
+# courante, `-w 0 nt`), PowerShell natif démarré dans le dossier Windows du vault
+# (`-d C:\…` via wslpath). Process Windows natif = I/O natif sur C: (cf. mémoire
+# feedback_claude-side-matches-filesystem). L'user y tape `claude` lui-même.
+open_wt_pwsh() {  # $1 = dossier WSL du vault
+  run wt.exe -w 0 nt -d "$(wslpath -w "$1")" pwsh.exe -NoLogo
 }
 
 case "$type" in
@@ -167,7 +191,11 @@ case "$type" in
     create_session "$name" "$DEV_DIR/$name"
     ;;
   vault)
-    create_session "$name" "$VAULTS_DIR/$name"
+    # Vault Obsidian = sur C: (NTFS) → on veut du PowerShell natif Windows.
+    #   desktop (F2)  : onglet Windows Terminal natif (GUI visible localement)
+    #   tél (pc/ssh)  : pwsh dans un pane tmux (seul affichage joignable à distance)
+    if is_remote; then create_session "$name" "$VAULTS_DIR/$name" "pwsh.exe -NoLogo"
+    else               open_wt_pwsh "$VAULTS_DIR/$name"; fi
     ;;
   new)
     if [[ -z "$name" ]]; then
