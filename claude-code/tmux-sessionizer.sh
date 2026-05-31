@@ -172,11 +172,14 @@ create_session() {  # $1 = nom   $2 = dossier   $3 = commande (optionnel)
 is_remote() { [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]]; }
 
 # open_wt_pwsh : ouvre un vault dans un NOUVEL ONGLET Windows Terminal (fenêtre
-# courante, `-w 0 nt`), PowerShell natif démarré dans le dossier Windows du vault
-# (`-d C:\…` via wslpath). Process Windows natif = I/O natif sur C: (cf. mémoire
-# feedback_claude-side-matches-filesystem). L'user y tape `claude` lui-même.
+# courante, `-w 0 nt`), via le PROFIL nommé « PowerShell » (`-p`) et NON l'exe brut.
+# `-p` applique tout le profil (titre « PowerShell » + icône + couleurs + police) ;
+# passer `pwsh.exe` en commande donnait un onglet « pwsh.exe » à icône générique.
+# `-d` force le dossier de départ vers le vault (chemin Windows via wslpath), en
+# surchargeant le startingDirectory du profil. Process Windows natif = I/O natif
+# sur C: (cf. mémoire feedback_claude-side-matches-filesystem) ; l'user y tape `claude`.
 open_wt_pwsh() {  # $1 = dossier WSL du vault
-  run wt.exe -w 0 nt -d "$(wslpath -w "$1")" pwsh.exe -NoLogo
+  run wt.exe -w 0 nt -p "PowerShell" -d "$(wslpath -w "$1")"
 }
 
 case "$type" in
