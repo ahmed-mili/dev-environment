@@ -54,30 +54,48 @@ mapfile -t vaults < <(find "$VAULTS_DIR" -mindepth 1 -maxdepth 1 -type d -exec t
 # couleurs ANSI (interprétées par fzf --ansi)
 G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[38;5;141m'   # M = violet (vaults Obsidian)
 
-# Dédup : on ne montre un projet/vault que s'il n'a pas déjà une session active.
-# (On calcule les listes affichées ici pour connaître aussi les POSITIONS, dont
-# se servent les binds de navigation fzf plus bas.)
-in_actives() { local x="$1" s; for s in "${actives[@]}"; do [[ "$s" == "$x" ]] && return 0; done; return 1; }
-shown_projects=(); for _x in "${projects[@]}"; do in_actives "$_x" || shown_projects+=("$_x"); done
-shown_vaults=();   for _x in "${vaults[@]}";   do in_actives "$_x" || shown_vaults+=("$_x"); done
-n_active=${#actives[@]}; n_proj=${#shown_projects[@]}; n_vault=${#shown_vaults[@]}
+# Chaque projet/vault reste à SA place dans sa section ; s'il a une session active
+# du même nom, on le marque ● (active) au lieu de le déplacer en haut. Helpers
+# d'appartenance.
+in_list()   { local x="$1"; shift; local e; for e in "$@"; do [[ "$e" == "$x" ]] && return 0; done; return 1; }
+is_active() { in_list "$1" "${actives[@]}"; }
+
+# Orphelines = sessions actives qui ne sont NI un projet NI un vault (typiquement
+# créées via «＋ nouveau»). Sans section propre -> petite zone en tête de menu.
+orphans=()
+for _s in "${actives[@]}"; do
+  in_list "$_s" "${projects[@]}" || in_list "$_s" "${vaults[@]}" || orphans+=("$_s")
+done
+
+# Compteurs pour les POSITIONS des binds de navigation fzf (plus bas).
+n_orphan=${#orphans[@]}; n_proj=${#projects[@]}; n_vault=${#vaults[@]}
 
 # --- menu (TSV : type <TAB> name <TAB> label affiché) --------------------
 build_menu() {
   local s p v
-  for s in "${actives[@]}"; do
+  # 1) sessions orphelines (ni projet ni vault) — pas de section, en tête
+  for s in "${orphans[@]}"; do
     printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$s" "$G" "$R" "$s" "$G" "$R"
   done
-  for p in "${shown_projects[@]}"; do
-    printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
+  # 2) projets ~/dev — chacun à SA place ; actif -> ● (active), sinon ○ gris
+  for p in "${projects[@]}"; do
+    if is_active "$p"; then
+      printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$p" "$G" "$R" "$p" "$G" "$R"
+    else
+      printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
+    fi
   done
-  # vaults Obsidian : leur propre section, sous un séparateur, items en ○ normal.
+  # 3) vaults Obsidian : leur propre section sous un séparateur ; même règle d'actif.
   if (( n_vault )); then
     # type 'sep' : ligne décorative ; les flèches la sautent (binds), et un clic
     # dessus rouvre le menu (dispatch 'sep') — on ne peut donc pas la "choisir".
     printf 'sep\t\t%s──────  %s◆ Obsidian Vaults%s  ──────%s\n' "$D" "$M" "$D" "$R"
-    for v in "${shown_vaults[@]}"; do
-      printf 'vault\t%s\t%s○%s %s\n' "$v" "$M" "$R" "$v"
+    for v in "${vaults[@]}"; do
+      if is_active "$v"; then
+        printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$v" "$G" "$R" "$v" "$G" "$R"
+      else
+        printf 'vault\t%s\t%s○%s %s\n' "$v" "$M" "$R" "$v"
+      fi
     done
   fi
   printf 'new\t\t%s＋ nouveau (nom libre)%s\n' "$G" "$R"
@@ -96,16 +114,16 @@ else
   # disparus -> zéro match. La VALEUR retournée reste la ligne d'origine (3 champs).
   # Navigation : sauter le séparateur (down/up) et basculer projets ⇄ vaults (Tab).
   # Positions 1-based (layout reverse, liste NON filtrée) :
-  #   [sessions 1..n_active] [projets ..] [sep] [vaults ..] [nouveau]
+  #   [orphelines 1..n_orphan] [projets ..] [sep] [vaults ..] [nouveau]
   # Le garde `[ -z {q} ]` désactive saut/bascule dès qu'un filtre est tapé : une
   # fois la liste filtrée, ces positions absolues ne veulent plus rien dire.
   nav=(); hdr='↑↓ choisir · tape = filtrer · Entrée = ouvrir · Échap = annuler'
   if (( n_vault )); then
-    sep=$(( n_active + n_proj + 1 )); vfirst=$(( sep + 1 ))
+    sep=$(( n_orphan + n_proj + 1 )); vfirst=$(( sep + 1 )); pfirst=$(( n_orphan + 1 ))
     nav=(
       --bind "down:transform:[ -z {q} ] && [ \$((FZF_POS+1)) -eq $sep ] && echo down+down || echo down"
       --bind "up:transform:[ -z {q} ] && [ \$((FZF_POS-1)) -eq $sep ] && echo up+up || echo up"
-      --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos(1)' )"
+      --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )"
     )
     hdr='↑↓ choisir · Tab = projets ⇄ vaults · tape = filtrer · Entrée = ouvrir'
   fi
