@@ -118,7 +118,34 @@ type="$(cut -f1 <<<"$choice")"
 name="$(cut -f2 <<<"$choice")"
 
 # --- action --------------------------------------------------------------
-run() { if [[ -n "${PC_DRYRUN:-}" ]]; then printf 'DRYRUN: '; printf '%q ' "$@"; echo; else exec "$@"; fi; }
+# Commande lancée dans le pane à la création : `env -u TMUX` rend le truecolor à
+# Claude (il se rabaisse en 256 couleurs s'il voit $TMUX) ; `exec bash` → on
+# retombe sur un shell quand Claude quitte, au lieu de fermer la session.
+CLAUDE_CMD='env -u TMUX claude; exec bash'
+
+# run  : DERNIÈRE commande — `exec` (remplace le process) ; en PC_DRYRUN, imprime.
+# step : commande de PRÉPARATION — exécute sans `exec` ; en PC_DRYRUN, imprime.
+run()  { if [[ -n "${PC_DRYRUN:-}" ]]; then printf 'DRYRUN: '; printf '%q ' "$@"; echo; else exec "$@"; fi; }
+step() { if [[ -n "${PC_DRYRUN:-}" ]]; then printf 'DRYRUN: '; printf '%q ' "$@"; echo; else "$@"; fi; }
+
+# Rejoindre une session DÉJÀ active. Dans tmux, `attach` est interdit (nesting) →
+# `switch-client` ; hors tmux → `attach`.
+attach_session() {  # $1 = nom de session
+  if [[ -n "${TMUX:-}" ]]; then run tmux switch-client  -t "$1"
+  else                          run tmux attach-session -t "$1"; fi
+}
+
+# Créer (ou rejoindre si déjà là) une session dans $2. Hors tmux : `new-session -A`
+# (attach-or-create) en une fois. Dans tmux : on ne peut pas attach → créer détaché
+# (idempotent : `|| true` si la session existe déjà) puis `switch-client`.
+create_session() {  # $1 = nom   $2 = dossier de départ
+  if [[ -n "${TMUX:-}" ]]; then
+    step tmux new-session -d -s "$1" -c "$2" "$CLAUDE_CMD" || true
+    run  tmux switch-client -t "$1"
+  else
+    run tmux new-session -A -s "$1" -c "$2" "$CLAUDE_CMD"
+  fi
+}
 
 case "$type" in
   sep)
@@ -126,13 +153,13 @@ case "$type" in
     exec "$0"                                          # séparateur : rouvre le menu
     ;;
   active)
-    run tmux attach-session -t "$name"
+    attach_session "$name"
     ;;
   project)
-    run tmux new-session -A -s "$name" -c "$DEV_DIR/$name" "env -u TMUX claude; exec bash"
+    create_session "$name" "$DEV_DIR/$name"
     ;;
   vault)
-    run tmux new-session -A -s "$name" -c "$VAULTS_DIR/$name" "env -u TMUX claude; exec bash"
+    create_session "$name" "$VAULTS_DIR/$name"
     ;;
   new)
     if [[ -z "$name" ]]; then
@@ -140,7 +167,7 @@ case "$type" in
       [[ -z "$name" ]] && exit 0
     fi
     [[ -d "$DEV_DIR/$name" ]] && start="$DEV_DIR/$name" || start="$HOME"
-    run tmux new-session -A -s "$name" -c "$start" "env -u TMUX claude; exec bash"
+    create_session "$name" "$start"
     ;;
   *)
     echo "choix non reconnu : $type" >&2; exit 1
