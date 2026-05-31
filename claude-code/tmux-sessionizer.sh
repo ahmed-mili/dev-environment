@@ -153,7 +153,7 @@ else
     )
     if (( n_proj && n_vault )); then
       nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
-      hdr_full='↑↓ naviguer · Tab projets⇄vaults · ⏎ ouvrir · Ctrl+N nouveau · Ctrl+R renommer · Ctrl+X supprimer · Ctrl+G masquer'
+      hdr_full='↑↓ naviguer · Tab projets ⇄ vaults · ⏎ ouvrir · Ctrl+N nouveau · Ctrl+R renommer · Ctrl+X supprimer · Ctrl+G masquer'
     fi
   fi
   # Aide togglable SANS jamais perdre l'indice : header minimal « ^G commandes »
