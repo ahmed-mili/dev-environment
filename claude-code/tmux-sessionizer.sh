@@ -132,7 +132,7 @@ else
   # Aide : header minimal « ^G commandes » TOUJOURS visible ; Ctrl-G le bascule
   # avec la liste COMPLÈTE (hdr_full).
   nav=(); hdr_min='Ctrl+G  help'
-  hdr_full='↑↓ navigate · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
+  hdr_full='↑↓ navigate · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+D detach · Ctrl+G hide'
   ssep=0; psep=0; vsep=0; pfirst=0; vfirst=0; pos=0
   (( n_orphan )) && { ssep=$(( pos + 1 )); pos=$(( pos + 1 + n_orphan )); }
   (( n_proj ))   && { psep=$(( pos + 1 )); pfirst=$(( psep + 1 )); pos=$(( pos + 1 + n_proj )); }
@@ -155,7 +155,7 @@ else
       nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
       # ↹ = U+21B9, symbole « touche Tab » à DEUX flèches. Absent de JetBrainsMono
       # Nerd Font mais rendu par la police de secours (bloc Unicode Arrows, comme ⇄).
-      hdr_full='↑↓ navigate · ↹ switch category · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
+      hdr_full='↑↓ navigate · ↹ switch category · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+D detach · Ctrl+G hide'
     fi
   fi
   # Aide togglable SANS jamais perdre l'indice : header minimal « ^G commandes »
@@ -181,7 +181,7 @@ else
       --color=pointer:8 \
       --prompt='pc ❯ ' \
       --header="$hdr_min" \
-      --expect=ctrl-n,ctrl-x,ctrl-r \
+      --expect=ctrl-n,ctrl-x,ctrl-r,ctrl-d \
       "${nav[@]}" \
     )" || exit 0
   key="$(sed -n '1p' <<<"$out")"
@@ -286,6 +286,13 @@ case "$key" in
         step tmux rename-session -t "$name" "$REPLY_OC"
       fi
     fi
+    [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0
+    exec "$0"
+    ;;
+  ctrl-d)
+    # Detach : la session reste ACTIVE en arrière-plan, on coupe juste les clients
+    # attachés (detach-client -s). Non destructif -> pas de confirmation.
+    [[ "$type" == "active" ]] && step tmux detach-client -s "$name"
     [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0
     exec "$0"
     ;;
