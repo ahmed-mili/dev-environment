@@ -73,12 +73,17 @@ n_orphan=${#orphans[@]}; n_proj=${#projects[@]}; n_vault=${#vaults[@]}
 # --- menu (TSV : type <TAB> name <TAB> label affiché) --------------------
 build_menu() {
   local s p v
-  # 1) sessions orphelines (ni projet ni vault) — pas de section, en tête
-  for s in "${orphans[@]}"; do
-    printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$s" "$G" "$R" "$s" "$G" "$R"
-  done
-  # 2) projets ~/dev : section propre sous un titre « ◆ Projects » (texte clair sur
-  #    tirets gris) ; chacun à SA place ; actif -> ● (active), sinon ○ gris.
+  # type 'sep' = titre décoratif : les flèches le sautent (binds), un clic dessus
+  # rouvre le menu (dispatch 'sep') -> non sélectionnable.
+  # 1) sessions hors-catégorie (ni projet ~/dev ni vault) sous un titre « ◆ Sessions ».
+  if (( n_orphan )); then
+    printf 'sep\t\t%s──────  %s◆ Sessions%s  ──────%s\n' "$D" "$R" "$D" "$R"
+    for s in "${orphans[@]}"; do
+      printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$s" "$G" "$R" "$s" "$G" "$R"
+    done
+  fi
+  # 2) projets ~/dev sous « ◆ Projects » (texte clair sur tirets gris) ; chacun à SA
+  #    place ; actif -> ● (active), sinon ○ gris.
   if (( n_proj )); then
     printf 'sep\t\t%s──────  %s◆ Projects%s  ──────%s\n' "$D" "$R" "$D" "$R"
     for p in "${projects[@]}"; do
@@ -89,10 +94,8 @@ build_menu() {
       fi
     done
   fi
-  # 3) vaults Obsidian : leur propre section sous un séparateur ; même règle d'actif.
+  # 3) vaults Obsidian sous « ◆ Obsidian Vaults » (violet) ; même règle d'actif.
   if (( n_vault )); then
-    # type 'sep' : ligne décorative ; les flèches la sautent (binds), et un clic
-    # dessus rouvre le menu (dispatch 'sep') — on ne peut donc pas la "choisir".
     printf 'sep\t\t%s──────  %s◆ Obsidian Vaults%s  ──────%s\n' "$D" "$M" "$D" "$R"
     for v in "${vaults[@]}"; do
       if is_active "$v"; then
@@ -102,44 +105,52 @@ build_menu() {
       fi
     done
   fi
-  printf 'new\t\t%s＋ nouveau (nom libre)%s\n' "$G" "$R"
+  # Plus de ligne « ＋ nouveau » : la création passe par le raccourci Ctrl-N
+  # (--expect=ctrl-n + prompt) — cf. bloc « sélection » plus bas.
 }
 
 [[ "${1:-}" == "--list" ]] && { build_menu; exit 0; }
 
 # --- sélection -----------------------------------------------------------
 if [[ -n "${PC_PICK:-}" ]]; then
-  choice="$PC_PICK"
+  key="${PC_KEY:-}"; choice="$PC_PICK"
 else
   [[ -x "$FZF" ]] || { echo "fzf introuvable (~/.fzf/bin/fzf) — lance: ~/.fzf/install --bin" >&2; exit 1; }
   # --with-nth=3 : on n'AFFICHE que le label (champ 3), qui contient déjà le nom
   # -> la frappe filtre sur ce qu'on voit (WYSIWYG). Pas de --nth : fzf réécrit
   # la ligne avant d'appliquer --nth, donc --nth=2,3 chercherait des champs
   # disparus -> zéro match. La VALEUR retournée reste la ligne d'origine (3 champs).
-  # Navigation : sauter les titres « ◆ … » (↑↓) et basculer projets ⇄ vaults (Tab).
+  # Navigation : sauter les titres « ◆ … » (↑↓), basculer projets ⇄ vaults (Tab),
+  # créer une session (Ctrl-N, via --expect plus bas).
   # Positions 1-based (layout reverse, liste NON filtrée) :
-  #   [orphelines 1..n_orphan] [« ◆ Projects »] [projets ..] [« ◆ Vaults »] [vaults ..] [nouveau]
-  # psep/vsep = lignes-titres (sautées) ; pfirst/vfirst = 1er item de chaque section ;
-  # cursor0 = 1er item SÉLECTIONNABLE (où démarre le curseur — jamais sur un titre).
+  #   [« ◆ Sessions »] [orphelines ..] [« ◆ Projects »] [projets ..] [« ◆ Vaults »] [vaults ..]
+  # ssep/psep/vsep = lignes-titres ; pfirst/vfirst = 1er item projet/vault ;
+  # cursor0 = 1er item SÉLECTIONNABLE (où démarre le curseur — jamais sur un titre) ;
+  # $seps = positions de TOUS les titres présents (les ↑↓ les enjambent, via `case`).
   # Le garde `[ -z {q} ]` désactive saut/bascule dès qu'un filtre est tapé : une fois
   # la liste filtrée, ces positions absolues ne veulent plus rien dire.
-  nav=(); hdr='↑↓ choisir · tape = filtrer · Entrée = ouvrir · Échap = annuler'
-  psep=0; vsep=0; pfirst=0; vfirst=0
-  (( n_proj ))  && { psep=$(( n_orphan + 1 )); pfirst=$(( psep + 1 )); }
-  (( n_vault )) && { vsep=$(( n_orphan + (n_proj ? n_proj + 1 : 0) + 1 )); vfirst=$(( vsep + 1 )); }
-  if   (( n_orphan )); then cursor0=1
+  nav=(); hdr='↑↓ choisir · ^N nouveau · tape = filtrer · Entrée = ouvrir'
+  ssep=0; psep=0; vsep=0; pfirst=0; vfirst=0; pos=0
+  (( n_orphan )) && { ssep=$(( pos + 1 )); pos=$(( pos + 1 + n_orphan )); }
+  (( n_proj ))   && { psep=$(( pos + 1 )); pfirst=$(( psep + 1 )); pos=$(( pos + 1 + n_proj )); }
+  (( n_vault ))  && { vsep=$(( pos + 1 )); vfirst=$(( vsep + 1 )); pos=$(( pos + 1 + n_vault )); }
+  if   (( n_orphan )); then cursor0=$(( ssep + 1 ))
   elif (( n_proj ));   then cursor0=$pfirst
   elif (( n_vault ));  then cursor0=$vfirst
   else                      cursor0=1; fi
-  if (( psep || vsep )); then
+  seps=""
+  (( ssep )) && seps="$seps $ssep"
+  (( psep )) && seps="$seps $psep"
+  (( vsep )) && seps="$seps $vsep"
+  if (( ssep || psep || vsep )); then
     nav=(
       --bind "load:pos($cursor0)"
-      --bind "down:transform:[ -z {q} ] && { [ \$((FZF_POS+1)) -eq $psep ] || [ \$((FZF_POS+1)) -eq $vsep ]; } && echo down+down || echo down"
-      --bind "up:transform:[ -z {q} ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); if [ $psep -gt 0 ] && [ \$p -eq $psep ]; then [ $psep -eq 1 ] && echo ignore || echo up+up; elif [ $vsep -gt 0 ] && [ \$p -eq $vsep ]; then echo up+up; else echo up; fi"
+      --bind "down:transform:[ -z {q} ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac"
+      --bind "up:transform:[ -z {q} ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac"
     )
     if (( n_proj && n_vault )); then
       nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
-      hdr='↑↓ choisir · Tab = projets ⇄ vaults · tape = filtrer · Entrée = ouvrir'
+      hdr='↑↓ · Tab projets⇄vaults · ^N nouveau · tape=filtrer · ⏎ ouvrir'
     fi
   fi
   # --color=pointer:8 : par défaut fzf peint son pointeur (le ▌ de la ligne
@@ -151,19 +162,30 @@ else
   # fzf — --color=pointer est global, aucune action change-color n'existe, et
   # l'ANSI dans le pointeur est rejeté (largeur uniseg ≤ 2). Vérifié dans le
   # source 0.73.1 (terminal.go:7952, options.go:3605). Ne pas retenter.
-  choice="$(build_menu | "$FZF" \
+  # --expect=ctrl-n : Ctrl-N quitte fzf en mettant la touche sur la 1re ligne de
+  # sortie (vide pour Entrée), la sélection sur la 2e -> raccourci « nouvelle session ».
+  out="$(build_menu | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
       --color=pointer:8 \
       --prompt='pc ❯ ' \
       --header="$hdr" \
+      --expect=ctrl-n \
       "${nav[@]}" \
     )" || exit 0
+  key="$(sed -n '1p' <<<"$out")"
+  choice="$(sed -n '2p' <<<"$out")"
 fi
-[[ -z "$choice" ]] && exit 0
 
-type="$(cut -f1 <<<"$choice")"
-name="$(cut -f2 <<<"$choice")"
+# Ctrl-N : on réutilise le flux de création « new » (prompt nom + create_session),
+# sans ligne « ＋ nouveau » dans le menu.
+if [[ "$key" == "ctrl-n" ]]; then
+  type="new"; name=""
+else
+  [[ -z "$choice" ]] && exit 0
+  type="$(cut -f1 <<<"$choice")"
+  name="$(cut -f2 <<<"$choice")"
+fi
 
 # --- action --------------------------------------------------------------
 # À la création on n'injecte AUCUNE commande : tmux ouvre le shell par défaut
