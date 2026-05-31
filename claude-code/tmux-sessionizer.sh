@@ -104,9 +104,15 @@ else
     )
     hdr='↑↓ choisir · Tab = projets ⇄ vaults · tape = filtrer · Entrée = ouvrir'
   fi
+  # --color=pointer:green : sans ça, fzf colore son pointeur (le ▌ de la ligne
+  # courante) en rose-rouge (couleur 161 de son thème par défaut) — la SEULE
+  # couleur hors de la palette du menu (vert/violet/gris). On le ramène au vert
+  # des sessions actives/＋ : reste distinct sur toutes les lignes (y compris les
+  # vaults en violet, où un pointeur violet se fondrait dans le ○).
   choice="$(build_menu | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
+      --color=pointer:green \
       --prompt='pc ❯ ' \
       --header="$hdr" \
       "${nav[@]}" \
