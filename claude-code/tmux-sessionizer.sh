@@ -131,8 +131,8 @@ else
   # la liste filtrée, ces positions absolues ne veulent plus rien dire.
   # Aide : header minimal « ^G commandes » TOUJOURS visible ; Ctrl-G le bascule
   # avec la liste COMPLÈTE (hdr_full).
-  nav=(); hdr_min='^G  commandes'
-  hdr_full='↑↓ naviguer · ⏎ ouvrir · ^N nouveau · ^R renommer · ^X supprimer · ^G masquer'
+  nav=(); hdr_min='Ctrl+G  commandes'
+  hdr_full='↑↓ naviguer · ⏎ ouvrir · Ctrl+N nouveau · Ctrl+R renommer · Ctrl+X supprimer · Ctrl+G masquer'
   ssep=0; psep=0; vsep=0; pfirst=0; vfirst=0; pos=0
   (( n_orphan )) && { ssep=$(( pos + 1 )); pos=$(( pos + 1 + n_orphan )); }
   (( n_proj ))   && { psep=$(( pos + 1 )); pfirst=$(( psep + 1 )); pos=$(( pos + 1 + n_proj )); }
@@ -153,7 +153,7 @@ else
     )
     if (( n_proj && n_vault )); then
       nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
-      hdr_full='↑↓ naviguer · Tab projets⇄vaults · ⏎ ouvrir · ^N nouveau · ^R renommer · ^X supprimer · ^G masquer'
+      hdr_full='↑↓ naviguer · Tab projets⇄vaults · ⏎ ouvrir · Ctrl+N nouveau · Ctrl+R renommer · Ctrl+X supprimer · Ctrl+G masquer'
     fi
   fi
   # Aide togglable SANS jamais perdre l'indice : header minimal « ^G commandes »
