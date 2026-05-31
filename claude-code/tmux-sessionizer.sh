@@ -209,6 +209,21 @@ fi
 run()  { if [[ -n "${PC_DRYRUN:-}" ]]; then printf 'DRYRUN: '; printf '%q ' "$@"; echo; else exec "$@"; fi; }
 step() { if [[ -n "${PC_DRYRUN:-}" ]]; then printf 'DRYRUN: '; printf '%q ' "$@"; echo; else "$@"; fi; }
 
+# read_or_cancel : lit une saisie sur /dev/tty (fzf a rendu le terminal). Si la
+# PREMIÈRE touche est Échap, ANNULE -> retourne 1 (pour abandonner un raccourci
+# Ctrl-N/R/X déclenché par erreur). Sinon la saisie complète va dans $REPLY_OC.
+# `-sn1` intercepte Échap AVANT tout écho ; le 1er caractère est ré-affiché à la
+# main, puis on lit le reste de la ligne normalement.
+read_or_cancel() {
+  local first rest; REPLY_OC=""
+  IFS= read -rsn1 first </dev/tty 2>/dev/null || return 1   # Ctrl-D / pas de tty
+  [[ "$first" == $'\e' ]] && { echo >&2; return 1; }        # Échap -> annule
+  [[ -z "$first" ]] && { echo >&2; return 0; }              # Entrée seule -> vide
+  printf '%s' "$first" >&2
+  IFS= read -r rest </dev/tty 2>/dev/null || rest=""
+  REPLY_OC="$first$rest"
+}
+
 # Rejoindre une session DÉJÀ active. Dans tmux, `attach` est interdit (nesting) →
 # `switch-client` ; hors tmux → `attach`.
 attach_session() {  # $1 = nom de session
@@ -255,8 +270,10 @@ case "$key" in
   ctrl-x)
     if [[ "$type" == "active" ]]; then
       printf "Kill session '%s'? [y/N] " "$name" >&2
-      read -r ans </dev/tty 2>/dev/null || ans=""
-      [[ "$ans" == [yY]* ]] && step tmux kill-session -t "$name"
+      # Échap (ou réponse ≠ y) -> pas de kill ; on rafraîchit juste le menu.
+      if read_or_cancel && [[ "$REPLY_OC" == [yY]* ]]; then
+        step tmux kill-session -t "$name"
+      fi
     fi
     [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0   # pas de boucle en mode test
     exec "$0"                                          # rafraîchir le menu
@@ -264,8 +281,10 @@ case "$key" in
   ctrl-r)
     if [[ "$type" == "active" ]]; then
       printf "New name for '%s': " "$name" >&2
-      read -r newname </dev/tty 2>/dev/null || newname=""
-      [[ -n "$newname" ]] && step tmux rename-session -t "$name" "$newname"
+      # Échap (ou nom vide) -> pas de rename ; on rafraîchit le menu.
+      if read_or_cancel && [[ -n "$REPLY_OC" ]]; then
+        step tmux rename-session -t "$name" "$REPLY_OC"
+      fi
     fi
     [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0
     exec "$0"
@@ -292,8 +311,13 @@ case "$type" in
     ;;
   new)
     if [[ -z "$name" ]]; then
-      read -rp "Session name: " name || exit 0   # Ctrl-D = annule proprement
-      [[ -z "$name" ]] && exit 0
+      printf 'Session name: ' >&2
+      # Échap / saisie vide / Ctrl-D -> annule la création et revient au menu.
+      if ! read_or_cancel || [[ -z "$REPLY_OC" ]]; then
+        [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0
+        exec "$0"
+      fi
+      name="$REPLY_OC"
     fi
     [[ -d "$DEV_DIR/$name" ]] && start="$DEV_DIR/$name" || start="$HOME"
     create_session "$name" "$start"
