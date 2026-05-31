@@ -119,7 +119,10 @@ if [[ ${BLE_VERSION-} ]]; then
   ble-face syntax_error='fg=default'    # don't paint unknown commands red
   ble-bind -m auto_complete -f 'TAB' 'auto_complete/@end insert'  # Tab accepts
   ble-bind -m auto_complete -f 'C-i' 'auto_complete/@end insert'  # the suggestion
-  ble-bind -f 'f2' 'menu-complete'      # F2 = navigable completion menu
+  ble-bind -f 'f3' 'menu-complete'      # F3 = navigable completion menu
+  # F2 = tmux sessionizer (same fzf menu as `pc` on the phone). -c runs an external
+  # fullscreen program (fzf) with the terminal restored, then redraws the prompt.
+  ble-bind -c 'f2' "$HOME/dev/dev-environment/claude-code/tmux-sessionizer.sh"
 fi
 
 # ble-attach MUST be the last statement of ~/.bashrc.
