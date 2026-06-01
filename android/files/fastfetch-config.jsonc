@@ -19,8 +19,9 @@
     { "type": "cpu",     "key": "\u001b[38;2;180;190;254m󰻟  CPU\u001b[0m",     "format": "{name}" },
     { "type": "gpu",     "key": "\u001b[38;2;172;191;252m󰂮  GPU\u001b[0m",     "format": "{name}" },
     { "type": "memory",  "key": "\u001b[38;2;164;192;250m󰆘  RAM\u001b[0m" },
-    { "type": "disk",    "key": "\u001b[38;2;156;193;247m󰋊  Disk\u001b[0m" },
-    { "type": "battery", "key": "\u001b[38;2;148;194;245m󰂄  Battery\u001b[0m" },
+    // Only the real storage (/storage/emulated, ~939 GiB fuse); hides the
+    // read-only Termux rootfs mount (/ erofs, 100%), which is clutter.
+    { "type": "disk",    "key": "\u001b[38;2;156;193;247m󰋊  Disk\u001b[0m", "folders": "/storage/emulated" },
     "break",
     "break"
   ]
