@@ -336,15 +336,18 @@ case "$type" in
     #   desktop (F2)  : onglet Windows Terminal natif (GUI visible localement)
     #   tél (pc/ssh)  : le sessionizer tourne dans WSL, et le hop WSL→Windows est CASSÉ par
     #     un bug WSL mirrored (127.0.0.1 détourné vers loopback0, handshake échoue) → ce menu
-    #     ne peut PAS ouvrir un vault en pwsh natif. Le tél utilise à la place la commande
-    #     `vault` (ssh DIRECT du tél vers le sshd Windows, port 2222 Tailscale). Cf.
-    #     docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md + mémoire
-    #     reference_ssh-wsl-no-interop. On affiche donc juste un rappel.
+    #     ne peut PAS ouvrir un vault en pwsh natif lui-même. Mais le TÉL, lui, sait joindre
+    #     Windows (ssh direct, cmd `vault`). Donc on DÉLÈGUE : on dépose le nom du vault choisi
+    #     et on sort avec le code 42 ; pc()/pcm() (côté tél) interceptent ce 42 et lancent
+    #     `vault <nom>` automatiquement → l'user choisit dans le menu et le vault s'ouvre, sans
+    #     rien taper. Cf. docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md +
+    #     mémoires reference_ssh-wsl-no-interop / reference_wsl-mirrored-loopback-broken.
     if is_remote; then
-      printf 'Open a vault from the phone with the `vault` command (ssh direct to the\nWindows pwsh) — not this menu: the WSL->Windows hop is broken by a WSL\nmirrored-networking bug. E.g.:  vault %s\nPress a key…' "$name" >&2
-      [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0
-      read -rsn1 </dev/tty 2>/dev/null || true
-      exec "$0"
+      req="${PC_VAULT_REQ:-$HOME/.cache/pc-vault-request}"
+      mkdir -p "$(dirname "$req")" 2>/dev/null || true
+      printf '%s\n' "$name" > "$req" 2>/dev/null || true
+      [[ -n "${PC_DRYRUN:-}" ]] && { echo "DRYRUN: open vault '$name' client-side (a écrit \$req, sortirait 42)"; exit 0; }
+      exit 42
     else
       open_wt_pwsh "$VAULTS_DIR/$name"
     fi
