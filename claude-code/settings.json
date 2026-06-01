@@ -2,7 +2,7 @@
   "model": "opus",
   "statusLine": {
     "type": "command",
-    "command": "C:/Users/Ahmed/.claude/statusline.exe"
+    "command": "~/.claude/statusline.exe"
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,
