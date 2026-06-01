@@ -95,8 +95,8 @@ isadmin() { [ "$(id -u)" -eq 0 ]; }
 # WSL. Color codes are wrapped in \[ \] so readline measures the visible width correctly.
 _PROMPT_ID="${USER:-$(whoami 2>/dev/null || echo termux)}@$(getprop ro.product.model 2>/dev/null || hostname 2>/dev/null || echo termux)"
 _set_prompt() {
-  local p="${PWD/#$HOME/\~}"             # ~ for $HOME, full path elsewhere (like WSL)
-  PS1="\[\e[1;38;2;166;227;161m\]${_PROMPT_ID}\[\e[0m\]:\[\e[1;38;2;137;180;250m\]${p}\[\e[0m\]\$ "
+  # Always the FULL absolute path (no ~ shorthand) so you instantly know where you are.
+  PS1="\[\e[1;38;2;166;227;161m\]${_PROMPT_ID}\[\e[0m\]:\[\e[1;38;2;137;180;250m\]${PWD}\[\e[0m\]\$ "
 }
 PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }_set_prompt"
 
