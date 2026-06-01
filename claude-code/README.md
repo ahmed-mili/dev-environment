@@ -183,22 +183,24 @@ ssh phone 'termux-reload-settings'
 
 Rollback: `ssh phone 'cp ~/.termux/font.ttf.bak ~/.termux/font.ttf && termux-reload-settings'`. Re-run the patch if a Termux font update overwrites it.
 
-## Sessionizer (`pc` / `pcm` / `obs` / F2)
+## Sessionizer (`wsl` / `pwsh` / F2)
 
-`tmux-sessionizer.sh` is the shared fzf menu that merges, in one list: `●` **active** tmux sessions (attach), `○` **`~/dev` projects** with no session (create one in the folder), `○` **Obsidian vaults** in violet (native PowerShell), and **new** ad-hoc sessions (Ctrl+N). The **same** menu has three perimeters, driven by the `PC_VIEW` env var so projects and vaults never share a cluttered list:
+`tmux-sessionizer.sh` is the shared fzf menu that merges, in one list: `●` **active** tmux sessions (attach), `○` **`~/dev` projects** with no session (create one in the folder), `○` **Obsidian vaults** in violet (native PowerShell), and **new** ad-hoc sessions (Ctrl+N). The **same** menu has three perimeters, driven by the `PC_VIEW` env var. The split is by **world** (which side of the filesystem / where it runs best), not by object type, so the two worlds never share a cluttered list:
 
-| Entry point | `PC_VIEW` | Shows |
+| Entry point | `PC_VIEW` | World — shows |
 |---|---|---|
-| `pc` (SSH) / `pcm` (mosh) — phone | `main` | everything **except** vaults (sessions + projects) |
-| `obs` (SSH) / `obsm` (mosh) — phone | `vaults` | **only** Obsidian vaults |
+| `wsl` (SSH) / `wslm` (mosh) — phone | `wsl` | **Linux/ext4**: tmux sessions + `~/dev` projects (no vaults) |
+| `pwsh` (SSH) / `pwshm` (mosh) — phone | `ps` | **Windows/C: in native pwsh**: Obsidian vaults (extensible to any C: folder better in PowerShell) |
 | **F2** — desktop WSL shell | `all` (default) | everything (vaults open as Windows Terminal tabs via interop) |
 
-> **Picking a vault from the phone opens native Windows PowerShell — automatically.** A vault lives on `C:`, so it must run in native `pwsh`, but the phone's SSH-into-WSL session **can't reach Windows**: the **WSL→Windows hop is broken by a WSL mirrored-networking bug** — `127.0.0.1` is policy-routed to `loopback0` and the host handshake times out (confirmed across *all* Windows ports; `LoopbackEnabled=True` + `wsl --shutdown` does **not** fix it). So when you pick a vault in `obs`, the sessionizer (in WSL) just **records the name and exits with code 42**; the phone's `obs`/`pc` function catches that and runs `vault <name>` **client-side** — an `ssh` **directly** from the phone to the **Windows OpenSSH server** (port 2222, bound to localhost + the Tailscale IP, key-only) into native `pwsh` in the vault folder. You pick in the menu, the vault just opens — nothing to type. (`vault Obsidian` also works as a direct, menu-less shortcut.) **Trade-off:** a phone-opened vault is **not** a tmux session, so it never shows as `●` active and has no detach/reattach — it's a fresh `pwsh` each time (the mirrored bug rules out clean tmux persistence). One-time Windows setup (OpenSSH Server, keys, firewall, `LoopbackEnabled`): see `docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md`.
+`pc`/`pcm`/`obs`/`obsm` remain as backward-compat aliases (→ `wsl`/`wslm`/`pwsh`/`pwshm`).
+
+> **Picking a vault from the phone opens native Windows PowerShell — automatically.** A vault lives on `C:`, so it must run in native `pwsh`, but the phone's SSH-into-WSL session **can't reach Windows**: the **WSL→Windows hop is broken by a WSL mirrored-networking bug** — `127.0.0.1` is policy-routed to `loopback0` and the host handshake times out (confirmed across *all* Windows ports; `LoopbackEnabled=True` + `wsl --shutdown` does **not** fix it). So when you pick a vault in `pwsh`, the sessionizer (in WSL) just **records the name and exits with code 42**; the phone's `pwsh`/`wsl` function catches that and runs `vault <name>` **client-side** — an `ssh` **directly** from the phone to the **Windows OpenSSH server** (port 2222, bound to localhost + the Tailscale IP, key-only) into native `pwsh` in the vault folder. You pick in the menu, the vault just opens — nothing to type. (`vault Obsidian` also works as a direct, menu-less shortcut. The phone-side `pwsh` *function* doesn't clash with the remote `pwsh` — the latter lives inside the ssh command string, run on Windows.) **Trade-off:** a phone-opened vault is **not** a tmux session, so it never shows as `●` active and has no detach/reattach — it's a fresh `pwsh` each time (the mirrored bug rules out clean tmux persistence). One-time Windows setup (OpenSSH Server, keys, firewall, `LoopbackEnabled`): see `docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md`.
 
 | Key | Action |
 |---|---|
 | ⏎ | open / attach |
-| ↹ Tab | switch category (projects ⇄ vaults) — F2 `all` view only; `pc`/`obs` each show one category |
+| ↹ Tab | switch category (projects ⇄ vaults) — F2 `all` view only; `wsl`/`pwsh` each show one world |
 | Ctrl+N | new session (free name) |
 | Ctrl+R | rename the active session |
 | Ctrl+X | kill the active session (see below) |
