@@ -116,6 +116,15 @@ if command -v fzf >/dev/null 2>&1; then
     command -v fd >/dev/null 2>&1 && export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
 fi
 
+# ---- Start in the phone's shared internal storage (/storage/emulated/0) ----
+# That's what Material Files and the default Android file manager open on ("Internal
+# storage"), not Termux's sandboxed home. Only when launching at $HOME (a fresh login),
+# so it never overrides the directory a subshell was started from. Needs storage access
+# (termux-setup-storage); silently stays in $HOME if it's not reachable.
+if [ "$PWD" = "$HOME" ] && [ -d /storage/emulated/0 ]; then
+    cd /storage/emulated/0 2>/dev/null || true
+fi
+
 # ---- Gradient USER@HOST header + fastfetch (interactive shells only) ----
 # Renders the same five Catppuccin stops as the Windows splash (Mauve →
 # Lavender → Sapphire) so the header is a continuous palette ribbon.
