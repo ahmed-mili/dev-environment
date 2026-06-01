@@ -201,10 +201,17 @@ alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,S
 # vault: NATIVE pwsh in an Obsidian vault (on C:). The WSL->Windows hop being broken
 # by a WSL mirrored bug (127.0.0.1 routed to loopback0, handshake times out), we ssh
 # DIRECTLY from the phone to the Windows sshd (port 2222, phone key authorized on Windows).
+# The Windows account can't be derived from the phone, so it's read from $WIN_USER (set it
+# in ~/.bashrc.local, e.g. `export WIN_USER=<your-windows-account>`) — keeps this versioned
+# file shareable.
 # Cf. docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md
 vault() {
   local v="${1:-Obsidian}"
-  ssh -t -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 Ahmed@desktop \
+  if [ -z "${WIN_USER:-}" ]; then
+    echo "vault: set your Windows account in ~/.bashrc.local — e.g. export WIN_USER=<your-windows-account>" >&2
+    return 1
+  fi
+  ssh -t -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
     "pwsh -NoLogo -WorkingDirectory C:\\obsidian-vaults\\$v"
 }
 
