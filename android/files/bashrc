@@ -116,9 +116,12 @@ fi
 if [ -t 1 ] && command -v fastfetch >/dev/null 2>&1; then
     _gradient_header() {
         # USER is empty in local Termux and hostname is "localhost" -> ugly "@localhost".
-        # Use a clean USER@MACHINE label: fixed user + the device model from getprop
-        # (ro.product.model = e.g. 23078PND5G), the truest parallel to a PC hostname.
-        local text="Ahmed@$(getprop ro.product.model 2>/dev/null || hostname 2>/dev/null || echo termux)"
+        # Build a clean, fully DYNAMIC USER@MACHINE label (nothing hardcoded, so the repo
+        # stays shareable): the real Termux user ($USER, or `whoami` fallback since $USER
+        # is empty in local Termux) @ the device model from getprop (ro.product.model,
+        # e.g. 23078PND5G — the truest parallel to a PC hostname); falls back to
+        # hostname/termux off-Android.
+        local text="${USER:-$(whoami 2>/dev/null || echo termux)}@$(getprop ro.product.model 2>/dev/null || hostname 2>/dev/null || echo termux)"
         local n=${#text}
         # Three RGB stops: Mauve→Lavender, Lavender, Lavender→Sapphire.
         local r=(192 180 148)
