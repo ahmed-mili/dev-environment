@@ -1,7 +1,7 @@
 # ~/.bashrc — Termux, Catppuccin Mocha, mirrors the Windows PowerShell 7
 # profile installed by https://github.com/ahmed-mili/windows-pwsh-config
 # (UTF-8 console, gradient USER@HOST header, fastfetch splash, fzf bindings,
-#  predictions via shell history + gradient prompt).
+#  predictions via shell history + Ubuntu-style prompt).
 
 # Skip non-interactive (scripted pipes, scp, sftp, Claude Code subshells).
 case $- in
@@ -51,7 +51,7 @@ shopt -s histappend
 shopt -s checkwinsize
 shopt -s globstar 2>/dev/null
 shopt -s autocd 2>/dev/null
-PROMPT_COMMAND="__ec=\$?; history -a; history -n${PROMPT_COMMAND:+; $PROMPT_COMMAND}"   # __ec = real exit code (1st), for the prompt ❯
+PROMPT_COMMAND="history -a; history -n${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 
 # ---- ls / cat / find replacements when available (eza/bat/fd/ripgrep) ----
 if command -v eza >/dev/null 2>&1; then
@@ -88,35 +88,15 @@ alias tls='tmux ls'
 # ---- isadmin helper (returns 0 if running as root — root rarely needed on Termux) ----
 isadmin() { [ "$(id -u)" -eq 0 ]; }
 
-# ---- Prompt: two-line, REAL per-character gradient on the path (replaces Starship) ----
-# Line 1: the path in a smooth mauve->lavender->blue gradient (Catppuccin, same family as
-# the splash header). Line 2: a green ❯ (red on the previous command's error).
-# Why custom, not Starship: Starship only has fixed per-segment styles — no smooth
-# per-character gradient. So we render the path ourselves (like _gradient_header). Pure
-# integer math (no awk/subprocess) keeps it fast every prompt; color codes are wrapped in
-# \[ \] so readline measures the visible width correctly.
-_prompt_path_gradient() {
-  local s="$1"; local n=${#s}            # separate decls: `local s=.. n=${#s}` would read the OLD s
-  (( n == 0 )) && return
-  local r0=203 g0=166 b0=247  r1=180 g1=190 b1=254  r2=137 g2=180 b2=250  # mauve->lavender->blue
-  local half=$(( n>1 ? n/2 : 1 ))
-  local i ch out="" ra ga ba rb gb bv rr gg bb d j
-  for (( i=0; i<n; i++ )); do
-    if (( i <= half )); then ra=$r0;ga=$g0;ba=$b0; rb=$r1;gb=$g1;bv=$b1; d=$half;        j=$i
-    else                     ra=$r1;ga=$g1;ba=$b1; rb=$r2;gb=$g2;bv=$b2; d=$((n-1-half)); j=$((i-half)); fi
-    (( d == 0 )) && d=1
-    rr=$(( ra+(rb-ra)*j/d )); gg=$(( ga+(gb-ga)*j/d )); bb=$(( ba+(bv-ba)*j/d ))
-    ch="${s:$i:1}"
-    out+="\[\e[1;38;2;${rr};${gg};${bb}m\]${ch}"
-  done
-  printf '%s\[\e[0m\]' "$out"
-}
-_set_prompt() {                          # __ec captured first in PROMPT_COMMAND = real exit code
-  local p="${PWD/#$HOME/\~}"             # ~ for $HOME
-  local arrow
-  if (( ${__ec:-0} == 0 )); then arrow="\[\e[1;38;2;166;227;161m\]❯\[\e[0m\]"     # green
-  else                           arrow="\[\e[1;38;2;243;139;168m\]❯\[\e[0m\]"; fi   # red
-  PS1="$(_prompt_path_gradient "$p")\n${arrow} "
+# ---- Prompt: one-line WSL/Ubuntu style — user@host (green) : path (blue) $ (replaces Starship) ----
+# Same look as a stock Ubuntu/WSL shell (ahmed@HOST:/path$). user@host is built ONCE at shell
+# init (real Termux user + getprop model = the same machine name as the splash header), so the
+# only per-prompt work is the path. ~ abbreviates $HOME and the full path shows elsewhere, like
+# WSL. Color codes are wrapped in \[ \] so readline measures the visible width correctly.
+_PROMPT_ID="${USER:-$(whoami 2>/dev/null || echo termux)}@$(getprop ro.product.model 2>/dev/null || hostname 2>/dev/null || echo termux)"
+_set_prompt() {
+  local p="${PWD/#$HOME/\~}"             # ~ for $HOME, full path elsewhere (like WSL)
+  PS1="\[\e[1;38;2;166;227;161m\]${_PROMPT_ID}\[\e[0m\]:\[\e[1;38;2;137;180;250m\]${p}\[\e[0m\]\$ "
 }
 PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }_set_prompt"
 
