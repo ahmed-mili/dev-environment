@@ -1,6 +1,6 @@
 # android/
 
-Termux installer for the **"SSH client to a remote dev machine"** workflow: a polished Termux (Catppuccin Mocha colours, JetBrainsMono Nerd Font, gradient prompt, fastfetch splash, fzf bindings) wired with the SSH stack you need to reach a remote PC over Tailscale (`openssh`, `mosh`, `tmux`). Nothing more.
+Termux installer for the **"SSH client to a remote dev machine"** workflow: a polished Termux (Catppuccin Mocha colours, JetBrainsMono Nerd Font, Ubuntu-style prompt, fastfetch splash, fzf bindings) wired with the SSH stack you need to reach a remote PC over Tailscale (`openssh`, `mosh`, `tmux`). Nothing more.
 
 ## Files
 

@@ -4,7 +4,7 @@
 #
 # What this installs:
 #   - A polished Termux (Catppuccin Mocha colours, JetBrainsMono Nerd Font,
-#     gradient prompt, fastfetch splash, fzf bindings)
+#     Ubuntu-style prompt, fastfetch splash, fzf bindings)
 #   - The SSH stack needed to reach a remote PC over Tailscale:
 #     openssh client, mosh (resilient over flaky mobile networks), tmux
 #   - An ed25519 SSH key (printed at the end so you can paste it into
