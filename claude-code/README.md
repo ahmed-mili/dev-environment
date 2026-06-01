@@ -183,16 +183,22 @@ ssh phone 'termux-reload-settings'
 
 Rollback: `ssh phone 'cp ~/.termux/font.ttf.bak ~/.termux/font.ttf && termux-reload-settings'`. Re-run the patch if a Termux font update overwrites it.
 
-## Sessionizer (`pc` / `pcm` / F2)
+## Sessionizer (`pc` / `pcm` / `obs` / F2)
 
-`tmux-sessionizer.sh` is the shared fzf menu that merges, in one list: `●` **active** tmux sessions (attach), `○` **`~/dev` projects** with no session (create one in the folder), `○` **Obsidian vaults** in violet (native PowerShell), and **new** ad-hoc sessions (Ctrl+N). Reached three ways: **F2** in a desktop WSL shell, `pc` (SSH) or `pcm` (mosh) from the phone.
+`tmux-sessionizer.sh` is the shared fzf menu that merges, in one list: `●` **active** tmux sessions (attach), `○` **`~/dev` projects** with no session (create one in the folder), `○` **Obsidian vaults** in violet (native PowerShell), and **new** ad-hoc sessions (Ctrl+N). The **same** menu has three perimeters, driven by the `PC_VIEW` env var so projects and vaults never share a cluttered list:
 
-> **Opening a vault from the phone: use the `vault` command, not this menu.** A vault lives on `C:`, so it opens in native Windows PowerShell. On the desktop (F2) that's a new Windows Terminal tab. From the phone it **can't** go through this menu: the sessionizer runs in WSL, and the **WSL→Windows hop is broken by a WSL mirrored-networking bug** — `127.0.0.1` is policy-routed to `loopback0` and the host handshake times out (confirmed across *all* Windows ports; `LoopbackEnabled=True` + `wsl --shutdown` does **not** fix it). Instead, a `vault [name]` function on the phone (in `android/files/bashrc`) does `ssh` **directly** to the **Windows OpenSSH server** (port 2222, bound to localhost + the Tailscale IP, key-only) and lands you in native `pwsh` in the vault folder — e.g. `vault Obsidian`. Trade-off vs. the menu: no tmux persistence and no fzf list for vaults. One-time Windows setup (OpenSSH Server, keys, firewall, `LoopbackEnabled`): see `docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md`.
+| Entry point | `PC_VIEW` | Shows |
+|---|---|---|
+| `pc` (SSH) / `pcm` (mosh) — phone | `main` | everything **except** vaults (sessions + projects) |
+| `obs` (SSH) / `obsm` (mosh) — phone | `vaults` | **only** Obsidian vaults |
+| **F2** — desktop WSL shell | `all` (default) | everything (vaults open as Windows Terminal tabs via interop) |
+
+> **Picking a vault from the phone opens native Windows PowerShell — automatically.** A vault lives on `C:`, so it must run in native `pwsh`, but the phone's SSH-into-WSL session **can't reach Windows**: the **WSL→Windows hop is broken by a WSL mirrored-networking bug** — `127.0.0.1` is policy-routed to `loopback0` and the host handshake times out (confirmed across *all* Windows ports; `LoopbackEnabled=True` + `wsl --shutdown` does **not** fix it). So when you pick a vault in `obs`, the sessionizer (in WSL) just **records the name and exits with code 42**; the phone's `obs`/`pc` function catches that and runs `vault <name>` **client-side** — an `ssh` **directly** from the phone to the **Windows OpenSSH server** (port 2222, bound to localhost + the Tailscale IP, key-only) into native `pwsh` in the vault folder. You pick in the menu, the vault just opens — nothing to type. (`vault Obsidian` also works as a direct, menu-less shortcut.) **Trade-off:** a phone-opened vault is **not** a tmux session, so it never shows as `●` active and has no detach/reattach — it's a fresh `pwsh` each time (the mirrored bug rules out clean tmux persistence). One-time Windows setup (OpenSSH Server, keys, firewall, `LoopbackEnabled`): see `docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md`.
 
 | Key | Action |
 |---|---|
 | ⏎ | open / attach |
-| ↹ Tab | switch category (projects ⇄ vaults) |
+| ↹ Tab | switch category (projects ⇄ vaults) — F2 `all` view only; `pc`/`obs` each show one category |
 | Ctrl+N | new session (free name) |
 | Ctrl+R | rename the active session |
 | Ctrl+X | kill the active session (see below) |
