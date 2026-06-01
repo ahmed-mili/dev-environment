@@ -7,7 +7,7 @@ Cross-platform config for my Claude Code setup on **Windows** and **Android** (T
 ```
 dev-environment/
 ├── windows/        # PowerShell 7, Windows Terminal, Fastfetch
-├── android/        # Termux: bash, starship, fastfetch
+├── android/        # Termux: bash, gradient prompt, fastfetch
 └── claude-code/    # statusline, settings, hooks, skills
 ```
 
