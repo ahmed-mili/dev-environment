@@ -4,7 +4,7 @@
 #
 # What this installs:
 #   - A polished Termux (Catppuccin Mocha colours, JetBrainsMono Nerd Font,
-#     starship prompt, fastfetch splash, fzf bindings)
+#     gradient prompt, fastfetch splash, fzf bindings)
 #   - The SSH stack needed to reach a remote PC over Tailscale:
 #     openssh client, mosh (resilient over flaky mobile networks), tmux
 #   - An ed25519 SSH key (printed at the end so you can paste it into
@@ -52,7 +52,6 @@ REPO_RAW="https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/andr
 
 TERMUX_DIR="$HOME/.termux"
 CONFIG_DIR="$HOME/.config"
-STARSHIP_PATH="$CONFIG_DIR/starship.toml"
 FASTFETCH_PATH="$CONFIG_DIR/fastfetch/config.jsonc"
 
 # ---- printing helpers (Catppuccin Mocha-tinted) --------------------------
@@ -173,7 +172,7 @@ PKGS=(
     # Core CLI
     git openssh mosh curl wget nano
     # Shell UX
-    fzf fastfetch starship
+    fzf fastfetch
     eza bat fd ripgrep
     tmux
     # Termux integrations (clipboard, wake-lock, etc.)
@@ -230,14 +229,12 @@ ok "$(short_path "$TERMUX_DIR/colors.properties")"
 ok "$(short_path "$TERMUX_DIR/termux.properties")"
 
 # ---------------------------------------------------------------------------
-# 5) Bash profile + starship + fastfetch config
+# 5) Bash profile + fastfetch config
 # ---------------------------------------------------------------------------
 step "Shell profile"
 deploy_file "files/bashrc"                 "$HOME/.bashrc"     0644
-deploy_file "files/starship.toml"          "$STARSHIP_PATH"    0644
 deploy_file "files/fastfetch-config.jsonc" "$FASTFETCH_PATH"   0644
 ok "$(short_path "$HOME/.bashrc")"
-ok "$(short_path "$STARSHIP_PATH")"
 ok "$(short_path "$FASTFETCH_PATH")"
 
 # ---------------------------------------------------------------------------
@@ -247,7 +244,7 @@ ok "$(short_path "$FASTFETCH_PATH")"
 # syntax highlighting). It is intentionally dropped now: ble.sh logs a noisy
 # `locale 'C' seems broken` warning on every shell start because Termux/Bionic
 # ships no `locale` command for it to probe (termux-packages#546), and the
-# combo starship + fzf history search is enough for our use. Sweep any
+# combo custom prompt + fzf history search is enough for our use. Sweep any
 # leftover install + blerc so the warning disappears on next shell start.
 step "ble.sh cleanup (if previously installed)"
 BLESH_DIR="$HOME/.local/share/blesh"
@@ -356,7 +353,7 @@ printf '    %s2.%s  Connect:  %smosh <host>%s     (resilient over flaky 4G/5G)\n
 printf '    %s3.%s  Inside the remote shell:  %stmux new -A -s main%s\n\n' "$_dim" "$_reset" "$_dim" "$_reset"
 printf '  Docs: %shttps://github.com/ahmed-mili/dev-environment%s\n\n' "$_dim" "$_reset"
 
-# Auto-reload the shell so the user gets the new look + starship
+# Auto-reload the shell so the user gets the new look
 # immediately, no `source ~/.bashrc` to remember. exec replaces this script
 # process with a fresh interactive login bash — when the user types `exit`
 # they go back to whatever shell launched the bootstrap (or Termux closes).
