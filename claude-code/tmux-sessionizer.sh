@@ -22,7 +22,9 @@
 # est ~7,5× plus rapide que via /mnt/c depuis WSL (cf. mémoire
 # feedback_claude-side-matches-filesystem) -> on ouvre un PowerShell natif, pas bash :
 #   - desktop (F2)  : nouvel onglet Windows Terminal (`wt.exe -w 0 nt`, pwsh natif)
-#   - tél (pc/ssh)  : `pwsh.exe` dans un pane tmux (seul affichage joignable à distance)
+#   - tél (pc/ssh)  : ce menu ne peut PAS l'ouvrir (hop WSL→Windows cassé par un bug WSL
+#                     mirrored) -> rappel d'utiliser la commande `vault` (ssh direct du tél
+#                     vers le sshd Windows). Cf. plan vault-native-pwsh-ssh.
 # Détection via SSH_CONNECTION (is_remote). L'user tape `claude` (sa config PowerShell).
 #
 # Hooks de debug (sans effet en usage normal) :
@@ -150,6 +152,25 @@ else
       --bind "load:pos($cursor0)"
       --bind "down:transform:[ -z {q} ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac"
       --bind "up:transform:[ -z {q} ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac"
+      # Souris : OUVERTURE au DOUBLE-clic ; le SIMPLE clic sert de « survol » (le hover
+      # est impossible dans fzf — pas de tracking « all-motion » 1003) : il place le
+      # curseur ▌ sur la ligne SANS ouvrir, on confirme au 2e clic.
+      #
+      # fzf place le curseur sur la ligne cliquée (t.vset) AVANT de lancer l'action
+      # left-click / double-click (terminal.go:7848 et :7836) → \$FZF_POS = ligne cliquée.
+      # Donc :
+      #  - left-click sur un TITRE « ◆ … » ($seps) → on REBONDIT d'un cran (echo down)
+      #    vers le 1er item de la section (un titre est toujours suivi d'≥1 item) : le
+      #    curseur ne se pose JAMAIS sur un titre au clic, comme avec les flèches. C'est
+      #    CE bind qui rend les titres non-sélectionnables. Sur un item → ignore (déjà
+      #    positionné par t.vset).
+      #  - double-click sur un item → accept (ouvre) ; sur un titre → REBOND (down) lui
+      #    aussi, jamais d'ouverture : ainsi AUCUNE action souris ne laisse le curseur
+      #    sur un titre (le 2e clic re-vset sur le titre, le down le ré-éjecte).
+      # Binder left-click NE casse PAS le double-clic : chemins distincts (7833 vs 7842).
+      # Filtre tapé ({q} non vide) : titres filtrés hors-liste → pas de test de position.
+      --bind "left-click:transform:[ -n {q} ] && echo ignore || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo ignore;; esac; }"
+      --bind "double-click:transform:[ -n {q} ] && echo accept || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo accept;; esac; }"
     )
     if (( n_proj && n_vault )); then
       nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
@@ -235,8 +256,7 @@ attach_session() {  # $1 = nom de session
 # (attach-or-create) en une fois. Dans tmux : on ne peut pas attach → créer détaché
 # (idempotent : `|| true` si la session existe déjà) puis `switch-client`.
 # $3 = commande optionnelle lancée dans la session (string passée à sh -c par tmux) ;
-# absente -> tmux ouvre le shell par défaut (bash interactif). Sert au vault distant
-# qui lance `pwsh.exe` au lieu du shell.
+# absente -> tmux ouvre le shell par défaut (bash interactif).
 create_session() {  # $1 = nom   $2 = dossier   $3 = commande (optionnel)
   if [[ -n "${TMUX:-}" ]]; then
     step tmux new-session -d -s "$1" -c "$2" ${3:+"$3"} || true
@@ -269,7 +289,15 @@ open_wt_pwsh() {  # $1 = dossier WSL du vault
 case "$key" in
   ctrl-x)
     if [[ "$type" == "active" ]]; then
-      printf "Kill session '%s'? [y/N] " "$name" >&2
+      # kill ≠ delete : une session-PROJET / vault SURVIT au kill (repasse en ○ inactif,
+      # garde sa place dans le menu) car son dossier ancre encore la ligne ○ ; une session
+      # JETABLE (nom libre, aucun dossier) DISPARAÎT du menu — rien où ancrer un ○. Le
+      # prompt précise lequel des deux cas s'applique, pour éviter la surprise de la 1re.
+      if in_list "$name" "${projects[@]}" || in_list "$name" "${vaults[@]}"; then
+        printf "Kill '%s'? Stays listed as ○ inactive. [y/N] " "$name" >&2
+      else
+        printf "Kill '%s'? Disposable — disappears from the list. [y/N] " "$name" >&2
+      fi
       # Échap (ou réponse ≠ y) -> pas de kill ; on rafraîchit juste le menu.
       if read_or_cancel && [[ "$REPLY_OC" == [yY]* ]]; then
         step tmux kill-session -t "$name"
@@ -303,11 +331,23 @@ case "$type" in
     create_session "$name" "$DEV_DIR/$name"
     ;;
   vault)
-    # Vault Obsidian = sur C: (NTFS) → on veut du PowerShell natif Windows.
+    # Vault Obsidian = sur C: (NTFS) → PowerShell natif Windows (I/O natif, cf. mémoire
+    # feedback_claude-side-matches-filesystem).
     #   desktop (F2)  : onglet Windows Terminal natif (GUI visible localement)
-    #   tél (pc/ssh)  : pwsh dans un pane tmux (seul affichage joignable à distance)
-    if is_remote; then create_session "$name" "$VAULTS_DIR/$name" "pwsh.exe -NoLogo"
-    else               open_wt_pwsh "$VAULTS_DIR/$name"; fi
+    #   tél (pc/ssh)  : le sessionizer tourne dans WSL, et le hop WSL→Windows est CASSÉ par
+    #     un bug WSL mirrored (127.0.0.1 détourné vers loopback0, handshake échoue) → ce menu
+    #     ne peut PAS ouvrir un vault en pwsh natif. Le tél utilise à la place la commande
+    #     `vault` (ssh DIRECT du tél vers le sshd Windows, port 2222 Tailscale). Cf.
+    #     docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md + mémoire
+    #     reference_ssh-wsl-no-interop. On affiche donc juste un rappel.
+    if is_remote; then
+      printf 'Open a vault from the phone with the `vault` command (ssh direct to the\nWindows pwsh) — not this menu: the WSL->Windows hop is broken by a WSL\nmirrored-networking bug. E.g.:  vault %s\nPress a key…' "$name" >&2
+      [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0
+      read -rsn1 </dev/tty 2>/dev/null || true
+      exec "$0"
+    else
+      open_wt_pwsh "$VAULTS_DIR/$name"
+    fi
     ;;
   new)
     if [[ -z "$name" ]]; then
