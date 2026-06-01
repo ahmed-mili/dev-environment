@@ -161,16 +161,16 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 #              MAIS pas de scroll au doigt (mosh n'achemine pas la souris ;
 #              swipe = arrow keys ; scroll = touches PGUP/PGDN extra-keys).
 #   sleep-pc : met le desktop en veille (SetSuspendState via rundll32).
-#   vault    : ouvre un vault Obsidian (sur C:) dans pwsh NATIF Windows, via le
-#              serveur OpenSSH de Windows (port 2222, Tailscale). `vault` seul =
-#              Obsidian ; `vault Troubleshooting` pour l'autre. Pas de menu fzf ni
-#              de persistance tmux ici : le hop WSL->Windows etant casse par un bug
-#              WSL mirrored, on ssh DIRECT du tel vers le sshd Windows.
+#   obs/obsm : MEME menu que pc/pcm mais filtre sur les VAULTS Obsidian uniquement
+#              (PC_VIEW=vaults). pc/pcm montrent tout SAUF les vaults (PC_VIEW=main).
+#   vault    : ouvre un vault directement par son nom, sans menu (`vault Obsidian`).
+#              pwsh NATIF Windows via le serveur OpenSSH de Windows (port 2222,
+#              Tailscale). Pas de persistance tmux : le hop WSL->Windows etant casse
+#              par un bug WSL mirrored, on ssh DIRECT du tel vers le sshd Windows.
 #
-# pc / pcm ouvrent un MENU fzf de sessions tmux (sessionizer) sur le desktop :
-#   * sessions actives -> on rattache   o projets ~/dev -> on cree   + nom libre
-# Le script vit dans le repo (versionne, donc present aussi sur le laptop) et est
-# appele par chemin. Fonctions (pas alias) pour gerer l'expansion de ~ avec mosh.
+# pc/pcm (sessions+projets) et obs/obsm (vaults) ouvrent le MEME menu fzf (sessionizer)
+# sur le desktop, avec un perimetre different (var PC_VIEW). Le script vit dans le repo
+# (versionne). Fonctions (pas alias) pour gerer l'expansion de ~ avec mosh.
 # Choisir un VAULT dans le menu : le sessionizer (dans WSL) ne peut pas joindre Windows,
 # il depose le nom et sort avec le code 42 -> _pc_open_vault recupere le nom et lance
 # `vault <nom>` ICI (ssh direct tel->Windows) => le vault s'ouvre tout seul, sans rien taper.
@@ -183,8 +183,11 @@ _pc_open_vault() {
 }
 # LogLevel=ERROR : tait le « Connection to desktop closed. » + le WARNING post-quantum
 # (messages ssh de niveau INFO) — sans masquer les vraies erreurs (auth, hôte injoignable).
-pc()  { ssh -t -o LogLevel=ERROR desktop "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; [ $? -eq 42 ] && _pc_open_vault; }
-pcm() { mosh desktop -- bash -c "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; [ $? -eq 42 ] && _pc_open_vault; }
+_pc_sess="~/dev/dev-environment/claude-code/tmux-sessionizer.sh"
+pc()   { ssh -t -o LogLevel=ERROR desktop "PC_VIEW=main   $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
+pcm()  { mosh desktop -- bash -c           "PC_VIEW=main   $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
+obs()  { ssh -t -o LogLevel=ERROR desktop "PC_VIEW=vaults $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
+obsm() { mosh desktop -- bash -c           "PC_VIEW=vaults $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
 alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,SetSuspendState 0,1,0"'
 
 # vault : pwsh NATIF dans un vault Obsidian (sur C:). Le hop WSL->Windows etant casse
