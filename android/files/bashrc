@@ -175,11 +175,16 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 # il depose le nom et sort avec le code 42 -> _pc_open_vault recupere le nom et lance
 # `vault <nom>` ICI (ssh direct tel->Windows) => le vault s'ouvre tout seul, sans rien taper.
 _pc_open_vault() {
-  local v; v=$(ssh desktop 'f="$HOME/.cache/pc-vault-request"; [ -f "$f" ] && cat "$f"; rm -f "$f" 2>/dev/null')
-  [ -n "$v" ] && vault "$v"
+  local v; v=$(ssh -o LogLevel=ERROR desktop 'f="$HOME/.cache/pc-vault-request"; [ -f "$f" ] && cat "$f"; rm -f "$f" 2>/dev/null')
+  [ -n "$v" ] || return 0
+  clear 2>/dev/null
+  printf '\033[2m→ ouverture du vault %s…\033[0m\n' "$v"   # feedback pendant la connexion
+  vault "$v"
 }
-pc()  { ssh -t desktop  "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; [ $? -eq 42 ] && _pc_open_vault; }
-pcm() { mosh   desktop -- bash -c "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; [ $? -eq 42 ] && _pc_open_vault; }
+# LogLevel=ERROR : tait le « Connection to desktop closed. » + le WARNING post-quantum
+# (messages ssh de niveau INFO) — sans masquer les vraies erreurs (auth, hôte injoignable).
+pc()  { ssh -t -o LogLevel=ERROR desktop "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; [ $? -eq 42 ] && _pc_open_vault; }
+pcm() { mosh desktop -- bash -c "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; [ $? -eq 42 ] && _pc_open_vault; }
 alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,SetSuspendState 0,1,0"'
 
 # vault : pwsh NATIF dans un vault Obsidian (sur C:). Le hop WSL->Windows etant casse
@@ -188,7 +193,7 @@ alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,S
 # Cf. docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md
 vault() {
   local v="${1:-Obsidian}"
-  ssh -t -o StrictHostKeyChecking=accept-new -p 2222 Ahmed@desktop \
+  ssh -t -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 Ahmed@desktop \
     "pwsh -NoLogo -WorkingDirectory C:\\obsidian-vaults\\$v"
 }
 
