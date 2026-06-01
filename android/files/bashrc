@@ -161,6 +161,11 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 #              MAIS pas de scroll au doigt (mosh n'achemine pas la souris ;
 #              swipe = arrow keys ; scroll = touches PGUP/PGDN extra-keys).
 #   sleep-pc : met le desktop en veille (SetSuspendState via rundll32).
+#   vault    : ouvre un vault Obsidian (sur C:) dans pwsh NATIF Windows, via le
+#              serveur OpenSSH de Windows (port 2222, Tailscale). `vault` seul =
+#              Obsidian ; `vault Troubleshooting` pour l'autre. Pas de menu fzf ni
+#              de persistance tmux ici : le hop WSL->Windows etant casse par un bug
+#              WSL mirrored, on ssh DIRECT du tel vers le sshd Windows.
 #
 # pc / pcm ouvrent un MENU fzf de sessions tmux (sessionizer) sur le desktop :
 #   * sessions actives -> on rattache   o projets ~/dev -> on cree   + nom libre
@@ -169,6 +174,16 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 pc()  { ssh -t desktop  "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; }
 pcm() { mosh   desktop -- bash -c "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; }
 alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,SetSuspendState 0,1,0"'
+
+# vault : pwsh NATIF dans un vault Obsidian (sur C:). Le hop WSL->Windows etant casse
+# par un bug WSL mirrored (127.0.0.1 detourne vers loopback0, handshake echoue), on ssh
+# DIRECT du tel vers le sshd Windows (port 2222, cle du tel autorisee cote Windows).
+# Cf. docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md
+vault() {
+  local v="${1:-Obsidian}"
+  ssh -t -o StrictHostKeyChecking=accept-new -p 2222 Ahmed@desktop \
+    "pwsh -NoLogo -WorkingDirectory C:\\obsidian-vaults\\$v"
+}
 
 # ---- Local overrides — keep machine-specific tweaks out of git ----
 [ -f "$HOME/.bashrc.local" ] && source "$HOME/.bashrc.local"

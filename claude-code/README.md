@@ -183,6 +183,38 @@ ssh phone 'termux-reload-settings'
 
 Rollback: `ssh phone 'cp ~/.termux/font.ttf.bak ~/.termux/font.ttf && termux-reload-settings'`. Re-run the patch if a Termux font update overwrites it.
 
+## Sessionizer (`pc` / `pcm` / F2)
+
+`tmux-sessionizer.sh` is the shared fzf menu that merges, in one list: `●` **active** tmux sessions (attach), `○` **`~/dev` projects** with no session (create one in the folder), `○` **Obsidian vaults** in violet (native PowerShell), and **new** ad-hoc sessions (Ctrl+N). Reached three ways: **F2** in a desktop WSL shell, `pc` (SSH) or `pcm` (mosh) from the phone.
+
+> **Opening a vault from the phone: use the `vault` command, not this menu.** A vault lives on `C:`, so it opens in native Windows PowerShell. On the desktop (F2) that's a new Windows Terminal tab. From the phone it **can't** go through this menu: the sessionizer runs in WSL, and the **WSL→Windows hop is broken by a WSL mirrored-networking bug** — `127.0.0.1` is policy-routed to `loopback0` and the host handshake times out (confirmed across *all* Windows ports; `LoopbackEnabled=True` + `wsl --shutdown` does **not** fix it). Instead, a `vault [name]` function on the phone (in `android/files/bashrc`) does `ssh` **directly** to the **Windows OpenSSH server** (port 2222, bound to localhost + the Tailscale IP, key-only) and lands you in native `pwsh` in the vault folder — e.g. `vault Obsidian`. Trade-off vs. the menu: no tmux persistence and no fzf list for vaults. One-time Windows setup (OpenSSH Server, keys, firewall, `LoopbackEnabled`): see `docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md`.
+
+| Key | Action |
+|---|---|
+| ⏎ | open / attach |
+| ↹ Tab | switch category (projects ⇄ vaults) |
+| Ctrl+N | new session (free name) |
+| Ctrl+R | rename the active session |
+| Ctrl+X | kill the active session (see below) |
+| Ctrl+G | toggle the help header |
+| Esc | cancel a Ctrl+N/R/X prompt typed by mistake |
+| Click / tap | move the `▌` cursor to that line (visual feedback, does **not** open) |
+| Double-click / double-tap | open the item under the pointer (titles stay inert) |
+
+> **Mouse** works over `pc` (ssh) and F2 (desktop) only — `pcm` (mosh) doesn't route the mouse, so taps never reach fzf. There is **no hover highlight**: fzf tracks clicks and scroll (terminal mouse modes 1000/1002), not bare cursor motion (1003), so it gets no event until you actually click. Opening is on the **second** click *because* there's no hover — the first click moves the `▌` cursor onto the line (your "look before you leap"), the second confirms. **`◆` titles are never selectable by mouse**: clicking one bounces the cursor to its section's first item (fzf positions the cursor on the clicked line *before* the bound action — `terminal.go:7848` — so the bind can detect a title via `$FZF_POS` and step off it), and a double-click on a title is ignored.
+
+### Ctrl+X: kill ≠ delete
+
+`Ctrl+X` runs `tmux kill-session` — it ends the **running process** (the live shell / `claude`), never any file on disk. What happens to the **menu row** depends on whether a folder backs it:
+
+| Session killed | Menu row after kill | Why |
+|---|---|---|
+| 🟢 `~/dev` **project** | ✅ stays, flips to `○` **inactive** | the project folder still exists to anchor the `○` row |
+| 🟣 **Obsidian vault** | ✅ stays, flips to `○` **inactive** | same — the vault folder still exists |
+| ⚪ **disposable** (free name, no folder) | ❌ **disappears entirely** | a `○` row means "folder exists, no session"; a disposable session has no folder, so nothing is left to list |
+
+A "real" session is therefore **never lost** from the list — `Ctrl+X` just deactivates it (`●` → `○`), and you re-enter it later (`claude --resume` recovers the transcript). Only a truly disposable session vanishes, which is the whole point of "disposable". The confirm prompt states which case applies before you commit (`Kill 'x'? Stays listed as ○ inactive.` vs `… Disposable — disappears from the list.`).
+
 ## Statusline — technical details
 
 Private Claude Code endpoint for live usage:
