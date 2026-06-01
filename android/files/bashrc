@@ -150,51 +150,51 @@ fi
 # ---- Termux-specific: refresh PATH for ~/.local/bin and npm-global ----
 export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 
-# ---- Connexion au desktop (Tailscale, host alias `desktop` dans ~/.ssh/config) ----
+# ---- Desktop connection (Tailscale, host alias `desktop` in ~/.ssh/config) ----
 #
-# On partitionne l'acces au desktop par MONDE (cote du filesystem / ou ca tourne le mieux) :
-#   wsl/wslm   : monde Linux/ext4 — MENU des sessions tmux + projets ~/dev (SANS les vaults).
-#                wsl = ssh (defaut, scroll au doigt OK si connexion stable) ; wslm = mosh
-#                (robuste a la coupure reseau Wi-Fi<->4G/ecran eteint, mais pas de scroll souris).
-#                Si la connexion coupe : relancer, et `/resume` dans Claude reprend la session
-#                (elle tourne dans le tmux du desktop, survit aux deconnexions cote tel).
-#   pwsh/pwshm : monde Windows/C: en PowerShell NATIF — MEME menu, filtre sur les vaults
-#                Obsidian (extensible a tout dossier C: mieux en pwsh). pwsh=ssh, pwshm=mosh.
-#   vault      : ouvre un vault directement par son nom, sans menu (`vault Obsidian`).
-#   sleep-pc   : met le desktop en veille (SetSuspendState via rundll32).
-#   pc/pcm/obs/obsm : alias de compat (ancienne nomenclature) -> wsl/wslm/pwsh/pwshm.
+# We partition desktop access by WORLD (which side of the filesystem / where it runs best):
+#   wsl/wslm   : Linux/ext4 world — MENU of tmux sessions + ~/dev projects (NO vaults).
+#                wsl = ssh (default, finger-scroll OK on a stable link); wslm = mosh
+#                (robust to network drops Wi-Fi<->4G/screen off, but no mouse scroll).
+#                If the link drops: relaunch, and `/resume` in Claude resumes the session
+#                (it runs in the desktop tmux, survives phone-side disconnects).
+#   pwsh/pwshm : Windows/C: world in NATIVE PowerShell — SAME menu, filtered to Obsidian
+#                vaults (extensible to any C: folder better in pwsh). pwsh=ssh, pwshm=mosh.
+#   vault      : open a vault directly by name, no menu (`vault Obsidian`).
+#   sleep-pc   : put the desktop to sleep (SetSuspendState via rundll32).
+#   pc/pcm/obs/obsm : compat aliases (old naming) -> wsl/wslm/pwsh/pwshm.
 #
-# wsl/wslm (PC_VIEW=wsl) et pwsh/pwshm (PC_VIEW=ps) ouvrent le MEME menu fzf (sessionizer)
-# sur le desktop, perimetre different (var PC_VIEW). Script versionne dans le repo. Fonctions
-# (pas alias) pour gerer l'expansion de ~ avec mosh. NB : la fonction `pwsh` n'entre PAS en
-# conflit avec le pwsh distant — celui-ci est dans la chaine envoyee a ssh, execute cote Windows.
-# Choisir un VAULT dans le menu : le sessionizer (dans WSL) ne peut pas joindre Windows,
-# il depose le nom et sort avec le code 42 -> _pc_open_vault recupere le nom et lance
-# `vault <nom>` ICI (ssh direct tel->Windows) => le vault s'ouvre tout seul, sans rien taper.
+# wsl/wslm (PC_VIEW=wsl) and pwsh/pwshm (PC_VIEW=ps) open the SAME fzf menu (sessionizer)
+# on the desktop, different perimeter (PC_VIEW var). Script versioned in the repo. Functions
+# (not aliases) to handle ~ expansion with mosh. NB: the `pwsh` function does NOT clash with
+# the remote pwsh — the latter lives in the string sent to ssh, run on Windows.
+# Picking a VAULT in the menu: the sessionizer (in WSL) can't reach Windows, so it records
+# the name and exits with code 42 -> _pc_open_vault reads the name and runs
+# `vault <name>` HERE (direct ssh phone->Windows) => the vault opens on its own, no typing.
 _pc_open_vault() {
   local v; v=$(ssh -o LogLevel=ERROR desktop 'f="$HOME/.cache/pc-vault-request"; [ -f "$f" ] && cat "$f"; rm -f "$f" 2>/dev/null')
   [ -n "$v" ] || return 0
   clear 2>/dev/null
-  printf '\033[2m→ ouverture du vault %s…\033[0m\n' "$v"   # feedback pendant la connexion
+  printf '\033[2m→ opening vault %s…\033[0m\n' "$v"   # feedback while the ssh connects
   vault "$v"
 }
-# LogLevel=ERROR : tait le « Connection to desktop closed. » + le WARNING post-quantum
-# (messages ssh de niveau INFO) — sans masquer les vraies erreurs (auth, hôte injoignable).
+# LogLevel=ERROR: silences « Connection to desktop closed. » + the post-quantum WARNING
+# (INFO-level ssh messages) — without hiding real errors (auth, unreachable host).
 _pc_sess="~/dev/dev-environment/claude-code/tmux-sessionizer.sh"
 wsl()   { ssh -t -o LogLevel=ERROR desktop "PC_VIEW=wsl $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
 wslm()  { mosh desktop -- bash -c          "PC_VIEW=wsl $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
 pwsh()  { ssh -t -o LogLevel=ERROR desktop "PC_VIEW=ps  $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
 pwshm() { mosh desktop -- bash -c          "PC_VIEW=ps  $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
-# Compat ancienne nomenclature (muscle memory)
+# Compat with the old naming (muscle memory)
 pc()  { wsl;  }
 pcm() { wslm; }
 obs()  { pwsh;  }
 obsm() { pwshm; }
 alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,SetSuspendState 0,1,0"'
 
-# vault : pwsh NATIF dans un vault Obsidian (sur C:). Le hop WSL->Windows etant casse
-# par un bug WSL mirrored (127.0.0.1 detourne vers loopback0, handshake echoue), on ssh
-# DIRECT du tel vers le sshd Windows (port 2222, cle du tel autorisee cote Windows).
+# vault: NATIVE pwsh in an Obsidian vault (on C:). The WSL->Windows hop being broken
+# by a WSL mirrored bug (127.0.0.1 routed to loopback0, handshake times out), we ssh
+# DIRECTLY from the phone to the Windows sshd (port 2222, phone key authorized on Windows).
 # Cf. docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md
 vault() {
   local v="${1:-Obsidian}"
