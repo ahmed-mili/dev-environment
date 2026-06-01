@@ -171,8 +171,15 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 #   * sessions actives -> on rattache   o projets ~/dev -> on cree   + nom libre
 # Le script vit dans le repo (versionne, donc present aussi sur le laptop) et est
 # appele par chemin. Fonctions (pas alias) pour gerer l'expansion de ~ avec mosh.
-pc()  { ssh -t desktop  "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; }
-pcm() { mosh   desktop -- bash -c "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; }
+# Choisir un VAULT dans le menu : le sessionizer (dans WSL) ne peut pas joindre Windows,
+# il depose le nom et sort avec le code 42 -> _pc_open_vault recupere le nom et lance
+# `vault <nom>` ICI (ssh direct tel->Windows) => le vault s'ouvre tout seul, sans rien taper.
+_pc_open_vault() {
+  local v; v=$(ssh desktop 'f="$HOME/.cache/pc-vault-request"; [ -f "$f" ] && cat "$f"; rm -f "$f" 2>/dev/null')
+  [ -n "$v" ] && vault "$v"
+}
+pc()  { ssh -t desktop  "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; [ $? -eq 42 ] && _pc_open_vault; }
+pcm() { mosh   desktop -- bash -c "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"; [ $? -eq 42 ] && _pc_open_vault; }
 alias sleep-pc='ssh desktop "/mnt/c/Windows/System32/rundll32.exe powrprof.dll,SetSuspendState 0,1,0"'
 
 # vault : pwsh NATIF dans un vault Obsidian (sur C:). Le hop WSL->Windows etant casse
