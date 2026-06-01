@@ -53,15 +53,17 @@ mapfile -t projects < <(find "$DEV_DIR" -mindepth 1 -maxdepth 1 -type d -printf 
 vaults=()
 mapfile -t vaults < <(find "$VAULTS_DIR" -mindepth 1 -maxdepth 1 -type d -exec test -d '{}/.obsidian' ';' -printf '%f\n' 2>/dev/null | sort || true)
 
-# VUE (PC_VIEW) — même menu, périmètre différent, posé par les fonctions du tél :
-#   all    (défaut, F2 desktop) : tout — sessions + projets + vaults
-#   main   (`pc`)               : tout SAUF les vaults (sessions + projets)
-#   vaults (`obs`)              : UNIQUEMENT les vaults Obsidian
+# VUE (PC_VIEW) — même menu, périmètre différent, posé par les fonctions du tél.
+# On partitionne par MONDE (côté du filesystem / où ça tourne le mieux), pas par type :
+#   all (défaut, F2 desktop) : tout — sessions + projets + vaults
+#   wsl (`wsl`, ex-`pc`)     : monde Linux/ext4 — sessions tmux + projets ~/dev, SANS vaults
+#   ps  (`pwsh`, ex-`obs`)   : monde Windows/C: en pwsh natif — vaults Obsidian (extensible
+#                              à tout dossier C: mieux en PowerShell). Aucun n'est une session tmux.
 # On élague les tableaux ICI, en amont du calcul des positions/sections → tout le
 # reste (navigation fzf, build_menu, dispatch) marche sans aucune autre modif.
 case "${PC_VIEW:-all}" in
-  main)   vaults=() ;;                  # pc  : pas de vaults
-  vaults) actives=(); projects=() ;;    # obs : que les vaults (aucun n'est une session tmux)
+  wsl) vaults=() ;;                  # wsl : pas de vaults
+  ps)  actives=(); projects=() ;;   # ps  : que les trucs C: (aucun n'est une session tmux)
 esac
 
 # couleurs ANSI (interprétées par fzf --ansi)
