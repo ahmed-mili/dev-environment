@@ -11,6 +11,11 @@ mouse_mode true              // scroll molette + clic panes/tabs
 scroll_buffer_size 50000     // gros scrollback (comme ton history-limit tmux)
 pane_frames false            // épure, comme ton tmux minimaliste
 
+// WINDOWS uniquement : sans ça, Zellij ouvre le pane dans cmd.exe (shell Windows
+// par défaut). On force PowerShell 7. pwsh est un App Execution Alias (Store/winget)
+// résolu par nom via le PATH. NE PAS mettre cette ligne côté WSL (bash y est correct).
+// default_shell "pwsh"
+
 // copy_on_select : true par DÉFAUT chez Zellij -> la copie-à-la-sélection que tu aimes.
 // Copie : OSC52 par défaut (validé au POC, marche via SSH/tél) -> PAS de copy_command,
 //   sinon Zellij copierait en local au lieu de transmettre au terminal client (le tél).
