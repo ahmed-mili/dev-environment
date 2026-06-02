@@ -194,15 +194,20 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 # the name and exits with code 42 -> _pc_open_vault reads the name and opens the vault HERE
 # (direct ssh phone->Windows, native pwsh) => the vault opens on its own, no typing.
 _pc_open_vault() {
-  local v; v=$(ssh -o LogLevel=ERROR desktop 'f="$HOME/.cache/pc-vault-request"; [ -f "$f" ] && cat "$f"; rm -f "$f" 2>/dev/null')
+  local v; v=$(ssh -o ConnectTimeout=8 -o LogLevel=ERROR desktop 'f="$HOME/.cache/pc-vault-request"; [ -f "$f" ] && cat "$f"; rm -f "$f" 2>/dev/null')
   [ -n "$v" ] || return 0
   [ -n "${WIN_USER:-}" ] || { echo "set WIN_USER in ~/.bashrc.local to open vaults" >&2; return 1; }
   clear 2>/dev/null
   printf '\033[2m→ opening vault %s…\033[0m\n' "$v"   # feedback while the ssh connects
   # Open in NATIVE Windows pwsh via the Windows sshd (port 2222) — the WSL->Windows hop is
   # broken (mirrored bug), so we ssh straight from the phone. $WIN_USER (~/.bashrc.local).
-  ssh -t -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
+  # ConnectTimeout=8 : si le sshd Windows (:2222) est down, on echoue vite (~8s) avec un
+  # message clair, au lieu de figer sur « opening vault… » (sans ConnectTimeout, ssh pend
+  # ~2min sur le timeout TCP par defaut). ssh renvoie 255 sur ECHEC DE CONNEXION
+  # uniquement (une sortie normale de pwsh/claude renvoie son propre code, pas 255).
+  ssh -t -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
     "pwsh -NoLogo -WorkingDirectory C:\\obsidian-vaults\\$v"
+  [ $? -eq 255 ] && printf '\033[33m⚠ sshd Windows (:2222) injoignable — reveille le desktop, ou au desktop: Restart-Service sshd. En attendant: `wsl`.\033[0m\n' >&2
 }
 # LogLevel=ERROR: silences « Connection to desktop closed. » + the post-quantum WARNING
 # (INFO-level ssh messages) — without hiding real errors (auth, unreachable host).
@@ -216,7 +221,7 @@ pwshm() { mosh desktop -- bash -c          "PC_VIEW=ps  $_pc_sess"; [ $? -eq 42 
 # Needs $WIN_USER (~/.bashrc.local), like vaults.
 _win_run() {
   [ -n "${WIN_USER:-}" ] || { echo "set WIN_USER in ~/.bashrc.local — e.g. export WIN_USER=<account>" >&2; return 1; }
-  ssh -p 2222 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR "${WIN_USER}@desktop" "$@"
+  ssh -p 2222 -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR "${WIN_USER}@desktop" "$@"
 }
 sleep-pc() { _win_run "rundll32.exe powrprof.dll,SetSuspendState 0,1,0"; }   # suspend (sleep)
 stop-pc()  { _win_run "shutdown /s /t 0"; }                                  # full shutdown
