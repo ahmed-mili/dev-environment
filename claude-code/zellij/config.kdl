@@ -12,9 +12,13 @@ scroll_buffer_size 50000     // gros scrollback (comme ton history-limit tmux)
 pane_frames false            // épure, comme ton tmux minimaliste
 
 // WINDOWS uniquement : sans ça, Zellij ouvre le pane dans cmd.exe (shell Windows
-// par défaut). On force PowerShell 7. pwsh est un App Execution Alias (Store/winget)
-// résolu par nom via le PATH. NE PAS mettre cette ligne côté WSL (bash y est correct).
-// default_shell "pwsh"
+// par défaut). On force PowerShell 7. NE PAS mettre cette ligne côté WSL (bash OK).
+// ⚠ PIÈGE : `default_shell "pwsh"` NE MARCHE PAS — pwsh est un App Execution Alias
+// (stub WindowsApps de 2 octets) que Zellij n'arrive pas à spawn → "program not
+// found" → pane sans shell → écran vide. Il faut le CHEMIN RÉEL du binaire :
+//   default_shell "C:/Program Files/WindowsApps/Microsoft.PowerShell_<VER>_x64__8wekyb3d8bbwe/pwsh.exe"
+// Le <VER> change à chaque update de PowerShell → re-résoudre avec, en pwsh :
+//   (Get-Command pwsh).Source     # puis remettre le chemin dans %APPDATA%\zellij\config\config.kdl
 
 // copy_on_select : true par DÉFAUT chez Zellij -> la copie-à-la-sélection que tu aimes.
 // Copie : OSC52 par défaut (validé au POC, marche via SSH/tél) -> PAS de copy_command,
