@@ -62,7 +62,7 @@ It syncs only what is platform-independent: `keybindings.json`, `tmux.conf` (dep
 
 ### One-time bashrc snippet (not auto-synced)
 
-Claude Code downgrades to 256-color whenever it sees `$TMUX` (it ignores `COLORTERM` and `FORCE_COLOR` in that case). A small wrapper in `~/.bashrc` makes `claude` always launch without `TMUX`, so it emits real 24-bit again — `tmux.conf` then forwards it untouched. Add this once on a fresh WSL machine:
+Claude Code downgrades to 256-color whenever it sees `$TMUX` (it ignores `COLORTERM` and `FORCE_COLOR` in that case). A small wrapper in `~/.bashrc` makes `claude` always launch without `TMUX`, so it emits real 24-bit again — `tmux.conf` then forwards it untouched. **Zellij does not trigger this** (it sets `$ZELLIJ`, not `$TMUX`), so truecolor works out of the box there; the wrapper is kept anyway for when `claude` runs inside a real tmux (agent orchestrators, the `wdev` shortcut). Add this once on a fresh WSL machine:
 
 ```bash
 cat >> ~/.bashrc <<'EOF'
@@ -185,24 +185,25 @@ Rollback: `ssh phone 'cp ~/.termux/font.ttf.bak ~/.termux/font.ttf && termux-rel
 
 ## Sessionizer (`wsl` / `pwsh` / F2)
 
-`tmux-sessionizer.sh` is the shared fzf menu that merges, in one list: `●` **active** tmux sessions (attach), `○` **`~/dev` projects** with no session (create one in the folder), `○` **Obsidian vaults** in violet (native PowerShell), and **new** ad-hoc sessions (Ctrl+N). The **same** menu has three perimeters, driven by the `PC_VIEW` env var. The split is by **world** (which side of the filesystem / where it runs best), not by object type, so the two worlds never share a cluttered list:
+`tmux-sessionizer.sh` (kept name; it now drives **Zellij**, not tmux) is the shared fzf menu that merges, in one list: `●` **active** Zellij sessions (attach), `○` **`~/dev` projects** with no session (create one in the folder), `○` **Obsidian vaults** in violet (native PowerShell), and **new** ad-hoc sessions (Ctrl+N). The **same** menu has three perimeters, driven by the `PC_VIEW` env var. The split is by **world** (which side of the filesystem / where it runs best), not by object type, so the two worlds never share a cluttered list:
+
+> **Why Zellij, not tmux?** tmux has no native Windows build, and the only native-Windows tmux clone (psmux) was too buggy (laggy Claude TUI, Esc-blocked-after-Ctrl+letter, truecolor off). Zellij ships a native-Windows ConPTY binary (≥ 0.44) that runs `pwsh` natively (full-speed C: I/O) **with** detach/reattach. So one multiplexer covers both worlds: Zellij in WSL (projects) + Zellij on Windows (vaults). tmux stays installed as a dependency of agent orchestrators and a `0.x` fallback, but is no longer the daily mux. Active sessions are merged cross-OS: `zellij ls` for the WSL world, plus a read of the Windows Zellij IPC dir over `/mnt/c` for vaults (no interop needed).
 
 | Entry point | `PC_VIEW` | World — shows |
 |---|---|---|
-| `wsl` (SSH) / `wslm` (mosh) — phone | `wsl` | **Linux/ext4**: tmux sessions + `~/dev` projects (no vaults) |
-| `pwsh` (SSH) / `pwshm` (mosh) — phone | `ps` | **Windows/C: in native pwsh**: Obsidian vaults (extensible to any C: folder better in PowerShell) |
-| **F2** — desktop WSL shell | `all` (default) | everything (vaults open as Windows Terminal tabs via interop) |
+| `wsl` (SSH) / `wslm` (mosh) — phone | `wsl` | **Linux/ext4**: Zellij sessions + `~/dev` projects (no vaults) |
+| `pwsh` (SSH) / `pwshm` (mosh) — phone | `ps` | **Windows/C: in native pwsh**: Obsidian vaults as Zellij sessions (extensible to any C: folder better in PowerShell) |
+| **F2** — desktop WSL shell | `all` (default) | everything (vaults open as Windows Terminal tabs running `zellij attach -c` via interop) |
 
 `sleep-pc` suspends the desktop, `stop-pc` shuts it down — both run a native Windows command through the Windows sshd (port 2222) + `$WIN_USER` (the WSL ssh on port 22 has no Windows interop, so `rundll32`/`shutdown` can't run there).
 
-> **Picking a vault from the phone opens native Windows PowerShell — automatically.** A vault lives on `C:`, so it must run in native `pwsh`, but the phone's SSH-into-WSL session **can't reach Windows**: the **WSL→Windows hop is broken by a WSL mirrored-networking bug** — `127.0.0.1` is policy-routed to `loopback0` and the host handshake times out (confirmed across *all* Windows ports; `LoopbackEnabled=True` + `wsl --shutdown` does **not** fix it). So when you pick a vault in `pwsh`, the sessionizer (in WSL) just **records the name and exits with code 42**; the phone's `pwsh`/`wsl` function catches that and opens the vault **client-side** — an `ssh` **directly** from the phone to the **Windows OpenSSH server** (port 2222, bound to localhost + the Tailscale IP, key-only) into native `pwsh` in the vault folder. You pick in the menu, the vault just opens — nothing to type. (The phone-side `pwsh` *function* doesn't clash with the remote `pwsh` — the latter lives inside the ssh command string, run on Windows.) **Trade-off:** a phone-opened vault is **not** a tmux session, so it never shows as `●` active and has no detach/reattach — it's a fresh `pwsh` each time (the mirrored bug rules out clean tmux persistence). The Windows account for that ssh can't be derived from the phone, so it's read from **`$WIN_USER`** — set it in `~/.bashrc.local` (`export WIN_USER=<your Windows account>`), kept out of git so the versioned `bashrc` stays shareable. One-time Windows setup (OpenSSH Server, keys, firewall, `LoopbackEnabled`): see `docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md`.
+> **Picking a vault from the phone opens native Windows PowerShell — automatically.** A vault lives on `C:`, so it must run in native `pwsh`, but the phone's SSH-into-WSL session **can't reach Windows**: the **WSL→Windows hop is broken by a WSL mirrored-networking bug** — `127.0.0.1` is policy-routed to `loopback0` and the host handshake times out (confirmed across *all* Windows ports; `LoopbackEnabled=True` + `wsl --shutdown` does **not** fix it). So when you pick a vault in `pwsh`, the sessionizer (in WSL) just **records the name and exits with code 42**; the phone's `pwsh`/`wsl` function catches that and opens the vault **client-side** — an `ssh` **directly** from the phone to the **Windows OpenSSH server** (port 2222, bound to localhost + the Tailscale IP, key-only) into native `pwsh` in the vault folder. You pick in the menu, the vault just opens — nothing to type. The phone-side ssh now runs `zellij attach -c <vault>` in native `pwsh`, so **the vault is a persistent Zellij session** (`default_shell` → `pwsh` on Windows): it shows as `●` active in the menu and survives detach/reattach — type half a message in `claude`, detach, reopen from PC or phone, finish typing. This **replaces** the old "fresh `pwsh` each time" behaviour (the previous trade-off is gone). The Windows account for that ssh can't be derived from the phone, so it's read from **`$WIN_USER`** — set it in `~/.bashrc.local` (`export WIN_USER=<your Windows account>`), kept out of git so the versioned `bashrc` stays shareable. One-time Windows setup (OpenSSH Server, keys, firewall, `LoopbackEnabled`): see `docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md`.
 
 | Key | Action |
 |---|---|
 | ⏎ | open / attach |
 | ↹ Tab | switch category (projects ⇄ vaults) — F2 `all` view only; `wsl`/`pwsh` each show one world |
 | Ctrl+N | new session (free name) |
-| Ctrl+R | rename the active session |
 | Ctrl+X | kill the active session (see below) |
 | Ctrl+G | toggle the help header |
 | Esc | cancel a Ctrl+N/R/X prompt typed by mistake |
@@ -213,7 +214,7 @@ Rollback: `ssh phone 'cp ~/.termux/font.ttf.bak ~/.termux/font.ttf && termux-rel
 
 ### Ctrl+X: kill ≠ delete
 
-`Ctrl+X` runs `tmux kill-session` — it ends the **running process** (the live shell / `claude`), never any file on disk. What happens to the **menu row** depends on whether a folder backs it:
+`Ctrl+X` runs `zellij kill-session` — it ends the **running process** (the live shell / `claude`), never any file on disk. (Ctrl+R rename is disabled with Zellij: its CLI can't rename a detached session.) What happens to the **menu row** depends on whether a folder backs it:
 
 | Session killed | Menu row after kill | Why |
 |---|---|---|
