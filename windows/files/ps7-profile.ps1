@@ -90,10 +90,8 @@ if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction S
 
 # ---- Fastfetch splash (Windows logo + system info) ----
 # Uses the config at ~/.config/fastfetch/config.jsonc deployed by this bundle.
-# Runs only in interactive sessions to avoid polluting scripted/piped pwsh calls,
-# and is skipped inside Zellij ($env:ZELLIJ) — vault panes go straight to `claude`,
-# no slow WMI/fastfetch splash on every session.
-if ((-not [System.Console]::IsOutputRedirected) -and (-not $env:ZELLIJ) -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
+# Runs only in interactive sessions to avoid polluting scripted/piped pwsh calls.
+if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
     # Aggregate physical-memory info via WMI (portable across any Windows PC) and
     # expose as $env:FF_RAM so fastfetch's `command` module can echo it cheaply
     # instead of paying CIM cost on every fastfetch invocation.
