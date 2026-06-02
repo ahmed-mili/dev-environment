@@ -43,8 +43,22 @@ FZF="$HOME/.fzf/bin/fzf"
 [[ -x "$FZF" ]] || FZF="$(command -v fzf 2>/dev/null || true)"
 
 # --- collect -------------------------------------------------------------
-actives=()
-mapfile -t actives < <(tmux list-sessions -F '#{session_name}' 2>/dev/null | sort || true)
+# Zellij binary (WSL projects) + helpers to list active sessions per world.
+# WSL sessions: `zellij ls`. Windows (vault) sessions: read the IPC dir via
+# /mnt/c — the WSL binary can't talk to the Windows server (different OS), and
+# there's no interop over ssh. Glob contract_version_* for cross-version safety,
+# and the user glob /mnt/c/Users/* so nothing personal is hard-coded.
+ZJ="$(command -v zellij 2>/dev/null || echo "$HOME/.local/bin/zellij")"
+zj_actives_wsl() { "$ZJ" ls -ns 2>/dev/null | sort || true; }
+zj_actives_win() {
+  local base d
+  for base in /mnt/c/Users/*/AppData/Local/Temp/zellij; do
+    for d in "$base"/contract_version_*; do
+      [[ -d "$d" ]] && find "$d" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null
+    done
+  done | sort -u
+}
+actives=()   # filled per-view in the PC_VIEW case below
 
 projects=()
 mapfile -t projects < <(find "$DEV_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort || true)
@@ -63,8 +77,9 @@ mapfile -t vaults < <(find "$VAULTS_DIR" -mindepth 1 -maxdepth 1 -type d -exec t
 # We prune the arrays HERE, upstream of the position/section computation → everything
 # else (fzf navigation, build_menu, dispatch) works with no other change.
 case "${PC_VIEW:-all}" in
-  wsl) vaults=() ;;                  # wsl: no vaults
-  ps)  actives=(); projects=() ;;   # ps : only the C: things (none is a tmux session)
+  wsl) vaults=();   mapfile -t actives < <(zj_actives_wsl) ;;   # WSL world: projects + their Zellij sessions
+  ps)  projects=(); mapfile -t actives < <(zj_actives_win) ;;   # C: world: vaults + their (Windows) Zellij sessions
+  *)   mapfile -t actives < <( { zj_actives_wsl; zj_actives_win; } | sort -u ) ;;   # all (F2 desktop)
 esac
 
 # ANSI colors (interpreted by fzf --ansi)
@@ -259,25 +274,20 @@ read_or_cancel() {
   REPLY_OC="$first$rest"
 }
 
-# Join an ALREADY active session. Inside tmux, `attach` is forbidden (nesting) →
-# `switch-client`; outside tmux → `attach`.
+# Join an active session. A vault name is a Zellij session on the WINDOWS server,
+# unreachable from WSL → delegate (open_vault). Otherwise it's a WSL session → attach.
 attach_session() {  # $1 = session name
-  if [[ -n "${TMUX:-}" ]]; then run tmux switch-client  -t "$1"
-  else                          run tmux attach-session -t "$1"; fi
+  if in_list "$1" "${vaults[@]}"; then open_vault "$1"
+  else                                 run "$ZJ" attach "$1"; fi
 }
 
-# Create (or join if already there) a session in $2. Outside tmux: `new-session -A`
-# (attach-or-create) in one go. Inside tmux: we can't attach → create detached
-# (idempotent: `|| true` if the session already exists) then `switch-client`.
-# $3 = optional command run in the session (string passed to sh -c by tmux);
-# absent -> tmux opens the default shell (interactive bash).
-create_session() {  # $1 = name   $2 = folder   $3 = command (optional)
-  if [[ -n "${TMUX:-}" ]]; then
-    step tmux new-session -d -s "$1" -c "$2" ${3:+"$3"} || true
-    run  tmux switch-client -t "$1"
-  else
-    run tmux new-session -A -s "$1" -c "$2" ${3:+"$3"}
-  fi
+# Create (or join) a Zellij session named $1 in folder $2. `attach -c` is
+# attach-or-create in one go; a NEW session inherits the current cwd, so we cd
+# first. No command injected: Zellij opens the default shell, the user types
+# `claude` themselves (cf. the claude() wrapper in ~/.bashrc).
+create_session() {  # $1 = name   $2 = folder
+  step cd "$2"
+  run "$ZJ" attach -c "$1"
 }
 
 # is_remote: am I launched from the phone (via `wsl`/`pwsh` = `ssh -t desktop …`)
@@ -286,15 +296,31 @@ create_session() {  # $1 = name   $2 = folder   $3 = command (optional)
 # tab (desktop, GUI visible) vs delegating to `vault` (phone, only reachable display).
 is_remote() { [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]]; }
 
-# open_wt_pwsh: open a vault in a NEW Windows Terminal TAB (current window,
-# `-w 0 nt`), via the profile named « PowerShell » (`-p`) and NOT the raw exe.
-# `-p` applies the whole profile (title « PowerShell » + icon + colors + font);
-# passing `pwsh.exe` as the command gave a « pwsh.exe » tab with a generic icon.
-# `-d` forces the starting folder to the vault (Windows path via wslpath),
-# overriding the profile's startingDirectory. Native Windows process = native I/O
-# on C: (cf. memory feedback_claude-side-matches-filesystem); the user types `claude`.
-open_wt_pwsh() {  # $1 = WSL folder of the vault
-  run wt.exe -w 0 nt -p "PowerShell" -d "$(wslpath -w "$1")"
+# open_wt_zellij: desktop (F2) — open a NEW Windows Terminal tab (PowerShell
+# profile, `-p`, for the title/icon), `-d` set to the vault folder (Windows path
+# via wslpath), running `zellij attach -c <vault>` so the session lives natively
+# on Windows (native I/O on C:, cf. memory feedback_claude-side-matches-filesystem).
+open_wt_zellij() {  # $1 = vault name
+  run wt.exe -w 0 nt -p "PowerShell" -d "$(wslpath -w "$VAULTS_DIR/$1")" \
+      pwsh -NoProfile -NoExit -Command "zellij attach -c $1"
+}
+
+# open_vault: route a vault choice by where the menu runs.
+#   phone (ssh)  : the menu runs in WSL and WSL→Windows is broken (mirrored bug),
+#                  so we DELEGATE — record the name, exit 42; wsl()/pwsh() phone-side
+#                  catch 42 and ssh straight to the Windows sshd to `zellij attach`.
+#   desktop (F2) : new WT tab (open_wt_zellij). Cf. memories reference_ssh-wsl-no-interop
+#                  / reference_wsl-mirrored-loopback-broken.
+open_vault() {  # $1 = vault name
+  if is_remote; then
+    local req="${PC_VAULT_REQ:-$HOME/.cache/pc-vault-request}"
+    mkdir -p "$(dirname "$req")" 2>/dev/null || true
+    printf '%s\n' "$1" > "$req" 2>/dev/null || true
+    [[ -n "${PC_DRYRUN:-}" ]] && { echo "DRYRUN: open vault '$1' client-side (wrote \$req, would exit 42)"; exit 0; }
+    exit 42
+  else
+    open_wt_zellij "$1"
+  fi
 }
 
 # Keyboard meta-actions (--expect) on an ACTIVE session: Ctrl-X kill, Ctrl-R
@@ -314,7 +340,11 @@ case "$key" in
       fi
       # Esc (or any answer ≠ y) -> no kill; we just refresh the menu.
       if read_or_cancel && [[ "$REPLY_OC" == [yY]* ]]; then
-        step tmux kill-session -t "$name"
+        if in_list "$name" "${vaults[@]}"; then
+          printf "(killing a Windows vault session from here isn't supported yet)\n" >&2
+        else
+          step "$ZJ" kill-session "$name"
+        fi
       fi
     fi
     [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0   # no loop in test mode
@@ -325,7 +355,9 @@ case "$key" in
       printf "New name for '%s': " "$name" >&2
       # Esc (or empty name) -> no rename; we refresh the menu.
       if read_or_cancel && [[ -n "$REPLY_OC" ]]; then
-        step tmux rename-session -t "$name" "$REPLY_OC"
+        # Zellij CLI can't rename a DETACHED session (only from inside, via
+        # `zellij action rename-session`) → no-op here in v1. Documented limit.
+        printf "(rename via the menu isn't supported with Zellij yet — skipped)\n" >&2
       fi
     fi
     [[ -n "${PC_DRYRUN:-}${PC_PICK:-}" ]] && exit 0
@@ -345,26 +377,8 @@ case "$type" in
     create_session "$name" "$DEV_DIR/$name"
     ;;
   vault)
-    # Obsidian vault = on C: (NTFS) → native Windows PowerShell (native I/O, cf. memory
-    # feedback_claude-side-matches-filesystem).
-    #   desktop (F2)  : native Windows Terminal tab (GUI visible locally)
-    #   phone (ssh)   : the sessionizer runs in WSL, and the WSL→Windows hop is BROKEN by
-    #     a WSL mirrored bug (127.0.0.1 routed to loopback0, handshake times out) → this menu
-    #     CANNOT open a vault in native pwsh itself. But the PHONE can reach Windows
-    #     (direct ssh, cmd `vault`). So we DELEGATE: we record the chosen vault name and
-    #     exit with code 42; wsl()/pwsh() (phone-side) catch that 42 and run
-    #     `vault <name>` automatically → the user picks in the menu and the vault opens, with
-    #     nothing to type. Cf. docs/superpowers/plans/2026-06-01-vault-native-pwsh-ssh.md +
-    #     memories reference_ssh-wsl-no-interop / reference_wsl-mirrored-loopback-broken.
-    if is_remote; then
-      req="${PC_VAULT_REQ:-$HOME/.cache/pc-vault-request}"
-      mkdir -p "$(dirname "$req")" 2>/dev/null || true
-      printf '%s\n' "$name" > "$req" 2>/dev/null || true
-      [[ -n "${PC_DRYRUN:-}" ]] && { echo "DRYRUN: open vault '$name' client-side (wrote \$req, would exit 42)"; exit 0; }
-      exit 42
-    else
-      open_wt_pwsh "$VAULTS_DIR/$name"
-    fi
+    # Vault = on C: → native Windows Zellij (native I/O on C:). Routing in open_vault.
+    open_vault "$name"
     ;;
   new)
     if [[ -z "$name" ]]; then

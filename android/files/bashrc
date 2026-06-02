@@ -206,7 +206,7 @@ _pc_open_vault() {
   # ~2min sur le timeout TCP par defaut). ssh renvoie 255 sur ECHEC DE CONNEXION
   # uniquement (une sortie normale de pwsh/claude renvoie son propre code, pas 255).
   ssh -t -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
-    "pwsh -NoLogo -WorkingDirectory C:\\obsidian-vaults\\$v"
+    "pwsh -NoProfile -NoLogo -WorkingDirectory C:\\obsidian-vaults\\$v -Command \"zellij attach -c $v\""
   [ $? -eq 255 ] && printf '\033[33m⚠ sshd Windows (:2222) injoignable — reveille le desktop, ou au desktop: Restart-Service sshd. En attendant: `wsl`.\033[0m\n' >&2
 }
 # LogLevel=ERROR: silences « Connection to desktop closed. » + the post-quantum WARNING
