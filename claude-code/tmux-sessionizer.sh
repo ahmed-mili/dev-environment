@@ -302,7 +302,7 @@ is_remote() { [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]]; }
 # on Windows (native I/O on C:, cf. memory feedback_claude-side-matches-filesystem).
 open_wt_zellij() {  # $1 = vault name
   run wt.exe -w 0 nt -p "PowerShell" -d "$(wslpath -w "$VAULTS_DIR/$1")" \
-      pwsh -NoExit -Command "zellij attach -c $1"
+      pwsh -NoProfile -NoExit -Command "zellij attach -c $1"
 }
 
 # open_vault: route a vault choice by where the menu runs.
