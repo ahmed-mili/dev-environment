@@ -10,6 +10,7 @@ theme "tokyo-night"          // proche de ton thème tmux Tokyo Night
 mouse_mode true              // scroll molette + clic panes/tabs
 scroll_buffer_size 50000     // gros scrollback (comme ton history-limit tmux)
 pane_frames false            // épure, comme ton tmux minimaliste
+session_serialization false  // pas de résurrection au reboot → jamais d'écran "Waiting to run"
 
 // WINDOWS uniquement : sans ça, Zellij ouvre le pane dans cmd.exe (shell Windows
 // par défaut). On force PowerShell 7. NE PAS mettre cette ligne côté WSL (bash OK).

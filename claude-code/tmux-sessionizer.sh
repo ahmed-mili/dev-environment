@@ -287,6 +287,12 @@ attach_session() {  # $1 = session name
 # `claude` themselves (cf. the claude() wrapper in ~/.bashrc).
 create_session() {  # $1 = name   $2 = folder
   step cd "$2"
+  # Reboot-safe : une session sérialisée (EXITED) ressuscite sur `attach -c` avec ses
+  # panes-commande SUSPENDUS (start_suspended dans le layout sérialisé) → écran "Waiting
+  # to run" au redémarrage du PC. On purge d'abord toute copie MORTE → départ frais.
+  # `delete-session` SANS --force REFUSE une session vivante → une session ● actif reste
+  # intacte et `attach -c` la rejoint (persistance within-uptime préservée).
+  step "$ZJ" delete-session "$1" 2>/dev/null || true
   run "$ZJ" attach -c "$1"
 }
 
@@ -301,6 +307,11 @@ is_remote() { [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]]; }
 # via wslpath), running `zellij attach -c <vault>` so the session lives natively
 # on Windows (native I/O on C:, cf. memory feedback_claude-side-matches-filesystem).
 open_wt_zellij() {  # $1 = vault name
+  # Purge d'abord toute copie MORTE → onglet frais, pas de "Waiting to run". Appel SÉPARÉ,
+  # PAS chaîné par ';' dans la commande wt : ';' est un séparateur d'actions Windows Terminal,
+  # wt couperait dessus (erreur 0x80070002 "fichier introuvable" sur le 2e fragment). On purge
+  # via le zellij WINDOWS (pwsh.exe). `delete-session` SANS --force refuse un vault VIVANT → préservé.
+  step pwsh.exe -NoProfile -Command "zellij delete-session $1" 2>/dev/null || true
   run wt.exe -w 0 nt -p "PowerShell" -d "$(wslpath -w "$VAULTS_DIR/$1")" \
       pwsh -NoProfile -NoExit -Command "zellij attach -c $1"
 }
