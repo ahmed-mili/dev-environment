@@ -10,8 +10,14 @@ function isadmin {
 
 function dev { Set-Location C:\dev }
 
+# Invoke-Sessionizer : menu fzf (sessions/projets/vaults) qui tourne en WSL ; lié à F2 plus bas.
+# Exécuté comme une vraie commande (pas dans le ScriptBlock) pour que fzf reçoive le TTY.
+function Invoke-Sessionizer {
+    wsl -d Ubuntu -e bash -lic "PC_VIEW=all ~/dev/dev-environment/claude-code/tmux-sessionizer.sh"
+}
+
 # ---- PSReadLine: modern predictions + smart Tab + Catppuccin Mocha colors ----
-# - InlineView by default (grey ghost text). F2 toggles to ListView (dropdown).
+# - InlineView by default (grey ghost text). F3 toggles to ListView; F2 = sessionizer menu.
 # - Tab accepts the inline prediction if one is visible, else MenuComplete.
 # - Right Arrow / Ctrl+RightArrow also accept (standard PSReadLine behavior).
 # - Syntax-highlight colors aligned with the Catppuccin Mocha palette.
@@ -34,7 +40,16 @@ if (Get-Module -Name PSReadLine -ListAvailable) {
         Default            = '#CDD6F4'  # Text
         ContinuationPrompt = '#A6ADC8'  # Subtext0
     } -ErrorAction SilentlyContinue
-    Set-PSReadLineKeyHandler -Key F2 -Function SwitchPredictionView
+    # F3 : bascule InlineView <-> ListView (déplacé de F2 pour libérer F2, comme en WSL).
+    Set-PSReadLineKeyHandler -Key F3 -Function SwitchPredictionView
+    # F2 : menu sessionizer — MÊME menu fzf qu'en WSL (sessions/projets/vaults).
+    #      On INSÈRE `Invoke-Sessionizer` + AcceptLine (l'exécute comme une vraie ligne) : lancer
+    #      un TUI plein écran DANS le ScriptBlock ne lui passe pas le TTY -> fzf reste figé.
+    Set-PSReadLineKeyHandler -Key F2 -BriefDescription 'Sessionizer' -LongDescription 'Menu sessions/projets/vaults (idem WSL F2)' -ScriptBlock {
+        [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
+        [Microsoft.PowerShell.PSConsoleReadLine]::Insert('Invoke-Sessionizer')
+        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+    }
     Set-PSReadLineKeyHandler -Key Tab -ScriptBlock {
         $line = $null; $cursor = $null
         [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
