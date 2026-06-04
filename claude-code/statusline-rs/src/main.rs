@@ -842,6 +842,205 @@ fn build_line2(usage: &UsageResult) -> String {
     segments.join(&sep)
 }
 
+// =================== OLLAMA CLOUD USAGE ===================
+
+// `ollama launch claude` ne modifie pas settings.json : il injecte des variables
+// d'environnement dans le process claude (verifie en capturant l'env d'un faux
+// claude lance via la commande). La statusline etant un enfant de claude, elle en
+// herite. Signal le plus fiable : les modeles par defaut sont mappes sur des cibles
+// ":cloud" ; en repli, ANTHROPIC_BASE_URL pointe sur le daemon ollama local
+// (127.0.0.1:11434/11435, = OLLAMA_HOST).
+fn detect_ollama_env() -> bool {
+    let is_cloud = |k: &str| std::env::var(k).map(|v| v.contains(":cloud")).unwrap_or(false);
+    if is_cloud("ANTHROPIC_DEFAULT_OPUS_MODEL")
+        || is_cloud("ANTHROPIC_DEFAULT_SONNET_MODEL")
+        || is_cloud("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+        || is_cloud("ANTHROPIC_MODEL")
+    {
+        return true;
+    }
+    if let Ok(base) = std::env::var("ANTHROPIC_BASE_URL") {
+        let b = base.to_lowercase();
+        if b.contains("ollama") || b.contains(":11434") || b.contains(":11435") {
+            return true;
+        }
+        if let Ok(host) = std::env::var("OLLAMA_HOST") {
+            if !base.is_empty() && base == host {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+// Detection robuste : claude SCRUBE les ANTHROPIC_* de l'env qu'il passe au
+// sous-process statusline (verifie : BASE_URL=None cote statusline), et le model.id
+// du stdin reste l'alias "claude-opus-4-8" (pas ":cloud"). MAIS l'environ PROPRE du
+// process claude (et de ses ancetres) garde ANTHROPIC_BASE_URL=http://127.0.0.1:1143x
+// et ANTHROPIC_DEFAULT_*_MODEL=...:cloud. On remonte donc la chaine des ppid en lisant
+// /proc/<pid>/environ jusqu'a trouver le signal (Linux/WSL uniquement). Cousin de la
+// technique borrow_win_env. Valide : meme avec `env -i`, l'enfant lit l'env du parent.
+#[cfg(target_os = "linux")]
+fn parent_pid(pid: i32) -> Option<i32> {
+    let stat = fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
+    // comm (champ 2) peut contenir espaces/parentheses -> couper apres le dernier ')'
+    let rest = &stat[stat.rfind(')')? + 2..];
+    rest.split_whitespace().nth(1)?.parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn detect_ollama_proc() -> bool {
+    let mut pid = std::process::id() as i32;
+    for _ in 0..8 {
+        if let Ok(env) = fs::read(format!("/proc/{}/environ", pid)) {
+            for kv in env.split(|&b| b == 0) {
+                if let Ok(s) = std::str::from_utf8(kv) {
+                    if let Some(v) = s.strip_prefix("ANTHROPIC_BASE_URL=") {
+                        let l = v.to_lowercase();
+                        if l.contains("ollama") || l.contains(":11434") || l.contains(":11435") {
+                            return true;
+                        }
+                    }
+                    if s.starts_with("ANTHROPIC_DEFAULT_") && s.ends_with(":cloud") {
+                        return true;
+                    }
+                    if let Some(v) = s.strip_prefix("ANTHROPIC_MODEL=") {
+                        if v.contains(":cloud") {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        match parent_pid(pid) {
+            Some(p) if p > 1 => pid = p,
+            _ => break,
+        }
+    }
+    false
+}
+
+#[cfg(not(target_os = "linux"))]
+fn detect_ollama_proc() -> bool {
+    false
+}
+
+// Lit le cache d'usage Ollama (ecrit par ollama-usage.py). Si le cache a > 60 s,
+// (re)lance le helper en arriere-plan detache -- meme pattern que le fetch git :
+// un marqueur cooldown evite les rafales, et on rend immediatement avec la valeur
+// en cache (la prochaine invocation affiche la valeur fraiche). Le scrape lui-meme
+// (lecture du cookie Firefox + HTTP vers ollama.com/settings) reste donc hors du
+// chemin chaud du binaire 10 Hz.
+fn read_ollama_usage(claude_dir: &Path) -> Option<Value> {
+    let cache = claude_dir.join("ollama-usage-cache.json");
+    let stale = file_age_secs(&cache).map(|a| a >= 60.0).unwrap_or(true);
+    if stale {
+        let marker = claude_dir.join("ollama-usage-last-fetch");
+        let needs = file_age_secs(&marker).map(|a| a >= 15.0).unwrap_or(true);
+        if needs {
+            touch(&marker);
+            let helper = claude_dir.join("ollama-usage.py");
+            if helper.exists() {
+                let mut cmd = Command::new("python3");
+                cmd.arg(&helper);
+                cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+                #[cfg(windows)]
+                cmd.creation_flags(CREATE_NO_WINDOW | 0x00000008 /* DETACHED_PROCESS */);
+                let _ = cmd.spawn();
+            }
+        }
+    }
+    let raw = fs::read_to_string(&cache).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+// Construit la ligne 2 en mode Ollama : memes couleurs / barres / format que la
+// version Anthropic (cf. build_usage_seg), mais alimentee par session/weekly d'Ollama
+// Cloud. Labels "5h"/"7d" : la session Ollama se reinitialise toutes les 5 h et le
+// quota hebdomadaire tous les 7 j -- meme semantique que les fenetres Anthropic.
+fn build_line2_ollama(u: &Value) -> String {
+    let sep = format!(" {}\u{00B7}{} ", rgb(220, 220, 220), RESET);
+    let mut segments: Vec<String> = Vec::new();
+    for (key, label) in [("session", "5h"), ("weekly", "7d")] {
+        if let Some(w) = u.get(key) {
+            if let Some(util) = w.get("utilization").and_then(|v| v.as_f64()) {
+                let col = get_usage_color(util, false);
+                let bar = format_bar(util, &col, 14);
+                // pct = chaine exacte affichee par ollama.com (ex. "3.5"), repli sur
+                // l'entier tronque si absente. La barre, elle, utilise le float.
+                let pct = w
+                    .get("pct")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+                    .unwrap_or_else(|| (util as i64).to_string());
+                let mut seg = format!(
+                    "{}{}{} {} {}{}%{}",
+                    col, label, RESET, bar, col, pct, RESET
+                );
+                if let Some(rst) = w.get("reset").and_then(|v| v.as_str()) {
+                    let reset_col = rgb(140, 145, 165);
+                    seg.push_str(&format!(" {}({}){}", reset_col, rst, RESET));
+                }
+                segments.push(seg);
+            }
+        }
+    }
+    segments.join(&sep)
+}
+
+// =================== OLLAMA MODEL / CONTEXT WINDOW ===================
+
+// Remonte la chaine des ppid pour extraire le VRAI nom du modele Ollama Cloud
+// (ex. "deepseek-v4-pro:cloud") depuis l'environ du process claude parent.
+// Claude scrubbe ANTHROPIC_* au spawn du statusline, mais ses ancetres
+// conservent les variables (meme technique que detect_ollama_proc).
+#[cfg(target_os = "linux")]
+fn get_ollama_model() -> Option<String> {
+    let mut pid = std::process::id() as i32;
+    for _ in 0..8 {
+        if let Ok(env) = fs::read(format!("/proc/{}/environ", pid)) {
+            for kv in env.split(|&b| b == 0) {
+                if let Ok(s) = std::str::from_utf8(kv) {
+                    for prefix in [
+                        "ANTHROPIC_DEFAULT_OPUS_MODEL=",
+                        "ANTHROPIC_DEFAULT_SONNET_MODEL=",
+                        "ANTHROPIC_DEFAULT_HAIKU_MODEL=",
+                        "ANTHROPIC_MODEL=",
+                    ] {
+                        if let Some(v) = s.strip_prefix(prefix) {
+                            if v.contains(":cloud") {
+                                return Some(v.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        match parent_pid(pid) {
+            Some(p) if p > 1 => pid = p,
+            _ => break,
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_ollama_model() -> Option<String> {
+    None
+}
+
+// Context window (en tokens) des modeles Ollama Cloud courants.
+// Source : docs Ollama Cloud / fiches modeles (DeepWiki, Collabnix, etc.).
+fn ollama_context_window(model: &str) -> Option<i64> {
+    match model {
+        "deepseek-v4-pro:cloud" | "deepseek-v4-flash:cloud" => Some(1_000_000),
+        "kimi-k2.6:cloud" | "kimi-k2.5:cloud" | "kimi-k2:1t:cloud" | "qwen3.5:cloud" => Some(262_144),
+        "glm-5.1:cloud" => Some(131_072),
+        "minimax-m3:cloud" | "minimax-m2:cloud" => Some(1_000_000),
+        _ => None,
+    }
+}
+
 // =================== MAIN ===================
 
 fn main() {
@@ -882,11 +1081,15 @@ fn main() {
         .or_else(|| data.pointer("/session/permission_mode").and_then(|v| v.as_str()))
         .map(String::from);
 
-    let model = data
+    let mut model = data
         .pointer("/model/display_name")
         .and_then(|v| v.as_str())
         .or_else(|| data.pointer("/model/id").and_then(|v| v.as_str()))
         .map(String::from);
+
+    // model.id brut (pour la detection Ollama : l'env ANTHROPIC_* peut etre scrube
+    // par claude au spawn du statusline, mais l'id du modele est toujours dans le stdin).
+    let model_id = data.pointer("/model/id").and_then(|v| v.as_str()).map(String::from);
 
     let effort = data
         .pointer("/effort/level")
@@ -899,7 +1102,7 @@ fn main() {
     let ctx_tokens = data
         .pointer("/context_window/total_input_tokens")
         .and_then(|v| v.as_i64());
-    let ctx_size = data
+    let mut ctx_size = data
         .pointer("/context_window/context_window_size")
         .and_then(|v| v.as_i64());
 
@@ -914,7 +1117,51 @@ fn main() {
     let git_ms = t_git.elapsed().as_millis();
 
     let t_usage = Instant::now();
-    let usage = read_usage(&claude_dir, stdin_rate_limits, stdin_version.as_deref());
+    // Mode Ollama (`ollama launch claude`) : on ne consomme pas le quota Anthropic,
+    // donc afficher ses rate_limits serait trompeur. On source l'usage depuis Ollama
+    // Cloud (cache rempli par ollama-usage.py) et on n'interroge PAS api.anthropic.com.
+    // Detection : env (si propage) OU id du modele stdin contient ":cloud"/"kimi"
+    // (signal robuste, independant de la propagation d'env).
+    let model_is_cloud = model_id
+        .as_deref()
+        .or(model.as_deref())
+        .map(|m| {
+            let l = m.to_lowercase();
+            l.contains(":cloud") || l.contains("kimi")
+        })
+        .unwrap_or(false);
+    // 3 signaux : env direct (si non scrube) | /proc des ancetres (claude garde
+    // ANTHROPIC_BASE_URL malgre le scrub) | model.id du stdin contenant ":cloud".
+    let ollama = detect_ollama_env() || detect_ollama_proc() || model_is_cloud;
+
+    // Correction du contexte affiche : Claude Code envoie ctx_size=200k (sa valeur
+    // par defaut interne) meme quand le modele Ollama sous-jacent supporte 1M.
+    // On remplace par la vraie taille, et on affiche le vrai nom du modele.
+    if ollama {
+        if let Some(om) = get_ollama_model() {
+            model = Some(om.clone());
+            if let Some(sz) = ollama_context_window(&om) {
+                ctx_size = Some(sz);
+            }
+        }
+    }
+
+    let mut usage_src = String::from("Ollama");
+    let mut api_status_s = String::from("-");
+    let mut api_attempts_v: u8 = 0;
+    let mut api_ms_s = String::from("-");
+    let line2 = if ollama {
+        read_ollama_usage(&claude_dir)
+            .map(|u| build_line2_ollama(&u))
+            .unwrap_or_default()
+    } else {
+        let usage = read_usage(&claude_dir, stdin_rate_limits, stdin_version.as_deref());
+        usage_src = format!("{:?}", usage.source);
+        api_status_s = usage.api_status.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string());
+        api_attempts_v = usage.api_attempts;
+        api_ms_s = usage.api_ms.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string());
+        build_line2(&usage)
+    };
     let usage_ms = t_usage.elapsed().as_millis();
 
     let line1 = build_line1(
@@ -927,7 +1174,6 @@ fn main() {
         ctx_tokens,
         ctx_size,
     );
-    let line2 = build_line2(&usage);
 
     let mut out = line1;
     if !line2.is_empty() {
@@ -948,16 +1194,16 @@ fn main() {
     let _ = (|| -> std::io::Result<()> {
         let log_path = claude_dir.join("statusline-tick-log.txt");
         let line = format!(
-            "{} tick={} effort={} git_ms={} usage_ms={} usage_src={:?} api_status={} api_attempts={} api_ms={} total_ms={} pid={}\n",
+            "{} tick={} effort={} git_ms={} usage_ms={} usage_src={} api_status={} api_attempts={} api_ms={} total_ms={} pid={}\n",
             start_ms_unix,
             picker_tick(start_ms_unix),
             effort.as_deref().unwrap_or("none"),
             git_ms,
             usage_ms,
-            usage.source,
-            usage.api_status.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
-            usage.api_attempts,
-            usage.api_ms.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
+            usage_src,
+            api_status_s,
+            api_attempts_v,
+            api_ms_s,
             total_ms,
             std::process::id(),
         );
