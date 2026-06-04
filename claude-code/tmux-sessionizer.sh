@@ -68,13 +68,6 @@ mapfile -t projects < <(find "$DEV_DIR" -mindepth 1 -maxdepth 1 -type d -printf 
 vaults=()
 mapfile -t vaults < <(find "$VAULTS_DIR" -mindepth 1 -maxdepth 1 -type d -exec test -d '{}/.obsidian' ';' -printf '%f\n' 2>/dev/null | sort || true)
 
-# Ollama Cloud models = the user's curated list (same file the `ollama launch claude`
-# wrapper uses). Each becomes a menu entry that opens claude on that model in its own
-# Zellij session. Order = file order. Comments/blank lines skipped.
-ollama_models=()
-OLLAMA_MODELS_FILE="${OLLAMA_CLAUDE_MODELS:-$HOME/.config/ollama-claude-models}"
-[[ -r "$OLLAMA_MODELS_FILE" ]] && mapfile -t ollama_models < <(grep -vE '^[[:space:]]*(#|$)' "$OLLAMA_MODELS_FILE" 2>/dev/null || true)
-
 # VIEW (PC_VIEW) — same menu, different perimeter, set by the phone functions.
 # We partition by WORLD (which side of the filesystem / where it runs best), not by type:
 #   all (default, F2 desktop) : everything — sessions + projects + vaults
@@ -85,12 +78,12 @@ OLLAMA_MODELS_FILE="${OLLAMA_CLAUDE_MODELS:-$HOME/.config/ollama-claude-models}"
 # else (fzf navigation, build_menu, dispatch) works with no other change.
 case "${PC_VIEW:-all}" in
   wsl) vaults=();   mapfile -t actives < <(zj_actives_wsl) ;;   # WSL world: projects + their Zellij sessions
-  ps)  projects=(); ollama_models=(); mapfile -t actives < <(zj_actives_win) ;;   # C: world: vaults + their (Windows) Zellij sessions
+  ps)  projects=(); mapfile -t actives < <(zj_actives_win) ;;   # C: world: vaults + their (Windows) Zellij sessions
   *)   mapfile -t actives < <( { zj_actives_wsl; zj_actives_win; } | sort -u ) ;;   # all (F2 desktop)
 esac
 
 # ANSI colors (interpreted by fzf --ansi)
-G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[38;5;141m'; O=$'\e[36m'   # M = violet (vaults), O = cyan (Ollama)
+G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[38;5;141m'   # M = violet (vaults)
 
 # Each project/vault stays in ITS place within its section; if it has an active
 # session of the same name we mark it ● (active) instead of moving it to the top.
@@ -102,11 +95,11 @@ is_active() { in_list "$1" "${actives[@]}"; }
 # created via «＋ new»). With no section of their own -> a small zone at the top.
 orphans=()
 for _s in "${actives[@]}"; do
-  in_list "$_s" "${projects[@]}" || in_list "$_s" "${vaults[@]}" || in_list "$_s" "${ollama_models[@]}" || orphans+=("$_s")
+  in_list "$_s" "${projects[@]}" || in_list "$_s" "${vaults[@]}" || orphans+=("$_s")
 done
 
 # Counters for the POSITIONS of the fzf navigation binds (below).
-n_orphan=${#orphans[@]}; n_proj=${#projects[@]}; n_vault=${#vaults[@]}; n_ollama=${#ollama_models[@]}
+n_orphan=${#orphans[@]}; n_proj=${#projects[@]}; n_vault=${#vaults[@]}
 
 # --- menu (TSV: type <TAB> name <TAB> displayed label) -------------------
 build_menu() {
@@ -143,17 +136,6 @@ build_menu() {
       fi
     done
   fi
-  # 4) Ollama Cloud models under « ◆ Ollama (claude) » (cyan).
-  if (( n_ollama )); then
-    printf 'sep\t\t%s──────  %s◆ Ollama (claude)%s  ──────%s\n' "$D" "$O" "$D" "$R"
-    for o in "${ollama_models[@]}"; do
-      if is_active "$o"; then
-        printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$o" "$G" "$R" "$o" "$G" "$R"
-      else
-        printf 'ollama\t%s\t%s○%s %s\n' "$o" "$O" "$R" "$o"
-      fi
-    done
-  fi
   # No more « ＋ new » line: creation goes through the Ctrl-N shortcut
   # (--expect=ctrl-n + prompt) — cf. the « selection » block below.
 }
@@ -172,7 +154,7 @@ else
   # Navigation: skip the « ◆ … » titles (↑↓), toggle projects ⇄ vaults (Tab),
   # create a session (Ctrl-N, via --expect below).
   # 1-based positions (reverse layout, UNfiltered list):
-  #   [« ◆ Sessions »] [orphans ..] [« ◆ Projects »] [projects ..] [« ◆ Vaults »] [vaults ..] [« ◆ Ollama (claude) »] [models ..]
+  #   [« ◆ Sessions »] [orphans ..] [« ◆ Projects »] [projects ..] [« ◆ Vaults »] [vaults ..]
   # ssep/psep/vsep/osep = title lines; pfirst/vfirst/ofirst = first item of each section;
   # cursor0 = first SELECTABLE item (where the cursor starts — never on a title);
   # $seps = positions of ALL present titles (the ↑↓ step over them, via `case`).
@@ -182,21 +164,18 @@ else
   # with the FULL list (hdr_full).
   nav=(); hdr_min='Ctrl+G  help'
   hdr_full='↑↓ navigate · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
-  ssep=0; psep=0; vsep=0; osep=0; pfirst=0; vfirst=0; ofirst=0; pos=0
+  ssep=0; psep=0; vsep=0; pfirst=0; vfirst=0; pos=0
   (( n_orphan )) && { ssep=$(( pos + 1 )); pos=$(( pos + 1 + n_orphan )); }
   (( n_proj ))   && { psep=$(( pos + 1 )); pfirst=$(( psep + 1 )); pos=$(( pos + 1 + n_proj )); }
   (( n_vault ))  && { vsep=$(( pos + 1 )); vfirst=$(( vsep + 1 )); pos=$(( pos + 1 + n_vault )); }
-  (( n_ollama )) && { osep=$(( pos + 1 )); ofirst=$(( osep + 1 )); pos=$(( pos + 1 + n_ollama )); }
   if   (( n_orphan )); then cursor0=$(( ssep + 1 ))
   elif (( n_proj ));   then cursor0=$pfirst
   elif (( n_vault ));  then cursor0=$vfirst
-  elif (( n_ollama )); then cursor0=$ofirst
   else                      cursor0=1; fi
   seps=""
   (( ssep )) && seps="$seps $ssep"
   (( psep )) && seps="$seps $psep"
   (( vsep )) && seps="$seps $vsep"
-  (( osep )) && seps="$seps $osep"
   if (( ssep || psep || vsep )); then
     nav+=(
       --bind "load:pos($cursor0)"
@@ -413,17 +392,6 @@ case "$type" in
   vault)
     # Vault = on C: → native Windows Zellij (native I/O on C:). Routing in open_vault.
     open_vault "$name"
-    ;;
-  ollama)
-    # Launch a dedicated Zellij session for this Ollama Cloud model.
-    # The session is named after the model; if it already exists we attach.
-    # `zellij --layout` starts a new session from an inline KDL layout file.
-    step cd "$HOME"
-    step "$ZJ" delete-session "$name" 2>/dev/null || true
-    _layout=$(mktemp --suffix=.kdl)
-    printf 'layout {\n    session_name "%s"\n    pane command="bash" args="-lc" args="ollama launch claude --model %s"\n}\n' "$name" "$name" > "$_layout"
-    run "$ZJ" --layout "$_layout"
-    rm -f "$_layout"
     ;;
   new)
     if [[ -z "$name" ]]; then

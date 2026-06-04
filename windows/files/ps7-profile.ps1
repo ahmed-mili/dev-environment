@@ -14,6 +14,12 @@ function dev { Set-Location C:\dev }
 # Exécuté comme une vraie commande (pas dans le ScriptBlock) pour que fzf reçoive le TTY.
 function Invoke-Sessionizer {
     wsl -d Ubuntu -e bash -lic "PC_VIEW=all ~/dev/dev-environment/claude-code/tmux-sessionizer.sh"
+    # F2 ne doit RIEN laisser (comme `ble-bind -c` en WSL). AcceptLine a imprimé la ligne
+    # "PS> Invoke-Sessionizer" ; fzf/zellij (alternate screen) restaure le curseur juste dessous.
+    # On remonte d'1 ligne + efface jusqu'en bas → le prompt reprend proprement, le scrollback
+    # au-dessus est PRÉSERVÉ (≠ Clear-Host). ESC[1A = curseur up, ESC[0J = efface vers le bas.
+    $ESC = [char]27
+    [Console]::Write("$ESC[1A$ESC[0J")
 }
 
 # ---- PSReadLine: modern predictions + smart Tab + Catppuccin Mocha colors ----
