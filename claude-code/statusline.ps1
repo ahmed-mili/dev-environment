@@ -73,14 +73,20 @@ function Get-EffortDisplay([string]$level) {
     # claude.exe invoque le subprocess statusline sur state change (pas sur
     # timer), donc animer ici est de toute facon impraticable.
     #
-    #   low    -> ANSI 93 (yellowBright) bold
-    #   medium -> ANSI 92 (greenBright)  bold
-    #   high   -> ANSI 94 (blueBright)   bold
-    #   xhigh  -> RGB(242,193,233) = #F2C1E9 uniforme + bold (rose pastel doux).
-    #   max    -> RGB(255,121,198) = #FF79C6 uniforme + bold = couleur exacte
-    #             du path en bypassPermissions.
-    # Truecolor explicite (\e[38;2;R;G;Bm) garantit la parite visuelle
-    # independamment du theme du terminal et du theme dark-ansi de Claude Code.
+    #   low    -> "warning"    -> ANSI 93 (yellowBright)
+    #   medium -> "success"    -> ANSI 92 (greenBright)
+    #   high   -> "permission" -> ANSI 94 (blueBright)
+    #   xhigh  -> "autoAccept" -> ANSI 95 (magentaBright)
+    #   max    -> "rainbow-animated" cote picker (arc-en-ciel anime). Pas
+    #             d'equivalent statique -> ANSI 91 (redBright), ton "max/chaud".
+    # Ce sont les SLOTS ANSI exacts du picker /effort (verifie dans claude.exe
+    # v2.1.x : low=warning, medium=success, high=permission, xhigh=autoAccept,
+    # max=rainbow-animated). Emettre des slots (PAS du truecolor \e[38;2;R;G;Bm)
+    # est delibere : le statusline et Claude Code referencent le MEME slot de
+    # palette, donc le rendu matche sous n'importe quel theme de terminal.
+    # /!\ Un commit avait hardcode #F2C1E9/#FF79C6 "pour parite binaire" : ca
+    # cassait ce matching et donnait un max rose hors-palette. Ne PAS re-hardcoder
+    # de truecolor ici -- garder des slots pour rester aligne sur le picker.
     #
     # `[0m` reset TOUT y compris le background -> on utilise `[22m[39m` qui
     # n'ecrase pas le BG de la banniere s2_bg.
@@ -95,10 +101,10 @@ function Get-EffortDisplay([string]$level) {
         'low'    { return "$bold$esc[93m$label$endStyle" }
         'medium' { return "$bold$esc[92m$label$endStyle" }
         'high'   { return "$bold$esc[94m$label$endStyle" }
-        'xhigh'  { return "$bold$esc[38;2;242;193;233m$label$endStyle" }
-        'max'    { return "$bold$esc[38;2;255;121;198m$label$endStyle" }
+        'xhigh'  { return "$bold$esc[95m$label$endStyle" }
+        'max'    { return "$bold$esc[91m$label$endStyle" }
+        default  { return "$bold$label$endStyle" }   # niveau inconnu : visible (bold neutre) plutot que masque
     }
-    return ''
 }
 
 function Format-Reset($resetAt, $referenceTime = $null) {
@@ -132,6 +138,21 @@ function Format-Reset($resetAt, $referenceTime = $null) {
         $dayAbbr = $dayMap[[int]$resetLocal.DayOfWeek]
         return "$dayAbbr. $($resetLocal.ToString('HH:mm'))"
     } catch { return $null }
+}
+
+function Format-ResetOrRaw($resetAt, $referenceTime = $null) {
+    # Wrapper qui accepte une date ISO (traitee par Format-Reset) ou une
+    # string brute Ollama comme "(in 3 days)" / "never" / "N/A".
+    if (-not $resetAt) { return $null }
+    $parsed = Format-Reset $resetAt $referenceTime
+    if ($parsed) { return $parsed }
+    $raw = [string]$resetAt
+    $raw = $raw.Trim()
+    if ($raw.StartsWith('(') -and $raw.EndsWith(')')) {
+        $raw = $raw.Substring(1, $raw.Length - 2).Trim()
+    }
+    if ($raw -eq '' -or $raw -eq 'null') { return $null }
+    return $raw
 }
 
 # ============================== INPUT STDIN ==============================
@@ -170,6 +191,18 @@ if ($data -and $data.model) {
 # Effort level (low/medium/high/xhigh/max) — affichage statique cote statusline
 $effortLevel = $null
 if ($data -and $data.effort -and $data.effort.level) { $effortLevel = [string]$data.effort.level }
+
+# Détection mode Ollama (non-Anthropic) — conditionne tout le bloc usage + compte
+$isOllama = $false
+if ($modelName) {
+    $mid = [string]$modelName
+    $isAnthropicModel = $mid -match 'claude-'
+    $hasCreds = Test-Path "$env:USERPROFILE\.claude\.credentials.json"
+    if ((-not $isAnthropicModel) -or (-not $hasCreds)) {
+        $isOllama = $true
+    }
+    if ($mid -match 'ollama') { $isOllama = $true }
+}
 
 # ============================== COULEURS PATH ==============================
 
@@ -289,35 +322,36 @@ if ($probe) {
 }
 
 # ============================== COMPTE (email) ==============================
-
 $email = $null
-try {
-    $cfg = Get-Content -Raw "$env:USERPROFILE\.claude.json" | ConvertFrom-Json -AsHashtable
-    if ($cfg.oauthAccount -and $cfg.oauthAccount.emailAddress) { $email = $cfg.oauthAccount.emailAddress }
-} catch {}
-
-# Plan : cache 1h depuis claude auth status --json (ou .credentials.json en fallback)
 $plan = $null
-$authCache = "$env:USERPROFILE\.claude\auth-status-cache.json"
-$authValid = (Test-Path $authCache) -and ((Get-Date) - (Get-Item $authCache).LastWriteTime).TotalHours -lt 1
-if ($authValid) {
-    try { $plan = (Get-Content -Raw $authCache | ConvertFrom-Json).subscriptionType } catch {}
-}
-if (-not $plan) {
+if (-not $isOllama) {
     try {
-        $json = & claude auth status --json 2>$null
-        if ($json) {
-            Set-Content -Path $authCache -Value $json -Encoding UTF8
-            $plan = ($json | ConvertFrom-Json).subscriptionType
-        }
+        $cfg = Get-Content -Raw "$env:USERPROFILE\.claude.json" | ConvertFrom-Json -AsHashtable
+        if ($cfg.oauthAccount -and $cfg.oauthAccount.emailAddress) { $email = $cfg.oauthAccount.emailAddress }
     } catch {}
-}
-# Fallback ultime : lire subscriptionType directement dans .credentials.json
-if (-not $plan) {
-    try {
-        $creds = Get-Content -Raw "$env:USERPROFILE\.claude\.credentials.json" | ConvertFrom-Json
-        if ($creds.claudeAiOauth.subscriptionType) { $plan = $creds.claudeAiOauth.subscriptionType }
-    } catch {}
+
+    # Plan : cache 1h depuis claude auth status --json (ou .credentials.json en fallback)
+    $authCache = "$env:USERPROFILE\.claude\auth-status-cache.json"
+    $authValid = (Test-Path $authCache) -and ((Get-Date) - (Get-Item $authCache).LastWriteTime).TotalHours -lt 1
+    if ($authValid) {
+        try { $plan = (Get-Content -Raw $authCache | ConvertFrom-Json).subscriptionType } catch {}
+    }
+    if (-not $plan) {
+        try {
+            $json = & claude auth status --json 2>$null
+            if ($json) {
+                Set-Content -Path $authCache -Value $json -Encoding UTF8
+                $plan = ($json | ConvertFrom-Json).subscriptionType
+            }
+        } catch {}
+    }
+    # Fallback ultime : lire subscriptionType directement dans .credentials.json
+    if (-not $plan) {
+        try {
+            $creds = Get-Content -Raw "$env:USERPROFILE\.claude\.credentials.json" | ConvertFrom-Json
+            if ($creds.claudeAiOauth.subscriptionType) { $plan = $creds.claudeAiOauth.subscriptionType }
+        } catch {}
+    }
 }
 
 # ============================== USAGE (5h + 7j) ==============================
@@ -361,10 +395,12 @@ if ($data -and $data.rate_limits) {
     if (Test-Path $rateLimitFile) { Remove-Item $rateLimitFile -Force -ErrorAction SilentlyContinue }
 }
 
-# FALLBACK API : seulement si stdin ne contient pas rate_limits (early session
-# avant 1er API call, ou user sur plan API/enterprise sans rate_limits).
-# Cache 60s : meme cadence que claude.ai dashboard.
-$usageValid = (-not $usage) -and (Test-Path $usageCache) -and ((Get-Date) - (Get-Item $usageCache).LastWriteTime).TotalSeconds -lt 60
+# FALLBACK API Anthropic : uniquement si on n'est PAS en mode Ollama.
+if (-not $isOllama) {
+    # Seulement si stdin ne contient pas rate_limits (early session
+    # avant 1er API call, ou user sur plan API/enterprise sans rate_limits).
+    # Cache 60s : meme cadence que claude.ai dashboard.
+    $usageValid = (-not $usage) -and (Test-Path $usageCache) -and ((Get-Date) - (Get-Item $usageCache).LastWriteTime).TotalSeconds -lt 60
 if ($usageValid) {
     try { $usage = Get-Content -Raw $usageCache | ConvertFrom-Json } catch {}
 }
@@ -427,7 +463,9 @@ if ((-not $usage) -and (-not $inCooldown)) {
     } catch {}
 }
 
-# Fallback stale : si l'API a echoue (timeout, rate-limit, reseau, etc.) et qu'on n'a
+}
+
+# Fallback stale Anthropic : si l'API a echoue (timeout, rate-limit, reseau, etc.) et qu'on n'a
 # pas pu rafraichir le cache, on reutilise le dernier cache connu meme s'il est vieux.
 # Eviter que la ligne 5h/7d disparaisse est plus important que la fraicheur a la seconde.
 # Le flag $usageStale est utilise plus bas pour desaturer les couleurs ET figer le
@@ -436,12 +474,81 @@ if ((-not $usage) -and (-not $inCooldown)) {
 # date de ~7 min).
 $usageStale = $false
 $usageReferenceTime = $null   # null = utiliser Now() (cache frais)
-if (-not $usage -and (Test-Path $usageCache)) {
+if ((-not $isOllama) -and (-not $usage) -and (Test-Path $usageCache)) {
     try {
         $usage = Get-Content -Raw $usageCache | ConvertFrom-Json
         $usageStale = $true
         $usageReferenceTime = (Get-Item $usageCache).LastWriteTime.ToUniversalTime()
     } catch {}
+}
+
+# ============================== OLLAMA (usage + cache) ==============================
+
+# Source unique : ollama-usage.py (Windows) scrape ollama.com/settings via le
+# cookie Firefox, exactement comme sous WSL. Rafraîchi toutes les ~60s en détaché.
+# Plus d'estimateur à limites inventées, plus de serveur local / userscript.
+$winCachePath = "$env:USERPROFILE\.claude\ollama-usage-cache.json"
+
+function Read-OllamaCache($path) {
+    if (-not (Test-Path $path)) { return $null }
+    try {
+        $oc = Get-Content -Raw $path | ConvertFrom-Json
+        $usage = [PSCustomObject]@{}
+
+        # PRIORITÉ 1 : données réelles scrapées sur ollama.com/settings (session / weekly)
+        if ($oc.session -and $null -ne $oc.session.utilization) {
+            $fh = [ordered]@{ utilization = [double]$oc.session.utilization }
+            if ($oc.session.reset) { $fh.resets_at = $oc.session.reset }
+            $usage | Add-Member -NotePropertyName 'five_hour' -NotePropertyValue ([PSCustomObject]$fh)
+        }
+        if ($oc.weekly -and $null -ne $oc.weekly.utilization) {
+            $sd = [ordered]@{ utilization = [double]$oc.weekly.utilization }
+            if ($oc.weekly.reset) { $sd.resets_at = $oc.weekly.reset }
+            $usage | Add-Member -NotePropertyName 'seven_day' -NotePropertyValue ([PSCustomObject]$sd)
+        }
+        if ($usage.five_hour -or $usage.seven_day) { return $usage }
+
+        # FALLBACK : ancien format (five_hour / seven_day) — compat héritée.
+        if ($oc.five_hour -and $null -ne $oc.five_hour.utilization) {
+            $usage | Add-Member -NotePropertyName 'five_hour' -NotePropertyValue $oc.five_hour
+        }
+        if ($oc.seven_day -and $null -ne $oc.seven_day.utilization) {
+            $usage | Add-Member -NotePropertyName 'seven_day' -NotePropertyValue $oc.seven_day
+        }
+        if ($usage.five_hour -or $usage.seven_day) { return $usage }
+    } catch {}
+    return $null
+}
+
+if ($isOllama -and (-not $usage)) {
+    # Lecture du cache scrapé (session/weekly réels lus sur ollama.com/settings).
+    $usage = Read-OllamaCache $winCachePath
+
+    # Rafraîchissement détaché si le cache est absent ou vieux de plus de 60 s —
+    # même cadence que WSL. ollama-usage.py est best-effort : en cas d'échec
+    # (pas de cookie, hors-ligne) il laisse le cache intact, donc l'ancienne
+    # valeur reste affichée plutôt qu'un trou.
+    $ocOld = $true
+    if (Test-Path $winCachePath) {
+        $age = ((Get-Date) - (Get-Item $winCachePath).LastWriteTime).TotalSeconds
+        if ($age -lt 60) { $ocOld = $false }
+    }
+
+    if ($ocOld) {
+        try {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $py = 'python'
+            if (-not (Get-Command 'python' -ErrorAction SilentlyContinue)) {
+                if (Get-Command 'python3' -ErrorAction SilentlyContinue) { $py = 'python3' }
+            }
+            $psi.FileName = $py
+            $psi.Arguments = "`"$env:USERPROFILE\.claude\ollama-usage.py`""
+            $psi.CreateNoWindow = $true
+            $psi.UseShellExecute = $false
+            $psi.WindowStyle = 'Hidden'
+            [System.Diagnostics.Process]::Start($psi) | Out-Null
+        } catch {}
+    }
 }
 
 # ============================== CONTEXTE (stdin Claude Code) ==============================
@@ -452,6 +559,21 @@ if ($data -and $data.context_window) {
     if ($null -ne $data.context_window.used_percentage) { $ctxPct = [double]$data.context_window.used_percentage }
     if ($null -ne $data.context_window.total_input_tokens) { $ctxTokens = [long]$data.context_window.total_input_tokens }
     if ($null -ne $data.context_window.context_window_size) { $ctxSize = [long]$data.context_window.context_window_size }
+}
+
+# Override taille contexte pour les modèles non-Anthropic (Claude Code reporte 200k par defaut)
+if ($modelName) {
+    $mid = [string]$modelName
+    switch -Regex ($mid) {
+        'kimi'                    { $ctxSize = 262144 }
+        'deepseek'                { $ctxSize = 1048576 }
+        'qwen3-coder:480b|qwen3-coder-480b' { $ctxSize = 262144 }
+        'qwen3'                   { $ctxSize = 131072 }
+        'glm'                     { $ctxSize = 131072 }
+    }
+    if ($null -ne $ctxTokens -and $null -ne $ctxSize -and $ctxSize -gt 0) {
+        $ctxPct = [double]($ctxTokens / $ctxSize * 100)
+    }
 }
 
 # ============================== ASSEMBLAGE ==============================
@@ -550,10 +672,10 @@ if ($gradStops) {
 $line1 += "$pathFG$s2_bg$ch"
 
 # --- BANNER 2 : modèle + effort + ctx, sur fond s2_bg uni ---
-# Le label de l'effort lui-même (xhigh/max) prend un bg gradient char-par-char
-# (halo gaussien pour xhigh, rainbow stretch pour max) avec fg sombre lisible.
-# Get-EffortDisplay restaure $s2_bg + $s2_fg à la fin pour que le reste de la
-# bannière garde son rendu normal.
+# Le label de l'effort (low..max) est coloré par Get-EffortDisplay avec les
+# slots ANSI exacts du picker /effort. La fonction termine par [22m[39m (bold
+# off + fg défaut) SANS toucher au background, donc la bannière garde son fond
+# s2_bg ; le segment suivant (compteur de tokens) repose sa propre couleur.
 $line1 += "$s2_fg "
 if ($modelName) {
     $line1 += "$modelName  "
@@ -591,7 +713,7 @@ if ($usage) {
         $pct  = [double]$usage.five_hour.utilization
         $col  = Get-UsageColor $pct $usageStale
         $bar  = Format-Bar $pct $col
-        $rst  = Format-Reset $usage.five_hour.resets_at $usageReferenceTime
+        $rst  = Format-ResetOrRaw $usage.five_hour.resets_at $usageReferenceTime
         $seg  = "${col}5h$reset $bar ${col}$([int]$pct)%$reset"
         if ($rst) { $seg += " $resetCol($rst)$reset" }
         $usageSegments += $seg
@@ -601,7 +723,7 @@ if ($usage) {
         $pct  = [double]$usage.seven_day.utilization
         $col  = Get-UsageColor $pct $usageStale
         $bar  = Format-Bar $pct $col
-        $rst  = Format-Reset $usage.seven_day.resets_at $usageReferenceTime
+        $rst  = Format-ResetOrRaw $usage.seven_day.resets_at $usageReferenceTime
         $seg  = "${col}7d$reset $bar ${col}$([int]$pct)%$reset"
         if ($rst) { $seg += " $resetCol($rst)$reset" }
         $usageSegments += $seg
@@ -612,7 +734,7 @@ if ($usage) {
         $pct  = [double]$usage.seven_day_opus.utilization
         $col  = Get-UsageColor $pct $usageStale
         $bar  = Format-Bar $pct $col
-        $rst  = Format-Reset $usage.seven_day_opus.resets_at $usageReferenceTime
+        $rst  = Format-ResetOrRaw $usage.seven_day_opus.resets_at $usageReferenceTime
         $seg  = "${col}opus$reset $bar ${col}$([int]$pct)%$reset"
         if ($rst) { $seg += " $resetCol($rst)$reset" }
         $usageSegments += $seg
