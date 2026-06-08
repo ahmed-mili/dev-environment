@@ -38,15 +38,37 @@
 
 set -euo pipefail
 
-DESK="ahmed@100.66.28.125"        # desktop via Tailscale (IP 100.x)
-DEST_DIR="/home/ahmed/.claude-images"
-
 # Tout appel reseau est borne par `timeout` : sans ca, un cote desktop qui ne
 # rend jamais la main (cf. l'ancien `wl-copy` qui forkait un serveur clipboard
 # persistant tenant le canal SSH ouvert) gele indefiniment le screenshot-watcher
 # qui nous appelle en boucle synchrone. BatchMode evite tout prompt interactif.
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
 NET_TIMEOUT=30
+
+# Host SSH du desktop (alias ~/.ssh/config du telephone, surchargeable via $DESK).
+DESK="${DESK:-desktop}"
+
+# Home distant determine dynamiquement (une seule fois, mis en cache).
+DESK_HOME_CACHE="$HOME/.cache/img2claude-desk-home"
+if [ ! -f "$DESK_HOME_CACHE" ]; then
+  mkdir -p "$(dirname "$DESK_HOME_CACHE")"
+  ssh -o LogLevel=ERROR -o ConnectTimeout=5 -o BatchMode=yes "$DESK" 'echo "$HOME"' > "$DESK_HOME_CACHE" 2>/dev/null || true
+fi
+DESK_HOME="$(cat "$DESK_HOME_CACHE" 2>/dev/null || echo "/home/unknown")"
+DEST_DIR="$DESK_HOME/.claude-images"
+
+# WIN_USER : pour le maillon ssh Windows natif (port 2222). Lu depuis ~/.bashrc.local
+# si l'environnement ne l'a pas deja (ex: lance par Termux:Boot).
+[ -n "${WIN_USER:-}" ] || {
+  if [ -f "$HOME/.bashrc.local" ]; then
+    set +e
+    source "$HOME/.bashrc.local" 2>/dev/null
+    set -e
+  fi
+}
+
+# Nom de la distribution WSL (pour le chemin UNC \\wsl.localhost\...).
+WSL_DISTRO="${WSL_DISTRO:-Ubuntu}"
 
 # Un fichier image DOIT etre passe en argument (par screenshot-watcher ou par le
 # hook termux-file-editor). Plus de mode "sans argument" (scan de la + recente) :
@@ -136,7 +158,7 @@ else
 fi
 # Cote desktop, en une connexion :
 #   1. purge auto (ne garde que les 30 plus recentes)
-#   2. wslpath convertit /home/ahmed/... -> \\wsl.localhost\Ubuntu\home\ahmed\...
+#   2. wslpath convertit /home/<user>/... -> \\wsl.localhost\Ubuntu\home\<user>\...
 #      (powershell.exe tourne cote Windows et lit le FS WSL via UNC)
 #   3. PowerShell -Sta SetImage met l'image dans le clipboard WINDOWS (bonus
 #      Discord & co). -Sta est obligatoire : System.Windows.Forms.Clipboard
@@ -176,6 +198,22 @@ ok=0; for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ "\$ok" = 1 ] || { echo "wl-copy image/png pas pret" >&2; exit 1; }
 REMOTE
+
+# --- Maillon Windows natif (Claude Code pwsh) --------------------------------
+# Depuis une session SSH vers WSL, WSL_INTEROP est vide et powershell.exe
+# echoue silencieusement (|| true dans le bloc ci-dessus). On atteint le
+# presse-papier Windows par un ssh DIRECT vers le sshd Windows (port 2222).
+# Le chemin UNC lit l'image deposee dans WSL par le scp precedent.
+if [ -n "${WIN_USER:-}" ]; then
+  win_img_path="\\\\wsl.localhost\\$WSL_DISTRO${DESK_HOME//\//\\}\\.claude-images\\${dest}"
+  timeout "$NET_TIMEOUT" ssh -p 2222 "${SSH_OPTS[@]}" "$WIN_USER@$DESK" \
+    powershell.exe -Sta -NoProfile -NonInteractive -Command \
+    "Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \
+     \$img = [System.Drawing.Image]::FromFile('$win_img_path'); \
+     [System.Windows.Forms.Clipboard]::SetImage(\$img); \
+     \$img.Dispose()" </dev/null >/dev/null 2>&1 || true
+fi
+
 # Staging desktop reussi : on marque le succes AVANT le post ✅. Si on est arrive ici,
 # le scp ET le bloc REMOTE ont reussi (set -e) -> le trap ne retirera plus le ⏳.
 staged=1

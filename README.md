@@ -1,15 +1,26 @@
 # dev-environment
 
-Cross-platform config for my Claude Code setup on **Windows** and **Android** (Termux).
+Cross-platform config for my Claude Code setup on **Windows** (native + WSL) and **Android** (Termux thin-client).
 
 ## Structure
 
 ```
 dev-environment/
-├── windows/        # PowerShell 7, Windows Terminal, Fastfetch
-├── android/        # Termux: bash, Ubuntu-style prompt, fastfetch
-└── claude-code/    # statusline, settings, hooks, skills
+├── windows/        # PowerShell 7 profile, Windows Terminal, Fastfetch, Zellij (Windows)
+├── android/        # Termux: bash, SSH client, screenshot→desktop pipeline, fastfetch
+├── claude-code/    # Claude Code config: statusline (Rust + PowerShell), settings, hooks, skills
+│   ├── termux/     # img2claude: push phone screenshots/photos into desktop clipboard
+│   ├── zellij/     # Zellij config (WSL gruvbox-material / Windows night-owl)
+│   └── skills/     # 11 custom skills (deployed to ~/.claude/skills)
+├── bootstrap.ps1   # Windows one-liner (8 idempotent steps)
+└── bootstrap.sh    # Android one-liner (auto-detects legacy → migrates)
 ```
+
+**Daily drivers:**
+- **Mux:** Zellij (WSL + Windows native), replaces tmux for daily use; tmux kept for agents/orchestrators.
+- **Phone→Desktop:** Screenshot/photo auto-staged into desktop clipboard via `img2claude` (Wayland + Windows native), pasted with `Alt+V`.
+- **Sessionizer:** F2 opens a unified fzf menu of active Zellij sessions + `~/dev` projects + Obsidian vaults.
+- **Ollama Cloud:** `Ctrl+Y` launches a model picker that maps 3 Ollama models to Claude's Opus/Sonnet/Haiku slots.
 
 ## Install
 
