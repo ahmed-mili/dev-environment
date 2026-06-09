@@ -61,6 +61,9 @@ HOME_FILES=( "tmux.conf:.tmux.conf" )
 # Device-context detectors (deployed as a subdir under ~/.claude/)
 DEVICE_CONTEXT_DIR="device-context"
 
+# Utility scripts (deployed as a subdir under ~/.claude/)
+SCRIPTS_DIR="scripts"
+
 # Custom skills tracked in the repo (mirror of deploy.ps1's $CustomSkills).
 SKILLS=(
     claude-file-recovery copy-edit css-layout-check deploy-safety
@@ -102,6 +105,8 @@ if [ "$MODE" = "pull" ]; then
     for s in "${SKILLS[@]}"; do copy_skill "$REPO_CLAUDE/skills/$s" "$HOME_CLAUDE/skills/$s"; done
     echo "Device context:"
     copy_skill "$REPO_CLAUDE/$DEVICE_CONTEXT_DIR" "$HOME_CLAUDE/$DEVICE_CONTEXT_DIR"
+    echo "Scripts:"
+    copy_skill "$REPO_CLAUDE/$SCRIPTS_DIR" "$HOME_CLAUDE/$SCRIPTS_DIR"
     echo "Done. keybindings.json hot-reloads (no restart). tmux: 'tmux source-file ~/.tmux.conf' to apply on a running server. New skills: restart Claude Code."
 else
     echo "=== Push: $HOME_CLAUDE -> $REPO_CLAUDE ==="
@@ -116,5 +121,7 @@ else
     for s in "${SKILLS[@]}"; do copy_skill "$HOME_CLAUDE/skills/$s" "$REPO_CLAUDE/skills/$s"; done
     echo "Device context:"
     copy_skill "$HOME_CLAUDE/$DEVICE_CONTEXT_DIR" "$REPO_CLAUDE/$DEVICE_CONTEXT_DIR"
+    echo "Scripts:"
+    copy_skill "$HOME_CLAUDE/$SCRIPTS_DIR" "$REPO_CLAUDE/$SCRIPTS_DIR"
     echo "Done. Reminder: cd dev-environment ; git add -A ; git commit ; git push"
 fi

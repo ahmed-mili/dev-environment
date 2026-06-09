@@ -64,6 +64,27 @@ Each shell profile defines a `claude()` wrapper that calls a small detector befo
 
 The assistant can read this file with `Read ~/.claude/.device-context` to know whether the user is on their phone, their PC, or SSH-ing from one to the other. This avoids proposing PC-only actions when the user is on Termux, or phone-only actions when the user is on WSL.
 
+### Plugin integrity check
+
+Plugins listed in `settings.json` -> `enabledPlugins` may appear "enabled" but not actually installed (cache corruption, new machine, reinstall). This makes skills appear in the system reminder but they are not invocable — the assistant will not know they exist.
+
+**Detect missing plugins:**
+```bash
+# WSL / Linux / Termux
+bash ~/.claude/scripts/check-plugins.sh
+
+# Windows PowerShell
+& ~/.claude/scripts/check-plugins.ps1
+```
+
+**Install missing plugins automatically:**
+```bash
+bash ~/.claude/scripts/check-plugins.sh --fix
+# Windows: & ~/.claude/scripts/check-plugins.ps1 -Fix
+```
+
+Run this after any `deploy --pull` or `bootstrap` on a new machine, or whenever the Skill Registry looks incomplete. The script parses `settings.json`, compares against `claude plugin list`, and installs whatever is missing.
+
 ### To add a new custom skill to the whitelist
 
 Edit `deploy.ps1` line `$CustomSkills = @(...)` and add your skill's folder name.

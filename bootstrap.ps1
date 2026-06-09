@@ -53,7 +53,7 @@ $GLYPH_OK = [char]0x2713  # check mark
 
 $script:T0        = Get-Date
 $script:StepIdx   = 0
-$script:StepTotal = 8   # 1.Checks 2.Git 3.GitConfig 4.Clone 5.Bundle 6.Build 7.Deploy 8.UpdateClaude+Plugins
+$script:StepTotal = 9   # 1.Checks 2.Git 3.GitConfig 4.Clone 5.Bundle 6.Build 7.Deploy 8.UpdateClaude+Plugins 9.PluginCheck
 
 function Write-Step {
     param([string]$msg)
@@ -289,6 +289,18 @@ if (-not $claudeCmd) {
         if ($LASTEXITCODE -ne 0) { Write-Warn ("claude plugin install {0} returned {1}" -f $p, $LASTEXITCODE) }
     }
     Write-Ok ("{0} plugin(s) processed" -f $plugins.Count)
+}
+
+# ---------------------------------------------------------------------------
+# 9. Plugin integrity check — ensure all enabledPlugins are actually installed
+# ---------------------------------------------------------------------------
+Write-Step 'Checking plugin integrity'
+$checkScript = Join-Path $RepoPath 'claude-code\scripts\check-plugins.ps1'
+if (Test-Path $checkScript) {
+    & $checkScript -Fix 2>$null | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
+    Write-Ok 'plugin integrity check complete'
+} else {
+    Write-Warn 'check-plugins.ps1 not found — skipping'
 }
 
 # ---------------------------------------------------------------------------

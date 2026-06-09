@@ -154,6 +154,14 @@ if ($Pull) {
     Write-TableRow $dcName $st $dcW
     Write-TableFooter $dcW
 
+    # Scripts
+    $scriptsName = 'scripts'
+    $scriptsW = Get-NameWidth @($scriptsName)
+    Write-TableHeader 'Scripts' 1 $scriptsW
+    $st = Copy-One "$RepoClaude\scripts" "$HomeClaude\scripts"
+    Write-TableRow $scriptsName $st $scriptsW
+    Write-TableFooter $scriptsW
+
     Write-Host "`nDone. Restart Claude Code so the new skills/settings are picked up." -ForegroundColor Yellow
 }
 
@@ -205,6 +213,14 @@ if ($Push) {
     $st = Copy-One "$HomeClaude\device-context" "$RepoClaude\device-context"
     Write-TableRow $dcName $st $dcW
     Write-TableFooter $dcW
+
+    # Scripts
+    $scriptsName = 'scripts'
+    $scriptsW = Get-NameWidth @($scriptsName)
+    Write-TableHeader 'Scripts' 1 $scriptsW
+    $st = Copy-One "$HomeClaude\scripts" "$RepoClaude\scripts"
+    Write-TableRow $scriptsName $st $scriptsW
+    Write-TableFooter $scriptsW
 
     Write-Host "`nDone. Reminder : cd dev-environment ; git add -A ; git commit ; git push" -ForegroundColor Yellow
 }
