@@ -44,8 +44,8 @@ fi
 MISSING=()
 for plugin in "${WANTED[@]}"; do
     name="${plugin%%@*}"
-    # claude plugin list --scope user prints one line per installed plugin
-    if ! claude plugin list --scope user 2>/dev/null | grep -q "^${name} "; then
+    # claude plugin list prints indented lines like: "  ❯ name@marketplace"
+    if ! claude plugin list 2>/dev/null | grep -q "❯ ${name}@"; then
         MISSING+=("$plugin")
     fi
 done

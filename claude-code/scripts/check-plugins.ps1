@@ -28,10 +28,12 @@ if ($wanted.Count -eq 0) {
 }
 
 # Check which ones are actually installed
-$installed = @(claude plugin list --scope user 2>$null | ForEach-Object { ($_ -split '\s+')[0] })
+# Format: "  ❯ name@marketplace"  (lines with the bullet marker)
+$installed = @(claude plugin list 2>$null | Where-Object { $_ -match '❯\s+(.+)' } | ForEach-Object { $matches[1].Trim() })
 $missing = @($wanted | Where-Object {
     $name = ($_ -split '@')[0]
-    $name -notin $installed
+    $pluginName = ($_ -split '@')[0] + '@' + ($_ -split '@')[1]
+    $pluginName -notin $installed
 })
 
 if ($missing.Count -eq 0) {
