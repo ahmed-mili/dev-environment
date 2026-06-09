@@ -146,6 +146,14 @@ if ($Pull) {
     }
     Write-TableFooter $skillW
 
+    # Device context
+    $dcName = 'device-context'
+    $dcW = Get-NameWidth @($dcName)
+    Write-TableHeader 'Device context' 1 $dcW
+    $st = Copy-One "$RepoClaude\device-context" "$HomeClaude\device-context"
+    Write-TableRow $dcName $st $dcW
+    Write-TableFooter $dcW
+
     Write-Host "`nDone. Restart Claude Code so the new skills/settings are picked up." -ForegroundColor Yellow
 }
 
@@ -189,6 +197,14 @@ if ($Push) {
         Write-TableRow $s $st $skillW
     }
     Write-TableFooter $skillW
+
+    # Device context
+    $dcName = 'device-context'
+    $dcW = Get-NameWidth @($dcName)
+    Write-TableHeader 'Device context' 1 $dcW
+    $st = Copy-One "$HomeClaude\device-context" "$RepoClaude\device-context"
+    Write-TableRow $dcName $st $dcW
+    Write-TableFooter $dcW
 
     Write-Host "`nDone. Reminder : cd dev-environment ; git add -A ; git commit ; git push" -ForegroundColor Yellow
 }

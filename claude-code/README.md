@@ -44,6 +44,26 @@ git add -A ; git commit -m "<message>" ; git push
 
 > ⚠️ `deploy.ps1 -Push` only copies the **11 whitelisted custom skills** to the repo. Anthropic's official skills or marketplace downloads (`brand-guidelines`, `claude-api`, `docx`, etc.) are never committed (keeps the repo lean).
 
+### Device context detection (so the assistant knows where it's talking)
+
+Each shell profile defines a `claude()` wrapper that calls a small detector before launching the real Claude binary. The detector writes a JSON file at `~/.claude/.device-context`:
+
+| Field | Example | Meaning |
+| --- | --- | --- |
+| `device` | `desktop` / `phone` | Which physical device |
+| `context` | `wsl` / `termux` / `ssh-to-wsl` / `pwsh-native` | Which shell / path |
+| `shell` | `bash` / `pwsh` | Shell type |
+| `distro` | `Ubuntu` | WSL distro (WSL only) |
+| `model` | `Xiaomi 13T Pro` | Phone model (Termux only) |
+| `ssh_from` | `100.66.28.125` | Client IP if connected via SSH |
+| `timestamp` | ISO 8601 | When the context was last written |
+
+**WSL / Linux** : the `claude()` wrapper in `~/.bashrc` calls `detect.sh` then `env -u TMUX claude`.
+**Windows pwsh** : the `claude()` function in `$PROFILE` calls `detect.ps1` then the binary.
+**Termux** : same wrapper as WSL — `detect.sh` detects Termux via `$PREFIX`.
+
+The assistant can read this file with `Read ~/.claude/.device-context` to know whether the user is on their phone, their PC, or SSH-ing from one to the other. This avoids proposing PC-only actions when the user is on Termux, or phone-only actions when the user is on WSL.
+
 ### To add a new custom skill to the whitelist
 
 Edit `deploy.ps1` line `$CustomSkills = @(...)` and add your skill's folder name.

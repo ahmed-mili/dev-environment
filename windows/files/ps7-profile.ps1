@@ -168,3 +168,21 @@ if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -Err
 
     fastfetch
 }
+
+# ---- Claude Code wrapper : device-context detection ------------------------
+# Calls the detector before launching the real claude binary, so the assistant
+# knows which machine/shell/context it is talking to. The detector writes a
+# JSON file at ~/.claude/.device-context that the assistant can read.
+# Recursion is avoided by calling the binary via its full path.
+function claude {
+    $detectScript = "$env:USERPROFILE\.claude\device-context\detect.ps1"
+    if (Test-Path $detectScript) {
+        & $detectScript 2>$null
+    }
+    $claudeCmd = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $claudeCmd) {
+        Write-Error "claude not found on PATH"
+        return
+    }
+    & $claudeCmd.Source @args
+}

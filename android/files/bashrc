@@ -229,5 +229,16 @@ stop-pc()  { _win_run "shutdown /s /t 0"; }                                  # f
 # ---- Ollama Cloud model launcher (Ctrl+Y sur le desktop, ou `oc` depuis le tél) ----
 oc() { ssh -tt -o LogLevel=ERROR desktop "$HOME/dev/dev-environment/claude-code/ollama-launcher.sh"; }
 
+# ---- Claude Code wrapper : truecolor + device-context detection ------------
+# WSL: Claude Code downgrades to 256-color when it sees $TMUX -> launch without.
+# Termux: device-context detector writes ~/.claude/.device-context so the
+# assistant knows which machine/shell/context it is talking to.
+claude() {
+  if [ -f "$HOME/.claude/device-context/detect.sh" ]; then
+    bash "$HOME/.claude/device-context/detect.sh" 2>/dev/null || true
+  fi
+  env -u TMUX claude "$@"
+}
+
 # ---- Local overrides — keep machine-specific tweaks out of git ----
 [ -f "$HOME/.bashrc.local" ] && source "$HOME/.bashrc.local"
