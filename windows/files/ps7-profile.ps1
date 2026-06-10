@@ -10,14 +10,14 @@ function isadmin {
 
 function dev { Set-Location C:\dev }
 
-# Invoke-Sessionizer : menu fzf (sessions/projets/vaults) qui tourne en WSL ; lié à F2 plus bas.
-# Exécuté comme une vraie commande (pas dans le ScriptBlock) pour que fzf reçoive le TTY.
+# Invoke-Sessionizer : menu fzf (sessions/projets/vaults) qui tourne en WSL ; lie a F2 plus bas.
+# Execute comme une vraie commande (pas dans le ScriptBlock) pour que fzf recoive le TTY.
 function Invoke-Sessionizer {
     wsl -d Ubuntu -e bash -lic "PC_VIEW=all ~/dev/dev-environment/claude-code/tmux-sessionizer.sh"
-    # F2 ne doit RIEN laisser (comme `ble-bind -c` en WSL). AcceptLine a imprimé la ligne
+    # F2 ne doit RIEN laisser (comme `ble-bind -c` en WSL). AcceptLine a imprime la ligne
     # "PS> Invoke-Sessionizer" ; fzf/zellij (alternate screen) restaure le curseur juste dessous.
-    # On remonte d'1 ligne + efface jusqu'en bas → le prompt reprend proprement, le scrollback
-    # au-dessus est PRÉSERVÉ (≠ Clear-Host). ESC[1A = curseur up, ESC[0J = efface vers le bas.
+    # On remonte d'1 ligne + efface jusqu'en bas -> le prompt reprend proprement, le scrollback
+    # au-dessus est PRESERVE (!= Clear-Host). ESC[1A = curseur up, ESC[0J = efface vers le bas.
     $ESC = [char]27
     [Console]::Write("$ESC[1A$ESC[0J")
 }
@@ -46,11 +46,11 @@ if (Get-Module -Name PSReadLine -ListAvailable) {
         Default            = '#CDD6F4'  # Text
         ContinuationPrompt = '#A6ADC8'  # Subtext0
     } -ErrorAction SilentlyContinue
-    # F3 : bascule InlineView <-> ListView (déplacé de F2 pour libérer F2, comme en WSL).
+    # F3 : bascule InlineView <-> ListView (deplace de F2 pour liberer F2, comme en WSL).
     Set-PSReadLineKeyHandler -Key F3 -Function SwitchPredictionView
-    # F2 : menu sessionizer — MÊME menu fzf qu'en WSL (sessions/projets/vaults).
-    #      On INSÈRE `Invoke-Sessionizer` + AcceptLine (l'exécute comme une vraie ligne) : lancer
-    #      un TUI plein écran DANS le ScriptBlock ne lui passe pas le TTY -> fzf reste figé.
+    # F2 : menu sessionizer - MEME menu fzf qu'en WSL (sessions/projets/vaults).
+    #      On INSERE `Invoke-Sessionizer` + AcceptLine (l'execute comme une vraie ligne) : lancer
+    #      un TUI plein ecran DANS le ScriptBlock ne lui passe pas le TTY -> fzf reste fige.
     Set-PSReadLineKeyHandler -Key F2 -BriefDescription 'Sessionizer' -LongDescription 'Menu sessions/projets/vaults (idem WSL F2)' -ScriptBlock {
         [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
         [Microsoft.PowerShell.PSConsoleReadLine]::Insert('Invoke-Sessionizer')
@@ -75,7 +75,7 @@ if (Get-Module -ListAvailable -Name CompletionPredictor) {
 }
 
 # ---- zoxide: smart `cd` based on frecency. After visiting a dir once,
-# `cd <fuzzy-name>` jumps there from anywhere (e.g. `cd dev-env` →
+# `cd <fuzzy-name>` jumps there from anywhere (e.g. `cd dev-env` ->
 # C:\dev\dev-environment). Original literal `cd ./path` still works first.
 if (Get-Command zoxide -ErrorAction SilentlyContinue) {
     Invoke-Expression (& { (zoxide init powershell --cmd cd | Out-String) })
@@ -139,15 +139,15 @@ if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -Err
 
     # Print a per-character gradient USER@HOST header before fastfetch.
     # The gradient walks the same 5 Catppuccin stops as the rest of the splash
-    # (Flamingo → Pink → Mauve → Lavender → Sapphire) so the whole header is a
+    # (Flamingo -> Pink -> Mauve -> Lavender -> Sapphire) so the whole header is a
     # single continuous palette ribbon.
     $titleText = "$env:USERNAME@$env:COMPUTERNAME"
-    # Restricted gradient for the title — uses only the cool-side trio:
+    # Restricted gradient for the title - uses only the cool-side trio:
     # the exact colors of the RAM, Drive and Display rows of the splash.
     $stops = @(
-        @(192, 178, 250),  # RAM     (lerp Mauve→Lavender)
+        @(192, 178, 250),  # RAM     (lerp Mauve->Lavender)
         @(180, 190, 254),  # Drive   (Lavender)
-        @(148, 194, 245)   # Display (lerp Lavender→Sapphire)
+        @(148, 194, 245)   # Display (lerp Lavender->Sapphire)
     )
     $segCount = $stops.Count - 1
     $sb = [System.Text.StringBuilder]::new()
@@ -169,15 +169,50 @@ if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -Err
     fastfetch
 }
 
-# ---- Claude Code wrapper : device-context detection ------------------------
-# Calls the detector before launching the real claude binary, so the assistant
-# knows which machine/shell/context it is talking to. The detector writes a
-# JSON file at ~/.claude/.device-context that the assistant can read.
+# `wdev` : atterrit dans la session tmux `main` du Claude WSL (Ubuntu).
+# Meme session que celle que mosh attache depuis le telephone -> relais PC <-> mobile.
+function wdev {
+    wsl -d Ubuntu -e bash -lic "cd ~/dev/dev-environment; tmux attach -t main 2>/dev/null || tmux new -s main"
+}
+
+# ---- Claude Code wrapper : device-context detection + clipboard watcher -----
+# 1. Calls the detector before launching the real claude binary, so the
+#    assistant knows which machine/shell/context it is talking to. The detector
+#    writes a JSON file at ~/.claude/.device-context that the assistant reads.
+# 2. Starts img-clip-watcher.ps1 : pushes every new phone image (img2claude ->
+#    WSL ~/.claude-images) into the clipboard of THIS logon session. The
+#    Windows clipboard is per window station : a SetImage performed by another
+#    SSH connection lands in an ephemeral clipboard this claude can never read
+#    (proven 2026-06-10), so the watcher MUST run here, next to claude.exe.
+#    Its internal mutex (scoped per window station) keeps a single instance per
+#    clipboard; extra launches exit instantly. It dies with the zellij server /
+#    calling shell, so nothing accumulates.
 # Recursion is avoided by calling the binary via its full path.
 function claude {
     $detectScript = "$env:USERPROFILE\.claude\device-context\detect.ps1"
     if (Test-Path $detectScript) {
         & $detectScript 2>$null
+    }
+    $watcher = "$env:USERPROFILE\.local\bin\img-clip-watcher.ps1"
+    if (Test-Path $watcher) {
+        # Invoke-CimMethod (PAS Start-Process) : le process est cree par le
+        # service WMI, donc HORS du job ConPTY du pane zellij (qui tue toute
+        # son arborescence a la fermeture du pane), mais avec le token de
+        # l'appelant -> la bonne logon session. Le watcher ne meurt qu'avec
+        # son ancre (serveur zellij / shell), pas avec ce pane.
+        $cmd = "powershell.exe -Sta -NoProfile -ExecutionPolicy Bypass -File `"$watcher`" -CallerPid $PID"
+        try {
+            Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Out-Null
+        } catch {
+            # Degrade gracefully : clipboard phone->pwsh may be unavailable, but
+            # Claude itself must still start.
+            try {
+                Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @(
+                    '-Sta', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                    '-File', $watcher, '-CallerPid', $PID
+                ) | Out-Null
+            } catch {}
+        }
     }
     $claudeCmd = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue
     if (-not $claudeCmd) {

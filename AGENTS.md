@@ -1,6 +1,6 @@
-# CLAUDE.md — dev-environment
+# AGENTS.md — dev-environment
 
-Conventions spécifiques à ce repo. S'applique en plus du `CLAUDE.md` global user-level.
+Conventions spécifiques à ce repo. S'applique en plus du `AGENTS.md` global user-level.
 
 ---
 
@@ -29,7 +29,7 @@ Dans un fichier versionné du repo, **jamais** de nom, hostname, IP, email, ou i
 Chaque script/chemin doit indiquer sa plateforme cible :
 - `windows/` → PowerShell 7+, Windows Terminal, `C:\dev`
 - `android/` → Termux (bash), `~/storage`, libellés Xiaomi/HyperOS obligatoires
-- `claude-code/` → config Claude Code (statusline, settings, hooks, skills)
+- `Codex/` → config Codex (statusline, settings, hooks, skills)
 
 Pas de chemin Linux dans un script Windows, et inversement.
 
@@ -58,10 +58,10 @@ dev-environment/
 │   └── files/
 ├── android/        # Termux bash, Ubuntu-style prompt, fastfetch, ssh-client
 │   └── setup-ssh-client.sh
-├── claude-code/    # Config Claude Code (statusline, settings, hooks, skills)
+├── Codex/    # Config Codex (statusline, settings, hooks, skills)
 │   ├── termux/img2claude      # push image téléphone → desktop
 │   ├── wsl-clipboard/         # clip-watcher systemd (WSL)
-│   ├── deploy.ps1 / deploy.sh # sync repo ↔ ~/.claude/
+│   ├── deploy.ps1 / deploy.sh # sync repo ↔ ~/.Codex/
 │   └── skills/
 ├── bootstrap.ps1   # one-liner Windows (idempotent, 8 étapes)
 ├── bootstrap.sh    # one-liner Android (auto-detect legacy → migrate)
@@ -74,16 +74,16 @@ dev-environment/
 
 ### `deploy.ps1` / `deploy.sh`
 
-Bidirectionnel (repo ↔ `~/.claude/`). Whitelist explicite des fichiers trackés. Le reste de `~/.claude/` (sessions, history, plugins officiels, credentials) est laissé intact.
+Bidirectionnel (repo ↔ `~/.Codex/`). Whitelist explicite des fichiers trackés. Le reste de `~/.Codex/` (sessions, history, plugins officiels, credentials) est laissé intact.
 
-### `img2claude` — règle à 2 lecteurs
+### `img2claude`
 
 Pipeline téléphone → desktop :
 1. **Dépôt fichier** (`rsync`/`scp`) dans `~/.claude-images`
-2. **Wayland** (`wl-copy`) : pour Claude Code WSL (wl-paste lit `image/png`)
-3. **Windows natif** (`img-clip-watcher.ps1`) : pour Claude Code pwsh natif
+2. **Wayland** (`wl-copy`) : pour Codex WSL
+3. **Windows natif** (`img-clip-watcher.ps1`) : pour Codex pwsh natif
 
-Le presse-papiers Windows **ne doit plus** être alimenté par `ssh -p 2222 ... SetImage` depuis `img2claude` : ce SetImage écrit dans la window station éphémère de la connexion SSH et renvoie un faux succès. Le bon design est local au lecteur : le wrapper `claude()` du profil pwsh lance `img-clip-watcher.ps1` dans la même window station que Claude, et ce watcher lit `\\wsl.localhost\<distro>\home\...\.claude-images`.
+Ne pas réintroduire `ssh -p 2222 ... powershell.exe SetImage` dans `img2claude` : ce SetImage écrit dans la window station éphémère de la connexion SSH et renvoie un faux succès. Le presse-papiers Windows natif doit être alimenté côté PC par `img-clip-watcher.ps1`, lancé par le wrapper `claude()` dans la même window station que le Claude pwsh lecteur.
 
 ---
 
@@ -92,7 +92,7 @@ Le presse-papiers Windows **ne doit plus** être alimenté par `ssh -p 2222 ... 
 | Doit être versionné | Ne doit PAS être versionné |
 |---------------------|---------------------------|
 | Scripts, configs, skills | `~/.bashrc.local`, secrets, IPs perso |
-| README avec one-liner public | Logs, sessions, history Claude |
+| README avec one-liner public | Logs, sessions, history Codex |
 | `.gitignore` adapté | Fichiers générés (binaires, cache) |
 
 ---

@@ -13,7 +13,7 @@
 # termux-wake-lock : sans ca, Android tue le process des que l'ecran s'eteint.
 # Le wake lock se voit dans la notif Termux ("Acquired wakelock") -> permet
 # d'arreter d'un swipe si besoin. Cout batterie reel : negligeable pour un
-# polling 2s qui ne fait qu'un find toutes les 2s.
+# polling court qui ne fait qu'un find borne a maxdepth 1.
 #
 # SUPERVISOR : relance le watcher s'il meurt (crash, OOM, etc). Log chaque
 # redemarrage dans ~/.screenshot-watcher.log pour debug post-mortem. Backoff

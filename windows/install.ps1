@@ -271,7 +271,7 @@ Install-WingetPackage -Id 'Microsoft.WindowsTerminal'     -DisplayName 'Windows 
 Install-WingetPackage -Id 'junegunn.fzf'                  -DisplayName 'fzf'
 Install-WingetPackage -Id 'ajeetdsouza.zoxide'            -DisplayName 'zoxide'
 # Fonts : on installe en trio plutot que la Nerd Font patchee fourre-tout, car
-# cette derniere remplace les codepoints emoji BMP (U+2705 ✓, U+274C ✗, U+26A0 ⚠
+# cette derniere remplace les codepoints emoji BMP (U+2705 CHECK, U+274C CROSS, U+26A0 WARNING
 # etc.) par des glyphes monochromes qui ecrasent le fallback Segoe UI Emoji
 # colore. Resultat avec la Nerd Font seule : tableaux et docs avec emojis BMP
 # illisibles en noir et blanc. Le combo recommande par Nerd Fonts eux-memes :
@@ -293,7 +293,7 @@ Install-UserFont -DisplayName 'Symbols Nerd Font Mono' `
     -MarkerFile  'SymbolsNerdFontMono-Regular.ttf'
 # Noto Color Emoji : la police emoji native Android (Google/Xiaomi/MIUI). On
 # la prefere a Segoe UI Emoji parce que (1) elle gere les drapeaux pays
-# (Windows affiche 'FR' au lieu de 🇫🇷 -- decision politique MS) et (2) le
+# (Windows affiche 'FR' au lieu du drapeau FR -- decision politique MS) et (2) le
 # style match exactement les emojis du telephone de l'user (coherence
 # cross-device).
 #
@@ -326,6 +326,31 @@ $ps7Path = Join-Path $env:USERPROFILE 'Documents\PowerShell\Microsoft.PowerShell
 Write-Utf8File -Path $ps7Path -Content $ps7Profile -WithBom $true
 Unblock-File $ps7Path
 Write-Ok (Short-Path $ps7Path)
+
+# ---------------------------------------------------------------------------
+# 2b) img-clip-watcher (clipboard natif pour Claude Code pwsh)
+# ---------------------------------------------------------------------------
+# Le wrapper claude() du profil PS7 lance ce watcher, qui pousse chaque image
+# deposee par le telephone (WSL ~/.claude-images) dans le presse-papiers de la
+# window station du claude appelant (le presse-papiers Windows est PAR window
+# station : il est impossible de l'alimenter depuis une autre connexion SSH --
+# cf. claude-code/windows-clipboard/img-clip-watcher.ps1 pour la root cause).
+# Source dans claude-code/ (machinerie Claude), pas dans windows/files/ -- on
+# ne le deploie que depuis un clone local ; en mode one-liner (irm) on skip
+# avec une note, le wrapper claude() degrade proprement (Test-Path).
+
+Write-Step 'img-clip-watcher (Claude Code clipboard)'
+$watcherSrc  = Join-Path $PSScriptRoot '..\claude-code\windows-clipboard\img-clip-watcher.ps1'
+$watcherDest = Join-Path $env:USERPROFILE '.local\bin\img-clip-watcher.ps1'
+if (Test-Path $watcherSrc) {
+    # BOM : le watcher tourne sous PS 5.1 (lecture CP-1252 sans BOM). Le fichier
+    # est 100% ASCII par contrat, le BOM est une defense en profondeur gratuite.
+    Write-Utf8File -Path $watcherDest -Content (Read-Utf8File $watcherSrc) -WithBom $true
+    Unblock-File $watcherDest
+    Write-Ok (Short-Path $watcherDest)
+} else {
+    Write-Note 'source absente (install one-liner sans clone) -- deployer depuis un clone : claude-code/windows-clipboard/img-clip-watcher.ps1 -> ~/.local/bin/'
+}
 
 # ---------------------------------------------------------------------------
 # 3) Windows PowerShell 5 profile

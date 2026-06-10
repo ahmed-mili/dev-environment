@@ -1,15 +1,16 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # watcher-toggle — notif persistante Termux:API a 2 boutons pour piloter les flux
-# du screenshot-watcher (captures + photos) SANS taper de commande.
+# image (captures + photos) SANS taper de commande.
 #
 # Source de verite = les MEMES flags fichiers que le watcher / les alias photos-on/off :
 #   ~/.screenshot-watcher.on      -> flux CAPTURES (dcim/Screenshots)
 #   ~/.screenshot-watcher.photos  -> flux PHOTOS   (dcim/Camera)
-# Le screenshot-watcher relit ces flags a chaque tour de boucle (2s) -> un tap prend
-# effet en <=2s sans redemarrer le watcher.
+# Le screenshot-watcher relit ces flags a chaque tour de boucle (0.5s) -> un tap prend
+# effet quasi immediatement sans redemarrer le watcher.
 #
 # Sous-commandes :
 #   watcher-toggle show     -> (re)poste la notif selon l'etat courant des flags
+#   watcher-toggle restore  -> reposte apres suppression manuelle de la notif
 #   watcher-toggle photos   -> bascule le flag PHOTOS puis show
 #   watcher-toggle shots    -> bascule le flag CAPTURES puis show
 #
@@ -19,15 +20,16 @@
 # aucune resolution relative possible. cf. reference_termux-boot-shebang et
 # reference_wsl-task-scheduler-path (meme piege : forcer les binaires en dur).
 #
-# Persistance : --ongoing (non balayable) -> la notif est LE point de controle, elle
-# ne doit jamais disparaitre par accident. Re-postee a l'install et a chaque boot
-# (cf. boot-screenshot-watcher). --priority low + --alert-once : silencieuse, pas de
-# re-buzz a chaque mise a jour.
+# Persistance : --ongoing + --on-delete. HyperOS peut quand meme laisser disparaitre
+# une notif "ongoing" dans certains gestes/groupes ; --on-delete rappelle `restore`,
+# qui attend un court instant puis reposte. La notif est LE point de controle, elle
+# ne doit jamais disparaitre par accident. Re-postee aussi a l'install et a chaque
+# boot (cf. boot-screenshot-watcher). --priority low + --alert-once : silencieuse.
 #
 # Channel dedie : la notif est postee sur un channel Termux:API a part
 # ("watcher-control"), cree a la volee (best-effort). Effet : elle apparait comme une
 # CATEGORIE distincte dans Reglages HyperOS > Apps > Termux:API > Notifications,
-# separee des "Image prete a coller" (channel watcher-images d'img2claude). L'user
+# separee des notifs d'image (channel watcher-images d'img2claude). L'user
 # peut la passer en silencieux cote HyperOS pour la faire descendre en bas du volet.
 # Repli sans --channel si la creation echoue (cf show) -> aucune notif perdue.
 #
@@ -43,27 +45,52 @@ ON_FLAG="$HOME/.screenshot-watcher.on"
 PHOTOS_FLAG="$HOME/.screenshot-watcher.photos"
 NOTIF_ID="watcher-toggle"
 CHANNEL_ID="watcher-control"
+GROUP_ID="watcher-control"
+RESTORE_DELAY="0"
 # Nom SANS espace : termux-notification-channel expanse $ARGS NON quote -> un nom
-# avec espace est tronque a son 1er mot (bug du script termux-api, pas le notre ;
-# confirme 2026-05-29 : "🛰️ Contrôle des flux" -> "🛰️"). Emoji + accents OK,
-# seuls les espaces cassent. cf reference_termux-notification-channels.
-CHANNEL_NAME="🛰️Contrôle-des-flux"
+# avec espace est tronque a son 1er mot (bug du script termux-api, pas le notre).
+CHANNEL_NAME="Image-control"
 
 # bascule un flag fichier : present -> absent, absent -> present.
 toggle_flag() {
   if [ -e "$1" ]; then rm -f "$1"; else touch "$1"; fi
 }
 
-state_label() { [ -e "$1" ] && printf 'ON' || printf 'OFF'; }
+is_on() { [ -e "$1" ]; }
+
+status_text() {
+  if is_on "$ON_FLAG" && is_on "$PHOTOS_FLAG"; then
+    printf 'Screenshots on - Photos on'
+  elif is_on "$ON_FLAG"; then
+    printf 'Screenshots on - Photos paused'
+  elif is_on "$PHOTOS_FLAG"; then
+    printf 'Screenshots paused - Photos on'
+  else
+    printf 'Watching paused'
+  fi
+}
+
+action_label() {
+  local flag="$1" on_label="$2" off_label="$3"
+  if is_on "$flag"; then printf '%s' "$on_label"; else printf '%s' "$off_label"; fi
+}
+
+restore() {
+  # Repost immediat apres swipe. Le temps restant vient surtout du lancement de
+  # l'action Termux:API/Android, pas de ce script.
+  [ "$RESTORE_DELAY" = 0 ] || sleep "$RESTORE_DELAY"
+  show
+}
 
 show() {
   command -v termux-notification >/dev/null 2>&1 || return 0
-  local shots photos
-  shots=$(state_label "$ON_FLAG")
-  photos=$(state_label "$PHOTOS_FLAG")
+  local content shots_action photos_action
+  content=$(status_text)
+  shots_action=$(action_label "$ON_FLAG" "Pause screenshots" "Enable screenshots")
+  photos_action=$(action_label "$PHOTOS_FLAG" "Pause photos" "Enable photos")
 
   # Channel dedie (best-effort) : isole cette notif permanente des autres notifs
-  # Termux:API (ex "Image prete a coller" d'img2claude), qui restent sur le channel
+  # Termux:API (ex notifs d'image d'img2claude), qui restent sur le channel
   # par defaut. termux-notification-channel est idempotent et NE reinitialise PAS les
   # reglages user d'un channel deja existant (importance/silence regles cote HyperOS
   # sont preserves). On n'ajoute --channel QUE si la creation reussit : un --channel
@@ -78,19 +105,23 @@ show() {
   termux-notification \
     --id "$NOTIF_ID" \
     "${channel_args[@]}" \
-    --title "🛰️ Watcher images → Claude" \
-    --content "Tap un bouton pour basculer le flux" \
+    --group "$GROUP_ID" \
+    --icon image \
+    --title "Images to PC" \
+    --content "$content" \
     --ongoing \
     --priority low \
     --alert-once \
-    --button1 "📸 Captures: $shots" --button1-action "$BASH_BIN $SELF shots" \
-    --button2 "🖼️ Photos: $photos"  --button2-action "$BASH_BIN $SELF photos" \
+    --on-delete "$BASH_BIN $SELF restore" \
+    --button1 "$shots_action" --button1-action "$BASH_BIN $SELF shots" \
+    --button2 "$photos_action"  --button2-action "$BASH_BIN $SELF photos" \
     >/dev/null 2>&1 || true
 }
 
 case "${1:-show}" in
   photos) toggle_flag "$PHOTOS_FLAG"; show ;;
   shots)  toggle_flag "$ON_FLAG";     show ;;
+  restore) restore ;;
   show)   show ;;
-  *) echo "Usage: watcher-toggle {show|photos|shots}" >&2; exit 1 ;;
+  *) echo "Usage: watcher-toggle {show|restore|photos|shots}" >&2; exit 1 ;;
 esac

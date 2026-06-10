@@ -5,6 +5,7 @@
 # Logs / cache
 *.log
 .DS_Store
+.codex-remote-attachments/
 
 # Secrets — SSH (NE JAMAIS COMMIT)
 id_ed25519

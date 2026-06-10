@@ -9,18 +9,31 @@
 # decision retiree d'img2claude 2026-05-27 : auto-paste = trop intrusif pour
 # les photos perso, on rend la main a l'user).
 #
-# Quel presse-papier ? Claude Code v2.1.152 lit l'image avec cette chaine (cli.js,
-# branche WSL), DANS CET ORDRE :
-#     wl-paste --type image/png || wl-paste --type image/bmp || powershell Get-Clipboard
-# Subtilite WSLg : si on ne met l'image QUE dans le presse-papier Windows
-# (PowerShell SetImage), le bridge WSLg l'expose cote Wayland UNIQUEMENT en
-# image/bmp -> un BMP 32-bit BI_BITFIELDS que le sharp/libvips de Claude NE SAIT
-# PAS decoder -> "No image found in clipboard". Et comme wl-paste image/bmp
-# reussit (exit 0), Claude n'atteint jamais le fallback PowerShell.
-# => On pose donc l'image en image/png dans le presse-papier WAYLAND via wl-copy :
-#    Claude la prend au 1er maillon (wl-paste --type image/png), avec des octets
-#    propres (le JPEG est re-sniffe par sharp, peu importe l'etiquette png).
-#    On garde EN PLUS le SetImage Windows pour que Discord & co puissent coller.
+# Quel presse-papier ? Deux lecteurs, deux mecanismes :
+#
+# 1. Claude WSL — lit l'image avec cette chaine (cli.js, branche WSL), DANS CET ORDRE :
+#        wl-paste --type image/png || wl-paste --type image/bmp || powershell Get-Clipboard
+#    Subtilite WSLg : si on ne met l'image QUE dans le presse-papier Windows
+#    (PowerShell SetImage), le bridge WSLg l'expose cote Wayland UNIQUEMENT en
+#    image/bmp -> un BMP 32-bit BI_BITFIELDS que le sharp/libvips de Claude NE SAIT
+#    PAS decoder -> "No image found in clipboard". Et comme wl-paste image/bmp
+#    reussit (exit 0), Claude n'atteint jamais le fallback PowerShell.
+#    => On pose donc l'image en image/png dans le presse-papier WAYLAND via wl-copy :
+#       Claude la prend au 1er maillon (wl-paste --type image/png), avec des octets
+#       propres (le JPEG est re-sniffe par sharp, peu importe l'etiquette png).
+#
+# 2. Claude pwsh NATIF (Windows) — son clipboard N'EST PAS atteignable d'ici, par
+#    construction : le presse-papiers Windows est PAR WINDOW STATION, et chaque
+#    connexion ssh :2222 recoit une window station ephemere (Service-0x0-<LUID>$)
+#    detruite a la deconnexion. Un `ssh -p 2222 ... powershell SetImage` lance
+#    d'ici renvoie exit 0 mais ecrit dans ce clipboard fantome — le Claude pwsh
+#    (logon session du serveur zellij) ne le voit JAMAIS. Prouve le 2026-06-10
+#    (SetText MARKER via ssh -> invisible depuis la session zellij). L'ancien
+#    "maillon Windows natif" (ssh :2222 SetImage) etait donc un FAUX POSITIF
+#    permanent ; il a ete retire. Le clipboard natif est alimente COTE PC par
+#    `img-clip-watcher.ps1` (lance par le wrapper claude() du profil pwsh, DANS
+#    la logon session du lecteur), qui surveille ~/.claude-images : notre seul
+#    travail ici est donc d'y deposer le fichier — deja fait par le rsync/scp.
 #
 # Pourquoi pas juste `tmux send-keys -l <path>` : un path brut tape dans le
 # prompt n'est PAS auto-attache par Claude Code (verifie 2026-05-27, v2.1.152).
@@ -57,18 +70,11 @@ fi
 DESK_HOME="$(cat "$DESK_HOME_CACHE" 2>/dev/null || echo "/home/unknown")"
 DEST_DIR="$DESK_HOME/.claude-images"
 
-# WIN_USER : pour le maillon ssh Windows natif (port 2222). Lu depuis ~/.bashrc.local
-# si l'environnement ne l'a pas deja (ex: lance par Termux:Boot).
-[ -n "${WIN_USER:-}" ] || {
-  if [ -f "$HOME/.bashrc.local" ]; then
-    set +e
-    source "$HOME/.bashrc.local" 2>/dev/null
-    set -e
-  fi
-}
-
-# Nom de la distribution WSL (pour le chemin UNC \\wsl.localhost\...).
-WSL_DISTRO="${WSL_DISTRO:-Ubuntu}"
+# NB : l'ancien bloc WIN_USER/WSL_DISTRO (maillon ssh :2222 -> SetImage) a ete
+# retire le 2026-06-10 : il ecrivait dans le clipboard d'une window station
+# ephemere (cf. en-tete, point 2) — faux positif permanent, jamais visible par
+# le Claude pwsh. Le clipboard natif est desormais le travail du watcher cote
+# PC (img-clip-watcher.ps1), pas du telephone.
 
 # Un fichier image DOIT etre passe en argument (par screenshot-watcher ou par le
 # hook termux-file-editor). Plus de mode "sans argument" (scan de la + recente) :
@@ -92,27 +98,64 @@ ext="${newest##*.}"
 # repartir de zero (cf plan rsync). Avant : un timestamp neuf a chaque appel cassait
 # la reprise. Effet de bord mineur : ~/.claude-images contient img-<hash>.ext.
 dest="img-$(printf '%s' "$newest" | md5sum | cut -c1-12).${ext}"
+total_bytes=$(stat -c '%s' "$newest" 2>/dev/null || printf '0')
 
 echo "-> $newest"
 
-# --- Notif "Transfert en cours" (etat 1/2) -------------------------------------
-# Approche 2 etats : on poste "⏳ Transfert en cours" AVANT le scp, puis le bloc
-# "Image prete" plus bas RE-poste sur le MEME id (img2claude) -> Android remplace la
-# notif EN PLACE (⏳ -> ✅). Utile sur lien lent (scp 10-20 s) : feedback "ca avance"
-# puis "c'est arme". Channel watcher-images calcule UNE fois ici, reutilise par les
-# deux posts. Buzz (choix A1) : le 1er post (⏳) alerte via le channel sonore = petit
-# buzz "c'est parti" assume ; le ✅ (sans --alert-once) re-alerte = buzz "prete" garde.
+# --- Notifications Android (meme id, remplacees en place) ----------------------
+# Termux:API ne propose pas encore de vraie barre native setProgress() pour
+# termux-notification. On affiche donc une barre textuelle calculee depuis le %
+# rsync reel, puis l'etat final : image deposee + clipboard Wayland arme (le
+# clipboard pwsh natif est rempli cote PC par img-clip-watcher.ps1 en <= 1 s,
+# non observable d'ici — on ne pretend donc plus le "confirmer").
 have_notif=0; img_channel=(); staged=0
+IMG_GROUP="watcher-images"
+
+format_mb() {
+  awk -v bytes="${1:-0}" 'BEGIN { printf "%.2f MB", bytes / 1048576 }'
+}
+
+progress_content() {
+  local pct="${1%%%}" done_bytes="${2:-}" eta_label=""
+  case "$pct" in ''|*[!0-9]* ) pct=0 ;; esac
+  case "$done_bytes" in ''|*[!0-9]* )
+    if [ "${total_bytes:-0}" -gt 0 ]; then
+      done_bytes=$((total_bytes * pct / 100))
+    else
+      done_bytes=0
+    fi
+    ;;
+  esac
+  [ "$done_bytes" -gt "${total_bytes:-0}" ] && done_bytes="${total_bytes:-0}"
+  if [ -n "${transfer_started_at:-}" ] && [ "$pct" -gt 0 ] && [ "$pct" -lt 100 ]; then
+    local now elapsed eta
+    now=$(date +%s)
+    elapsed=$((now - transfer_started_at))
+    eta=$(((elapsed * (100 - pct) + pct - 1) / pct))
+    [ "$eta" -gt 1 ] && eta_label=" - ${eta}s remaining"
+  fi
+  if [ "${total_bytes:-0}" -gt 0 ]; then
+    printf '%s / %s - %s%%%s' "$(format_mb "$done_bytes")" "$(format_mb "$total_bytes")" "$pct" "$eta_label"
+  else
+    printf '%s%%%s' "$pct" "$eta_label"
+  fi
+}
+
+notify_img() {
+  [ "$have_notif" = 1 ] || return 0
+  termux-notification --id img2claude "${img_channel[@]}" --group "$IMG_GROUP" "$@" >/dev/null 2>&1 || true
+}
+
 if command -v termux-notification >/dev/null 2>&1; then
   have_notif=1
   # Channel dedie (best-effort) : nom SANS espace (termux-notification-channel expanse
   # $ARGS non-quote -> tronque a la 1re espace, cf reference_termux-notification-channels).
   if command -v termux-notification-channel >/dev/null 2>&1 \
-     && termux-notification-channel watcher-images "🖼️Image-prête" >/dev/null 2>&1; then
+     && termux-notification-channel watcher-images "Image-ready" >/dev/null 2>&1; then
     img_channel=(--channel watcher-images)
   fi
-  termux-notification --id img2claude "${img_channel[@]}" --title "⏳ Transfert en cours…" \
-    --content "$dest" >/dev/null 2>&1 || true
+  notify_img --ongoing --icon sync --title "Image to PC clipboard" \
+    --content "$(progress_content 0)"
   # SECURITE : si on sort AVANT le succes (scp/stage rate, timeout), le ⏳ ne doit pas
   # rester fige. trap EXIT -> retire la notif tant que staged != 1. On capture puis
   # re-emet $? (exit $rc) pour NE PAS masquer le code d'echec : le watcher gate
@@ -130,6 +173,7 @@ fi
 if command -v rsync >/dev/null 2>&1; then
   SSH_E="ssh ${SSH_OPTS[*]}"   # reutilise les memes options ssh, en chaine pour rsync -e
   pf=$(mktemp)
+  transfer_started_at=$(date +%s)
   # --partial : garde le partiel pour reprendre. --append-verify : reprend en
   # re-checksummant le prefixe deja transfere (sur pour une image immuable re-envoyee,
   # cf dest deterministe). --timeout=30 : timeout d'INACTIVITE (survit a la lenteur
@@ -140,12 +184,14 @@ if command -v rsync >/dev/null 2>&1; then
   while kill -0 "$rpid" 2>/dev/null; do
     # `|| true` OBLIGATOIRE : tant qu'aucun % n'est sorti grep exit 1 -> sous
     # set -e+pipefail l'affectation tuerait le script en plein transfert.
-    pct=$(tr '\r' '\n' < "$pf" | grep -oE '[0-9]+%' | tail -1 || true)
+    progress_line=$(tr '\r' '\n' < "$pf" | grep -E '[0-9]+%' | tail -1 || true)
+    pct=$(printf '%s' "$progress_line" | grep -oE '[0-9]+%' | tail -1 || true)
+    sent_bytes=$(printf '%s' "$progress_line" | awk '{gsub(/,/, "", $1); if ($1 ~ /^[0-9]+$/) print $1}' || true)
     # MAJ silencieuse (--alert-once) : sinon chaque % re-buzzerait. Le buzz "depart"
     # vient du ⏳ initial (deja poste) et le buzz "prete" du ✅ final (sans --alert-once).
     [ -n "$pct" ] && [ "$have_notif" = 1 ] && \
-      termux-notification --id img2claude "${img_channel[@]}" --alert-once \
-        --title "⏳ Transfert… $pct" --content "$dest" >/dev/null 2>&1 || true
+      notify_img --ongoing --alert-once \
+        --icon sync --title "Image to PC clipboard" --content "$(progress_content "$pct" "$sent_bytes")"
     sleep 1
   done
   # `rc=0; wait || rc=$?` OBLIGATOIRE : sous set -e un wait non-zero sortirait AVANT
@@ -154,37 +200,28 @@ if command -v rsync >/dev/null 2>&1; then
   rm -f "$pf"
   [ "$rc" = 0 ] || exit "$rc"   # echec -> trap retire ⏳ + curseur watcher NON avance -> reprise
 else
+  notify_img --ongoing --alert-once --icon sync --title "Image to PC clipboard" \
+    --content "Transfer in progress (install rsync for live %)"
   timeout "$NET_TIMEOUT" scp "${SSH_OPTS[@]}" -q "$newest" "$DESK:$DEST_DIR/$dest"
 fi
+notify_img --ongoing --alert-once --icon content_paste --title "Staging PC clipboard" \
+  --content "Preparing clipboard"
 # Cote desktop, en une connexion :
 #   1. purge auto (ne garde que les 30 plus recentes)
-#   2. wslpath convertit /home/<user>/... -> \\wsl.localhost\Ubuntu\home\<user>\...
-#      (powershell.exe tourne cote Windows et lit le FS WSL via UNC)
-#   3. PowerShell -Sta SetImage met l'image dans le clipboard WINDOWS (bonus
-#      Discord & co). -Sta est obligatoire : System.Windows.Forms.Clipboard
-#      exige un thread en apartment STA.
-#   4. wl-copy --type image/png pose l'image dans le clipboard WAYLAND : c'est CE
-#      maillon que Claude lit en premier (wl-paste --type image/png), avant le
+#   2. wl-copy --type image/png pose l'image dans le clipboard WAYLAND : c'est CE
+#      maillon que Claude WSL lit en premier (wl-paste --type image/png), avant le
 #      image/bmp casse du bridge WSLg.
+# Le clipboard du Claude pwsh NATIF n'est PAS traite ici : impossible par
+# construction depuis une connexion ssh (clipboard par window station, cf.
+# en-tete point 2). C'est img-clip-watcher.ps1, cote PC, qui le remplit en
+# voyant arriver le fichier dans ~/.claude-images (deja depose ci-dessus).
 # L'image est juste STAGEE : pas d'envoi auto, l'user tape Alt+V quand il decide
 # (cf. comment d'entete pour le pourquoi).
 timeout "$NET_TIMEOUT" ssh "${SSH_OPTS[@]}" "$DESK" bash <<REMOTE
 set -e
 cd '$DEST_DIR'
 ls -t | tail -n +31 | xargs -r rm -f --
-export CLAUDE_IMG_WIN_PATH=\$(wslpath -w '$DEST_DIR/$dest')
-# WSLENV est OBLIGATOIRE : WSL ne propage AUCUNE variable d'env Linux a un
-# process Windows (powershell.exe) sans l'y declarer. Sans ca, \$env:CLAUDE_IMG_WIN_PATH
-# est vide cote PowerShell -> FromFile('') -> \$img null -> SetImage(null) echoue.
-export WSLENV=CLAUDE_IMG_WIN_PATH:\$WSLENV
-ps_exe=\$(command -v powershell.exe 2>/dev/null || echo /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe)
-# 1. Presse-papier WINDOWS (bonus : Discord & autres apps Windows peuvent coller).
-# </dev/null est CRITIQUE : powershell.exe herite du stdin du heredoc et AVALE
-# les lignes restantes (dont le wl-copy + le M-v plus bas) -> sans ca rien ne
-# suit. || true : Claude ne depend PAS de ce maillon (il lit le Wayland), donc
-# un echec PowerShell ne doit pas bloquer la suite.
-"\$ps_exe" -Sta -NoProfile -NonInteractive -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \$img = [System.Drawing.Image]::FromFile(\$env:CLAUDE_IMG_WIN_PATH); [System.Windows.Forms.Clipboard]::SetImage(\$img); \$img.Dispose()' </dev/null >&2 || true
-# 2. Presse-papier WAYLAND en image/png : LE maillon que Claude lit en premier
+# Presse-papier WAYLAND en image/png : LE maillon que Claude WSL lit en premier
 # (wl-paste --type image/png), AVANT le image/bmp casse du bridge WSLg.
 # Detache ( ... & ) + fds rediriges : le serveur persistant de wl-copy ne doit
 # pas garder le canal ssh ouvert, sinon ssh ne rend jamais la main et gele le
@@ -199,34 +236,20 @@ done
 [ "\$ok" = 1 ] || { echo "wl-copy image/png pas pret" >&2; exit 1; }
 REMOTE
 
-# --- Maillon Windows natif (Claude Code pwsh) --------------------------------
-# Depuis une session SSH vers WSL, WSL_INTEROP est vide et powershell.exe
-# echoue silencieusement (|| true dans le bloc ci-dessus). On atteint le
-# presse-papier Windows par un ssh DIRECT vers le sshd Windows (port 2222).
-# Le chemin UNC lit l'image deposee dans WSL par le scp precedent.
-if [ -n "${WIN_USER:-}" ]; then
-  win_img_path="\\\\wsl.localhost\\$WSL_DISTRO${DESK_HOME//\//\\}\\.claude-images\\${dest}"
-  timeout "$NET_TIMEOUT" ssh -p 2222 "${SSH_OPTS[@]}" "$WIN_USER@$DESK" \
-    powershell.exe -Sta -NoProfile -NonInteractive -Command \
-    "Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \
-     \$img = [System.Drawing.Image]::FromFile('$win_img_path'); \
-     [System.Windows.Forms.Clipboard]::SetImage(\$img); \
-     \$img.Dispose()" </dev/null >/dev/null 2>&1 || true
-fi
-
-# Staging desktop reussi : on marque le succes AVANT le post ✅. Si on est arrive ici,
-# le scp ET le bloc REMOTE ont reussi (set -e) -> le trap ne retirera plus le ⏳.
+# Staging desktop reussi : on marque le succes AVANT le post ✅. Si on est arrive
+# ici, le rsync/scp ET le bloc REMOTE ont reussi (set -e : un echec n'atteint
+# jamais cette ligne, le trap retire le ⏳) -> fichier depose + Wayland arme.
+# Le watcher pwsh cote PC prend le relais pour le clipboard natif (<= 1 s).
 staged=1
-echo "OK. Image stagee dans le presse-papier desktop. Tape Alt+V dans Claude pour l'envoyer."
+echo "OK. Image staged on the PC (Wayland armed, native watcher takes over)."
 
 # Signal "pret a coller" (etat 2/2) : RE-poste sur le MEME id img2claude -> remplace
-# le ⏳ par le ✅ EN PLACE. On n'arrive ici qu'apres le bloc REMOTE reussi (staged=1
-# ci-dessus ; set -e : un scp/stage rate n'atteint jamais cette ligne, et le trap a
-# deja retire le ⏳). Le channel + la garde notif sont calcules tout en haut (etat
-# 1/2), on les REUTILISE ici. --vibrate 200 = buzz "prete". Repli cloche si absent.
+# le ⏳ par le ✅ EN PLACE. Le channel + la garde notif sont calcules tout en haut
+# (etat 1/2), on les REUTILISE ici. --vibrate 200 = buzz "prete". Repli cloche si absent.
 if [ "$have_notif" = 1 ]; then
-  termux-notification --id img2claude "${img_channel[@]}" --title "Image prete a coller" \
-    --content "Alt+V dans Claude ($dest)" --priority high --vibrate 200 >/dev/null 2>&1 || true
+  notify_img --icon check_circle --title "Ready to paste" \
+    --content "Alt+V in Claude (WSL & pwsh)" --priority high --vibrate 200 \
+    --led-color 00c853 --led-on 250 --led-off 1000
 else
   printf '\a' >&2
 fi

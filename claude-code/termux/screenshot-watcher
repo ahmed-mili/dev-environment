@@ -19,7 +19,7 @@
 #
 # Pourquoi polling et pas inotify : sur /sdcard (FUSE), inotify ne recoit pas les
 # events des autres apps (l'app Camera/Screenshot ecrit sous la couche emulee).
-# Polling 2s = compromis reactivite/batterie.
+# Polling court = retour visuel quasi immediat ; le find reste borne a maxdepth 1.
 #
 # Lancement manuel : nohup bash ~/bin/screenshot-watcher >/dev/null 2>&1 &
 # Autostart boot   : via ~/.termux/boot/screenshot-watcher (Termux:Boot).
@@ -32,7 +32,14 @@ FLAG="$HOME/.screenshot-watcher.on"
 PHOTOS_FLAG="$HOME/.screenshot-watcher.photos"
 SHOTS_STATE="$HOME/.cache/screenshot-watcher.last-mtime"
 PHOTOS_STATE="$HOME/.cache/screenshot-watcher.photos-mtime"
-INTERVAL=2
+INTERVAL=0.5
+DISABLED_INTERVAL=2
+STABLE_INTERVAL=0.15
+STABLE_TRIES=14
+NOTIF_ID="img2claude"
+CHANNEL_ID="watcher-images"
+CHANNEL_NAME="Image-ready"
+GROUP_ID="watcher-images"
 
 mkdir -p "$(dirname "$SHOTS_STATE")"
 
@@ -62,6 +69,46 @@ baseline_of() {
 # le %T@ fractionnaire (ex 1780050672.6538521200) sort en "1.78005e+09" (notation
 # scientifique) que `find -newermt` refuse. `NR ? s : "0"` -> "0" si dossier vide.
 
+notify_detected() {
+  command -v termux-notification >/dev/null 2>&1 || return 0
+  local channel_args=()
+  if command -v termux-notification-channel >/dev/null 2>&1 \
+     && termux-notification-channel "$CHANNEL_ID" "$CHANNEL_NAME" >/dev/null 2>&1; then
+    channel_args=(--channel "$CHANNEL_ID")
+  fi
+  termux-notification \
+    --id "$NOTIF_ID" \
+    "${channel_args[@]}" \
+    --group "$GROUP_ID" \
+    --title "Image detected" \
+    --content "Preparing PC clipboard" \
+    --ongoing \
+    --priority high \
+    >/dev/null 2>&1 || true
+}
+
+wait_until_stable() {
+  local file="$1" prev="" size i
+  for i in $(seq 1 "$STABLE_TRIES"); do
+    [ -r "$file" ] || return 1
+    size=$(stat -c '%s' "$file" 2>/dev/null || printf '')
+    if [ -n "$size" ] && [ "$size" = "$prev" ] && [ "$size" -gt 0 ]; then
+      return 0
+    fi
+    prev="$size"
+    sleep "$STABLE_INTERVAL"
+  done
+  return 1
+}
+
+newest_after() {
+  local dir="$1" cutoff="$2"
+  find "$dir" -maxdepth 1 -type f ! -name '.*' \
+       \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+       -newermt "@$cutoff" -printf '%T@\t%p\n' 2>/dev/null \
+    | awk -F '\t' 'NR==1 || $1>best {best=$1; line=$0} END {if (NR) print line}'
+}
+
 # Stage UNIQUEMENT l'image la plus recente plus neuve que le cutoff, et avance le
 # curseur par-dessus toutes les autres (les intermediaires sont volontairement
 # sautees). Pourquoi PAS un FIFO de tout le backlog : le presse-papier Wayland ne
@@ -73,13 +120,11 @@ baseline_of() {
 # recente, le retard devient impossible par construction.
 process_dir() {
   local dir="$1" state="$2" cutoff mtime file
-  cutoff=$(cat "$state" 2>/dev/null || echo 0)
-  IFS=$'\t' read -r mtime file < <(find "$dir" -maxdepth 1 -type f ! -name '.*' \
-              \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
-              -newermt "@$cutoff" -printf '%T@\t%p\n' 2>/dev/null | sort -rn | head -1)
+  cutoff=$(head -n 1 "$state" 2>/dev/null || echo 0)
+  IFS=$'\t' read -r mtime file < <(newest_after "$dir" "$cutoff")
   [ -n "$file" ] || return 0
-  # Pause courte pour laisser Android finir l'ecriture (atomicite pas garantie).
-  sleep 0.3
+  notify_detected "$file"
+  wait_until_stable "$file" || return 0
   # Curseur avance UNIQUEMENT si img2claude reussit. Sinon (scp timeout en
   # tunnel/RER...) on garde le cutoff -> la capture sera RE-tentee au prochain
   # tour, jamais perdue silencieusement. Comme on vise toujours la PLUS recente,
@@ -90,22 +135,24 @@ process_dir() {
   fi
 }
 
-# Baseline captures au demarrage. baseline_of imprime toujours une seule valeur
-# propre (0 si vide) -> ecriture directe, PAS de `$(... || echo 0)` (cf. l'entete
-# de baseline_of : c'est ce fallback qui corrompait le state en multi-ligne).
-[ -s "$SHOTS_STATE" ] || baseline_of "$SHOTS_DIR" > "$SHOTS_STATE"
-
 while :; do
-  if [ ! -e "$FLAG" ]; then
-    sleep "$INTERVAL"
-    continue
+  active=0
+
+  # --- Flux CAPTURES ---
+  if [ -e "$FLAG" ]; then
+    active=1
+    # A l'activation : baseline sur la capture la plus recente, pour NE PAS
+    # envoyer ce qui a ete pris pendant la pause. baseline_of imprime toujours
+    # une seule valeur propre (0 si vide) -> pas de fallback `|| echo 0`.
+    [ -s "$SHOTS_STATE" ] || baseline_of "$SHOTS_DIR" > "$SHOTS_STATE"
+    process_dir "$SHOTS_DIR" "$SHOTS_STATE"
+  else
+    rm -f "$SHOTS_STATE"
   fi
 
-  # --- Flux CAPTURES (toujours actif tant que FLAG present) ---
-  process_dir "$SHOTS_DIR" "$SHOTS_STATE"
-
-  # --- Flux PHOTOS (seulement si le flag photos est present) ---
+  # --- Flux PHOTOS ---
   if [ -e "$PHOTOS_FLAG" ]; then
+    active=1
     # A l'activation (state absent) : baseline sur la photo la plus recente, pour
     # NE PAS deverser tout l'historique Camera d'un coup. Seules les photos prises
     # APRES l'activation partiront.
@@ -116,5 +163,9 @@ while :; do
     rm -f "$PHOTOS_STATE"
   fi
 
-  sleep "$INTERVAL"
+  if [ "$active" = 1 ]; then
+    sleep "$INTERVAL"
+  else
+    sleep "$DISABLED_INTERVAL"
+  fi
 done

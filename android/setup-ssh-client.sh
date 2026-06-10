@@ -170,7 +170,7 @@ pkg upgrade -y -o Dpkg::Options::="--force-confold" >/dev/null 2>&1 \
 
 PKGS=(
     # Core CLI
-    git openssh mosh curl wget nano
+    git openssh mosh curl wget nano rsync
     # Shell UX
     fzf fastfetch
     eza bat fd ripgrep
