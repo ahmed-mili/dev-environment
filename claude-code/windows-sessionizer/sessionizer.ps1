@@ -70,10 +70,42 @@ switch ($View) {
 # Orphelins = sessions actives qui ne sont NI un projet NI un vault (creees via Ctrl-N).
 $orphans = @($actives | Where-Object { ($projects -notcontains $_) -and ($vaults -notcontains $_) })
 
-if ($List) {
-    Write-Output "actives: $($actives -join ', ')"
-    Write-Output "projects: $($projects -join ', ')"
-    Write-Output "vaults: $($vaults -join ', ')"
-    Write-Output "orphans: $($orphans -join ', ')"
-    exit 0
+# --- Menu (TSV: type <TAB> name <TAB> label affiche) ----------------------------
+# type 'sep' = titre decoratif : les fleches le sautent (binds Task 4), un clic
+# dessus rouvre le menu -> non selectionnable. Parite build_menu du .sh.
+$e = [char]27
+$G = "$e[32m"; $D = "$e[90m"; $R = "$e[0m"; $M = "$e[38;5;141m"   # M = violet (vaults)
+$T = [char]9
+
+function Build-Menu {
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if ($orphans.Count) {
+        $lines.Add("sep$T$T$D──────  $R◆ Sessions$D  ──────$R")
+        foreach ($s in $orphans) {
+            $lines.Add("active$T$s$T$G●$R $s  $G(active)$R")
+        }
+    }
+    if ($projects.Count) {
+        $lines.Add("sep$T$T$D──────  $R◆ Projects$D  ──────$R")
+        foreach ($p in $projects) {
+            if ($actives -contains $p) {
+                $lines.Add("active$T$p$T$G●$R $p  $G(active)$R")
+            } else {
+                $lines.Add("project$T$p$T$D○$R $p")
+            }
+        }
+    }
+    if ($vaults.Count) {
+        $lines.Add("sep$T$T$D──────  $M◆ Obsidian Vaults$D  ──────$R")
+        foreach ($v in $vaults) {
+            if ($actives -contains $v) {
+                $lines.Add("active$T$v$T$G●$R $v  $G(active)$R")
+            } else {
+                $lines.Add("vault$T$v$T$M○$R $v")
+            }
+        }
+    }
+    return $lines
 }
+
+if ($List) { Build-Menu | Write-Output; exit 0 }
