@@ -20,10 +20,11 @@
 # Service-0x0-cf9df44$) -> clipboard VIDE.
 #
 # => Le SEUL design qui marche par construction : executer SetImage DEPUIS la
-# logon session du lecteur. Ce watcher est lance par le wrapper claude() du
-# profil pwsh ; il herite donc de la logon session du pane zellij (= celle du
-# serveur zellij = celle de claude.exe) et son SetImage est visible par le
-# Alt+V de CE claude. claude.exe lit le clipboard en spawnant
+# logon session du lecteur. Ce watcher est lance par les wrappers claude() /
+# ollama() du profil pwsh et par les launchers Bash de Claude ; il herite donc
+# de la logon session du pane zellij (= celle du serveur zellij = celle de
+# claude.exe) et son SetImage est visible par le Alt+V de CE claude.
+# claude.exe lit le clipboard en spawnant
 # `powershell [Clipboard]::ContainsImage()/GetImage()` (meme logon session).
 #
 # Cycle de vie :
@@ -117,7 +118,13 @@ try {
 # Pas de chemin personnel en dur : le home WSL est resolu via wsl.exe. Fallback
 # UNC glob si wsl.exe rechigne (rare). Reessaye dans la boucle si WSL est down.
 function Resolve-ImagesDir {
-    if ($script:ImagesDir -and (Test-Path $script:ImagesDir)) { return $script:ImagesDir }
+    if ($script:ImagesDir) {
+        try {
+            if (Test-Path $script:ImagesDir) { return $script:ImagesDir }
+        } catch {
+            $script:ImagesDir = ''
+        }
+    }
     try {
         $wslHome = (& "$env:SystemRoot\System32\wsl.exe" -d $Distro -e sh -c 'echo $HOME' 2>$null | Select-Object -First 1)
         if ($wslHome) { $wslHome = $wslHome.Trim() }
@@ -161,68 +168,79 @@ function Push-ToClipboard($file) {
     }
 }
 
-Write-Log "demarrage (caller=$CallerPid anchor=$AnchorPid pid=$PID winsta=$winsta)"
+try {
+    Write-Log "demarrage (caller=$CallerPid anchor=$AnchorPid pid=$PID winsta=$winsta)"
 
-# --- Etat initial : staging immediat d'une image fraiche ------------------------
-# Si l'user a envoye une photo AVANT d'ouvrir claude (< FreshWindowMin), elle
-# doit etre collable tout de suite. Plus vieille -> simple baseline (ne pas
-# re-coller l'historique).
-$lastSeen = ''   # cle "FullName|Ticks|Length" de la derniere image traitee
-$uncWarned = $false
-$dir = Resolve-ImagesDir
-if ($dir) {
+    # --- Etat initial : staging immediat d'une image fraiche --------------------
+    # Si l'user a envoye une photo AVANT d'ouvrir claude (< FreshWindowMin), elle
+    # doit etre collable tout de suite. Plus vieille -> simple baseline (ne pas
+    # re-coller l'historique).
+    $lastSeen = ''   # cle "FullName|Ticks|Length" de la derniere image traitee
+    $uncWarned = $false
+    $loopErrorWarned = $false
     try {
-        $latest = Get-LatestImage $dir
-        if ($latest) {
-            $key = '{0}|{1}|{2}' -f $latest.FullName, $latest.LastWriteTimeUtc.Ticks, $latest.Length
-            if (((Get-Date) - $latest.LastWriteTime).TotalMinutes -lt $FreshWindowMin) {
-                [void](Push-ToClipboard $latest)
+        $dir = Resolve-ImagesDir
+        if ($dir) {
+            $latest = Get-LatestImage $dir
+            if ($latest) {
+                $key = '{0}|{1}|{2}' -f $latest.FullName, $latest.LastWriteTimeUtc.Ticks, $latest.Length
+                if (((Get-Date) - $latest.LastWriteTime).TotalMinutes -lt $FreshWindowMin) {
+                    [void](Push-ToClipboard $latest)
+                }
+                $lastSeen = $key
             }
-            $lastSeen = $key
+        } else {
+            Write-Log 'dossier images introuvable au demarrage (WSL down ?) : retries en boucle'
         }
     } catch { Write-Log "scan initial impossible : $($_.Exception.Message)" }
-} else {
-    Write-Log 'dossier images introuvable au demarrage (WSL down ?) : retries en boucle'
+
+    # --- Boucle principale ------------------------------------------------------
+    while ($true) {
+        try {
+            Start-Sleep -Milliseconds $PollMs
+
+            # Ancre morte -> on sort (et on libere le mutex pour un futur watcher).
+            if (-not (Get-Process -Id $AnchorPid -ErrorAction SilentlyContinue)) {
+                Write-Log "ancre $AnchorPid morte : sortie"
+                break
+            }
+
+            $dir = Resolve-ImagesDir
+            if (-not $dir) {
+                if (-not $uncWarned) { Write-Log 'dossier images inaccessible : attente'; $uncWarned = $true }
+                continue
+            }
+
+            try {
+                $latest = Get-LatestImage $dir
+            } catch {
+                if (-not $uncWarned) { Write-Log "scan impossible : $($_.Exception.Message)"; $uncWarned = $true }
+                continue
+            }
+            $uncWarned = $false
+            $loopErrorWarned = $false
+            if (-not $latest) { continue }
+
+            $key = '{0}|{1}|{2}' -f $latest.FullName, $latest.LastWriteTimeUtc.Ticks, $latest.Length
+            if ($key -eq $lastSeen) { continue }
+
+            # Stabilite : scp (fallback sans rsync) ecrit le fichier final en place.
+            # On exige une taille inchangee sur ~300 ms avant de pousser ; sinon on
+            # retentera au prochain tour (la cle inclut Length -> changement re-detecte).
+            Start-Sleep -Milliseconds 300
+            try { $again = Get-Item $latest.FullName -ErrorAction Stop } catch { continue }
+            if ($again.Length -ne $latest.Length -or $again.LastWriteTimeUtc -ne $latest.LastWriteTimeUtc) { continue }
+
+            [void](Push-ToClipboard $latest)
+            $lastSeen = $key
+        } catch {
+            if (-not $loopErrorWarned) {
+                Write-Log "erreur transitoire boucle : $($_.Exception.Message)"
+                $loopErrorWarned = $true
+            }
+        }
+    }
+} finally {
+    try { $mutex.ReleaseMutex() } catch {}
+    try { $mutex.Dispose() } catch {}
 }
-
-# --- Boucle principale ----------------------------------------------------------
-while ($true) {
-    Start-Sleep -Milliseconds $PollMs
-
-    # Ancre morte -> on sort (et on libere le mutex pour un futur watcher).
-    if (-not (Get-Process -Id $AnchorPid -ErrorAction SilentlyContinue)) {
-        Write-Log "ancre $AnchorPid morte : sortie"
-        break
-    }
-
-    $dir = Resolve-ImagesDir
-    if (-not $dir) {
-        if (-not $uncWarned) { Write-Log 'dossier images inaccessible : attente'; $uncWarned = $true }
-        continue
-    }
-
-    try {
-        $latest = Get-LatestImage $dir
-    } catch {
-        if (-not $uncWarned) { Write-Log "scan impossible : $($_.Exception.Message)"; $uncWarned = $true }
-        continue
-    }
-    $uncWarned = $false
-    if (-not $latest) { continue }
-
-    $key = '{0}|{1}|{2}' -f $latest.FullName, $latest.LastWriteTimeUtc.Ticks, $latest.Length
-    if ($key -eq $lastSeen) { continue }
-
-    # Stabilite : scp (fallback sans rsync) ecrit le fichier final en place.
-    # On exige une taille inchangee sur ~300 ms avant de pousser ; sinon on
-    # retentera au prochain tour (la cle inclut Length -> changement re-detecte).
-    Start-Sleep -Milliseconds 300
-    try { $again = Get-Item $latest.FullName -ErrorAction Stop } catch { continue }
-    if ($again.Length -ne $latest.Length -or $again.LastWriteTimeUtc -ne $latest.LastWriteTimeUtc) { continue }
-
-    [void](Push-ToClipboard $latest)
-    $lastSeen = $key
-}
-
-$mutex.ReleaseMutex()
-$mutex.Dispose()

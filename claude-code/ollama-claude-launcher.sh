@@ -17,6 +17,38 @@
 # `ollama launch claude --model/--config/--restore/--help` → ollama natif.
 # `ollama launch claude [--resume|-c|…]` → claude direct (args transmis à claude).
 # Tout autre `ollama …` (run/pull/serve…) → inchangé.
+_start_windows_clipboard_watcher_for_claude() {
+    command -v powershell.exe >/dev/null 2>&1 || return 0
+    powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command '
+$caller = $PID
+$anchor = $caller
+try {
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$caller"
+    if ($p.ParentProcessId -gt 0) { $anchor = [int]$p.ParentProcessId }
+    while ($p) {
+        if ($p.Name -ieq "zellij.exe" -and $p.CommandLine -match "--server") {
+            $anchor = [int]$p.ProcessId
+            break
+        }
+        $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)" -ErrorAction SilentlyContinue
+    }
+} catch {}
+$watcher = Join-Path $env:USERPROFILE ".local\bin\img-clip-watcher.ps1"
+if (-not (Test-Path $watcher)) { return }
+$cmd = "powershell.exe -Sta -NoProfile -ExecutionPolicy Bypass -File `"$watcher`" -CallerPid $anchor"
+try {
+    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Out-Null
+} catch {
+    try {
+        Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @(
+            "-Sta", "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", $watcher, "-CallerPid", $anchor
+        ) | Out-Null
+    } catch {}
+}
+' </dev/null >/dev/null 2>&1 || true
+}
+
 ollama() {
     if [ "$1" = launch ] && [ "$2" = claude ]; then
         # Flags propres à `ollama launch` → laisser ollama natif s'en occuper.
@@ -56,6 +88,7 @@ MODELS
 
         # Daemon local injoignable → repli sur le lancement natif (1 modèle).
         if ! curl -sf -m 2 "$base/api/version" >/dev/null 2>&1; then
+            _start_windows_clipboard_watcher_for_claude
             command ollama launch claude --model "$opus" --yes "${@:3}"
             return
         fi
@@ -64,6 +97,7 @@ MODELS
         local cargs=("${@:3}")
         [ "${cargs[0]:-}" = "--" ] && cargs=("${cargs[@]:1}")
 
+        _start_windows_clipboard_watcher_for_claude
         ANTHROPIC_BASE_URL="$base" \
         ANTHROPIC_AUTH_TOKEN=ollama \
         ANTHROPIC_API_KEY= \

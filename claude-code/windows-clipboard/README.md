@@ -30,7 +30,8 @@ window station du lecteur**.
 | Fichier | Rôle |
 |---|---|
 | `img-clip-watcher.ps1` | Watcher (PS 5.1, ASCII pur) : poll `\\wsl.localhost\<distro>\<home>\.claude-images` (1 s), pousse chaque nouvelle image dans le presse-papiers de SA window station. Mutex `Local\img-clip-watcher-<winsta>` (1 par clipboard), meurt avec son ancre (serveur zellij / shell appelant). |
-| Wrapper `claude()` (dans `windows/files/ps7-profile.ps1`) | Lance le watcher avant le binaire, via `Invoke-CimMethod Win32_Process Create` : le process échappe au job ConPTY du pane zellij (qui tue son arborescence à la fermeture) tout en gardant le token — donc la window station — de l'appelant. |
+| Wrappers `claude()` / `ollama()` (dans `windows/files/ps7-profile.ps1`) | Lancent le watcher avant le binaire (`claude`) ou avant `ollama launch claude`, via `Invoke-CimMethod Win32_Process Create` : le process échappe au job ConPTY du pane zellij (qui tue son arborescence à la fermeture) tout en gardant le token — donc la window station — de l'appelant. |
+| Launchers Bash `ollama-launcher.sh` / `ollama-claude-launcher.sh` | Lancent aussi le watcher avant Claude, pour couvrir `Ctrl+Y` dans Zellij et les shells Bash/Git-Bash qui contournent le profil pwsh. |
 | `windows/install.ps1` (étape 2b) | Déploie le watcher vers `~/.local/bin/img-clip-watcher.ps1`. |
 
 ## Chaîne complète (3 lecteurs, 1 envoi)
@@ -56,6 +57,8 @@ téléphone (img2claude) --rsync--> WSL ~/.claude-images/img-<hash>.jpg
   un smart-quote 0x94 qui casse le parse. Le watcher est ASCII pur par contrat.
 - **GDI+ ne décode pas WebP** : une image `.webp` est loggée + sautée (la voie
   WSL la gère, elle).
+- **WSL/UNC peut tousser** (`Wsl/Service/E_UNEXPECTED`) : le watcher logge
+  l'erreur transitoire et continue au lieu de mourir silencieusement.
 
 ## Debug
 

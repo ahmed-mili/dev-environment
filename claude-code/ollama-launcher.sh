@@ -35,6 +35,41 @@ OLLAMA_OPTS=(
   "--debug"
 )
 
+start_windows_clipboard_watcher() {
+  # Windows/Git-Bash path: Ctrl+Y in Windows Zellij launches this script, then
+  # `ollama launch claude` bypasses the pwsh `claude()` wrapper. Start the
+  # native clipboard watcher here too, in the same window station as this pane.
+  command -v powershell.exe >/dev/null 2>&1 || return 0
+  powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command '
+$caller = $PID
+$anchor = $caller
+try {
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$caller"
+    if ($p.ParentProcessId -gt 0) { $anchor = [int]$p.ParentProcessId }
+    while ($p) {
+        if ($p.Name -ieq "zellij.exe" -and $p.CommandLine -match "--server") {
+            $anchor = [int]$p.ProcessId
+            break
+        }
+        $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)" -ErrorAction SilentlyContinue
+    }
+} catch {}
+$watcher = Join-Path $env:USERPROFILE ".local\bin\img-clip-watcher.ps1"
+if (-not (Test-Path $watcher)) { return }
+$cmd = "powershell.exe -Sta -NoProfile -ExecutionPolicy Bypass -File `"$watcher`" -CallerPid $anchor"
+try {
+    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Out-Null
+} catch {
+    try {
+        Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @(
+            "-Sta", "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", $watcher, "-CallerPid", $anchor
+        ) | Out-Null
+    } catch {}
+}
+' </dev/null >/dev/null 2>&1 || true
+}
+
 # run : LAST command — `exec` (replaces the process).
 run() { exec "$@"; }
 
@@ -107,6 +142,7 @@ option_menu() {  # $1 = model name
   for ((_i=0; _i<_n; _i++)); do
     ((_state[_i])) && _cmd_args+=("${OLLAMA_OPTS[_i]}")
   done
+  start_windows_clipboard_watcher
   run ollama launch claude --model "$model" "${_cmd_args[@]}"
 }
 

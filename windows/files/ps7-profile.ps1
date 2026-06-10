@@ -175,26 +175,25 @@ function wdev {
     wsl -d Ubuntu -e bash -lic "cd ~/dev/dev-environment; tmux attach -t main 2>/dev/null || tmux new -s main"
 }
 
-# ---- Claude Code wrapper : device-context detection + clipboard watcher -----
-# 1. Calls the detector before launching the real claude binary, so the
-#    assistant knows which machine/shell/context it is talking to. The detector
-#    writes a JSON file at ~/.claude/.device-context that the assistant reads.
-# 2. Starts img-clip-watcher.ps1 : pushes every new phone image (img2claude ->
-#    WSL ~/.claude-images) into the clipboard of THIS logon session. The
-#    Windows clipboard is per window station : a SetImage performed by another
-#    SSH connection lands in an ephemeral clipboard this claude can never read
-#    (proven 2026-06-10), so the watcher MUST run here, next to claude.exe.
-#    Its internal mutex (scoped per window station) keeps a single instance per
-#    clipboard; extra launches exit instantly. It dies with the zellij server /
-#    calling shell, so nothing accumulates.
-# Recursion is avoided by calling the binary via its full path.
-function claude {
-    $detectScript = "$env:USERPROFILE\.claude\device-context\detect.ps1"
-    if (Test-Path $detectScript) {
-        & $detectScript 2>$null
-    }
+# ---- Claude Code clipboard watcher ----------------------------------------
+# Pushes every new phone image (img2claude -> WSL ~/.claude-images) into the
+# clipboard of THIS window station. Called by both `claude` and `ollama launch
+# claude`; the watcher mutex keeps one instance per clipboard, so extra starts
+# are cheap no-ops.
+function Start-ClaudeClipboardWatcher {
+    param([switch]$Fast)
     $watcher = "$env:USERPROFILE\.local\bin\img-clip-watcher.ps1"
     if (Test-Path $watcher) {
+        $args = @(
+            '-Sta', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', $watcher, '-CallerPid', $PID
+        )
+        if ($Fast) {
+            try {
+                Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $args | Out-Null
+            } catch {}
+            return
+        }
         # Invoke-CimMethod (PAS Start-Process) : le process est cree par le
         # service WMI, donc HORS du job ConPTY du pane zellij (qui tue toute
         # son arborescence a la fermeture du pane), mais avec le token de
@@ -207,17 +206,40 @@ function claude {
             # Degrade gracefully : clipboard phone->pwsh may be unavailable, but
             # Claude itself must still start.
             try {
-                Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @(
-                    '-Sta', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-                    '-File', $watcher, '-CallerPid', $PID
-                ) | Out-Null
+                Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $args | Out-Null
             } catch {}
         }
     }
+}
+# ---- Claude Code wrapper : device-context detection ------------------------
+# Calls the detector before launching the real claude binary, so the assistant
+# knows which machine/shell/context it is talking to. The detector writes a
+# JSON file at ~/.claude/.device-context that the assistant reads.
+# Recursion is avoided by calling the binary via its full path.
+function claude {
+    $detectScript = "$env:USERPROFILE\.claude\device-context\detect.ps1"
+    if (Test-Path $detectScript) {
+        & $detectScript 2>$null
+    }
+    Start-ClaudeClipboardWatcher
     $claudeCmd = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue
     if (-not $claudeCmd) {
         Write-Error "claude not found on PATH"
         return
     }
     & $claudeCmd.Source @args
+}
+
+# `ollama launch claude` bypasses the `claude()` function above, so wrap the
+# application command too and start the same clipboard watcher for that path.
+function ollama {
+    if ($args.Count -ge 2 -and $args[0] -eq 'launch' -and $args[1] -eq 'claude') {
+        Start-ClaudeClipboardWatcher
+    }
+    $ollamaCmd = Get-Command ollama -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $ollamaCmd) {
+        Write-Error "ollama not found on PATH"
+        return
+    }
+    & $ollamaCmd.Source @args
 }
