@@ -179,8 +179,90 @@ if ($Pick) {
     $key = $Key
     $choice = $Pick
 } else {
-    Write-Error 'mode interactif branche en Task 4 (utiliser -Pick/-List en attendant)'
-    exit 1
+    if (-not (Get-Command fzf -ErrorAction SilentlyContinue)) {
+        Write-Error 'fzf introuvable - winget install junegunn.fzf'
+        exit 1
+    }
+    $menu = Build-Menu
+
+    # Positions 1-based (layout reverse, liste NON filtree) des titres et des
+    # premiers items, pour les binds de navigation. Parite .sh, MAIS : fzf Windows
+    # execute les transform via `cmd /s/c` -> pas d'arithmetique runtime possible
+    # en batch one-liner (pas de delayed expansion). On PRE-CALCULE donc tout :
+    #   down : saute si FZF_POS+1 est un titre  <=> FZF_POS dans (seps - 1)
+    #   up   : saute si FZF_POS-1 est un titre  <=> FZF_POS dans (seps + 1)
+    #          (cas special titre en position 1 : ignore, on ne remonte pas dessus)
+    #   clic : bounce si FZF_POS est un titre   <=> FZF_POS dans seps
+    $ssep = 0; $psep = 0; $vsep = 0; $pfirst = 0; $vfirst = 0; $pos = 0
+    if ($orphans.Count)  { $ssep = $pos + 1; $pos += 1 + $orphans.Count }
+    if ($projects.Count) { $psep = $pos + 1; $pfirst = $psep + 1; $pos += 1 + $projects.Count }
+    if ($vaults.Count)   { $vsep = $pos + 1; $vfirst = $vsep + 1; $pos += 1 + $vaults.Count }
+    $cursor0 = if ($ssep) { $ssep + 1 } elseif ($pfirst) { $pfirst } elseif ($vfirst) { $vfirst } else { 1 }
+    $seps = @($ssep, $psep, $vsep) | Where-Object { $_ -gt 0 }
+
+    # Genere une chaine batch `if "%FZF_POS%"=="a" (echo ACTION) else if ... (echo DEFAULT)`.
+    function New-PosBind {
+        param([int[]]$Positions, [string]$Action, [string]$Default)
+        if (-not $Positions -or $Positions.Count -eq 0) { return "echo $Default" }
+        $expr = "echo $Default"
+        foreach ($p in $Positions) {
+            $expr = "if `"%FZF_POS%`"==`"$p`" (echo $Action) else ($expr)"
+        }
+        return $expr
+    }
+
+    # Garde « filtre tape » : {q} est substitue PAR FZF avec quotes (query vide -> "").
+    # Une fois filtree, les positions absolues ne veulent plus rien dire -> action de base.
+    $downBatch  = "if {q}==`"`" ($(New-PosBind -Positions @($seps | ForEach-Object { $_ - 1 }) -Action 'down+down' -Default 'down')) else (echo down)"
+    $upPositions = @($seps | ForEach-Object { $_ + 1 })
+    $upInner = New-PosBind -Positions $upPositions -Action 'up+up' -Default 'up'
+    if ($seps -contains 1) {
+        # le titre est en position 1 : depuis la position 2, ne pas remonter dessus
+        $upInner = "if `"%FZF_POS%`"==`"2`" (echo ignore) else ($upInner)"
+    }
+    $upBatch    = "if {q}==`"`" ($upInner) else (echo up)"
+    $clickBatch = "if not {q}==`"`" (echo ignore) else ($(New-PosBind -Positions $seps -Action 'down' -Default 'ignore'))"
+    $dblBatch   = "if not {q}==`"`" (echo accept) else ($(New-PosBind -Positions $seps -Action 'down' -Default 'accept'))"
+
+    # Tab toggle projets <-> vaults (uniquement si les DEUX sections existent).
+    # IMPORTANT : calcule AVANT $ctrlGBatch, qui fige $hdrFull dans sa chaine batch.
+    $tabBatch = $null
+    $hdrMin  = 'Ctrl+G  help'
+    $hdrFull = 'Up/Down move - Enter open - Ctrl+N new - Ctrl+R rename - Ctrl+X kill - Ctrl+G hide'
+    if ($projects.Count -and $vaults.Count) {
+        $tabBatch = "if not {q}==`"`" (echo ignore) else (if %FZF_POS% LSS $vfirst (echo pos^($vfirst^)) else (echo pos^($pfirst^)))"
+        $hdrFull  = 'Up/Down move - Tab switch category - Enter open - Ctrl+N new - Ctrl+R rename - Ctrl+X kill - Ctrl+G hide'
+    }
+
+    # Aide toggleable Ctrl+G. ASCII PUR : ces echo passent par cmd (codepage OEM),
+    # tout glyphe Unicode y devient du mojibake (piege n°3). L'etat min/full est
+    # porte par l'existence d'un fichier temoin.
+    $hstate = Join-Path $env:TEMP 'pc-sessionizer-hdr-full'
+    Remove-Item $hstate -Force -ErrorAction SilentlyContinue
+    $ctrlGBatch = "if exist `"$hstate`" (del `"$hstate`" & echo $hdrMin) else (type nul > `"$hstate`" & echo $hdrFull)"
+
+    $fzfArgs = @(
+        '--ansi', '--delimiter', "`t", '--with-nth=3',
+        '--layout=reverse', '--no-multi',
+        '--color=pointer:8',
+        '--prompt', 'pc ❯ ',
+        '--header', $hdrMin,
+        '--expect=ctrl-n,ctrl-x,ctrl-r',
+        '--bind', "load:pos($cursor0)",
+        '--bind', "down:transform:$downBatch",
+        '--bind', "up:transform:$upBatch",
+        '--bind', "left-click:transform:$clickBatch",
+        '--bind', "double-click:transform:$dblBatch",
+        '--bind', "ctrl-g:transform-header:$ctrlGBatch"
+    )
+    if ($tabBatch) {
+        $fzfArgs += @('--bind', "tab:transform:$tabBatch")
+    }
+
+    $out = @($menu | & fzf @fzfArgs)
+    if ($LASTEXITCODE -ne 0 -and $out.Count -eq 0) { exit 0 }   # Esc / Ctrl-C (130) = annulation propre
+    $key    = if ($out.Count -ge 1) { $out[0] } else { '' }
+    $choice = if ($out.Count -ge 2) { $out[1] } else { '' }
 }
 
 # --- Dispatch ----------------------------------------------------------------------
