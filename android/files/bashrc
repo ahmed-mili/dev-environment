@@ -191,8 +191,8 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 # (not aliases) to handle ~ expansion with mosh. NB: the `pwsh` function does NOT clash with
 # the remote pwsh — the latter lives in the string sent to ssh, run on Windows.
 # Picking a VAULT in the menu: the sessionizer (in WSL) can't reach Windows, so it records
-# the name and exits with code 42 -> _pc_open_vault reads the name and opens the vault HERE
-# (direct ssh phone->Windows, native pwsh) => attach-or-create, no implicit delete.
+# the name and exits with code 42 -> _pc_open_vault reads the name and opens it HERE
+# through a Termux-local Zellij client + SSH tunnel to the Windows Zellij web server.
 _pc_open_vault() {
   local v; v=$(ssh -o ConnectTimeout=8 -o LogLevel=ERROR desktop 'f="$HOME/.cache/pc-vault-request"; [ -f "$f" ] && cat "$f"; rm -f "$f" 2>/dev/null')
   [ -n "$v" ] || return 0
@@ -202,7 +202,7 @@ _pc_open_vault() {
   [ -r "$token_file" ] || { echo "missing Zellij web token: $token_file" >&2; return 1; }
   local token; token="$(tr -d '\r\n' < "$token_file")"
   [ -n "$token" ] || { echo "empty Zellij web token: $token_file" >&2; return 1; }
-  local local_port="${PC_ZELLIJ_WEB_LOCAL_PORT:-18082}"
+  local local_port="${PC_ZELLIJ_WEB_LOCAL_PORT:-$((18082 + (RANDOM % 1000)))}"
   local remote_port="${PC_ZELLIJ_WEB_REMOTE_PORT:-8082}"
   clear 2>/dev/null
   printf '\033[2m→ opening vault %s…\033[0m\n' "$v"   # feedback while the ssh connects
@@ -217,21 +217,30 @@ _pc_open_vault() {
   # ~2min sur le timeout TCP par defaut). ssh renvoie 255 sur ECHEC DE CONNEXION
   # uniquement (une sortie normale de pwsh/claude renvoie son propre code, pas 255).
   ssh -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
-    "pwsh -NoProfile -NoLogo -WorkingDirectory C:\\obsidian-vaults -Command \"zellij web --daemonize --ip 127.0.0.1 --port $remote_port --server-startup-timeout 5\"" </dev/null
+    "pwsh -NoProfile -NoLogo -WorkingDirectory C:\\obsidian-vaults -Command \"\$null = zellij web --status --timeout 2 2>&1; if (\$LASTEXITCODE -ne 0) { \$null = zellij web --daemonize --ip 127.0.0.1 --port $remote_port --server-startup-timeout 5 2>&1; \$null = zellij web --status --timeout 2 2>&1 }; exit \$LASTEXITCODE\"" </dev/null
   if [ $? -eq 255 ]; then
     printf '\033[33m⚠ sshd Windows (:2222) injoignable — reveille le desktop, ou au desktop: Restart-Service sshd. En attendant: `wsl`.\033[0m\n' >&2
     return 255
   fi
 
+  local had_monitor=0
+  case $- in *m*) had_monitor=1; set +m ;; esac
   ssh -N -L "127.0.0.1:${local_port}:127.0.0.1:${remote_port}" \
     -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR \
     -p 2222 "${WIN_USER}@desktop" &
   local tunnel_pid=$!
   sleep 0.6
+  if ! kill -0 "$tunnel_pid" >/dev/null 2>&1; then
+    wait "$tunnel_pid" 2>/dev/null || true
+    [ "$had_monitor" -eq 1 ] && set -m
+    printf '\033[33m⚠ impossible d ouvrir le tunnel Zellij web local (port %s). Relance `pwsh`.\033[0m\n' "$local_port" >&2
+    return 1
+  fi
   zellij attach "http://127.0.0.1:${local_port}/$v" --token "$token"
   local rc=$?
   kill "$tunnel_pid" >/dev/null 2>&1 || true
   wait "$tunnel_pid" 2>/dev/null || true
+  [ "$had_monitor" -eq 1 ] && set -m
   return "$rc"
 }
 # LogLevel=ERROR: silences « Connection to desktop closed. » + the post-quantum WARNING
