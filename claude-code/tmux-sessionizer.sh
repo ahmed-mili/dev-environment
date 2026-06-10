@@ -292,7 +292,7 @@ read_or_cancel() {
 # unreachable from WSL → delegate (open_vault). Otherwise it's a WSL session → attach.
 attach_session() {  # $1 = session name
   if in_list "$1" "${vaults[@]}"; then open_vault "$1"
-  else                                 run "$ZJ" attach "$1"; fi
+  else                                 run "$ZJ" attach "$1" options --on-force-close detach; fi
 }
 
 # Create (or join) a Zellij session named $1 in folder $2. `attach -c` is
@@ -304,7 +304,7 @@ create_session() {  # $1 = name   $2 = folder
   # Phone reconnect invariant: opening a project must never delete a detached
   # session. `attach -c` is the only automatic action; explicit Ctrl-X is the
   # destructive path.
-  run "$ZJ" attach -c "$1"
+  run "$ZJ" attach -c "$1" options --on-force-close detach
 }
 
 # is_remote: am I launched from the phone (via `wsl`/`pwsh` = `ssh -t desktop …`)
@@ -315,13 +315,14 @@ is_remote() { [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]]; }
 
 # open_wt_zellij: desktop (F2) — open a NEW Windows Terminal tab (PowerShell
 # profile, `-p`, for the title/icon), `-d` set to the vault folder (Windows path
-# via wslpath), running `zellij attach -c <vault>` so the session lives natively
-# on Windows (native I/O on C:, cf. memory feedback_claude-side-matches-filesystem).
+# via wslpath), running `zellij attach -c <vault> options --on-force-close detach`
+# so the session lives natively on Windows (native I/O on C:, cf. memory
+# feedback_claude-side-matches-filesystem) and a forced terminal close detaches.
 open_wt_zellij() {  # $1 = vault name
   # Important for phone 5G reconnects: a detached Zellij session is still the
   # live Claude session. Do not run `delete-session` here; just attach-or-create.
   run wt.exe -w 0 nt -p "PowerShell" -d "$(wslpath -w "$VAULTS_DIR/$1")" \
-      pwsh -NoProfile -NoExit -Command "zellij attach -c $1"
+      pwsh -NoProfile -NoExit -Command "zellij attach -c $1 options --on-force-close detach"
 }
 
 # open_vault: route a vault choice by where the menu runs.
