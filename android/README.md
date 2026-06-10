@@ -33,21 +33,20 @@ The script installs the packages listed below, deploys the Catppuccin configs, g
 
 ## What this bundle is NOT (any more)
 
-This installer no longer puts Claude Code, Node.js or git-sync hooks on the phone. Claude Code now runs on the **PC** and is reached from Termux via `mosh <host>` + `tmux`.
+This installer no longer puts Claude Code, Node.js or git-sync hooks on the phone. Claude Code now runs on the **PC** and is reached from Termux with the `wsl` / `pwsh` helpers, which attach to persistent Zellij sessions on the desktop.
 
 If you were on either of the two previous setups (**Ollama + proot-distro Ubuntu**, or **native Claude Code on Termux** with auto-pull/push hooks), run `migrate-legacy.sh` — it detects and cleans up both generations (`~/.npm-global`, the SessionStart/SessionEnd hooks in `~/.claude/settings.json`, the autostart blocks in `~/.bashrc.local`, the empty `/storage/emulated/0/dev` tree if it still hangs around), then re-runs `setup-ssh-client.sh` for you. The top-level `bootstrap.sh` invokes it automatically when it detects either generation.
 
 ## Daily workflow
 
 ```bash
-mosh <host>                    # resilient over 4G / 5G — survives screen-off and network changes
-# inside the remote shell:
-tmux new -A -s main            # attach the "main" tmux session, create if absent
-# work in Claude Code, vim, whatever
-# Ctrl+B then D                # detach — your session keeps running on the PC
-# close Termux, switch apps, lock the screen: nothing dies
+wsl                            # Linux/ext4 projects on the PC
+pwsh                           # native Windows/C: vaults on the PC
+# Pick an existing Zellij session, or pick a project/vault to create one.
+# Work in Claude Code, vim, whatever.
+# If 5G drops, run wsl/pwsh again and pick the same entry: Zellij reattaches.
 # later:
-mosh <host>                    # mosh + tmux pick up exactly where you left off
+wsl                            # or pwsh: pick up exactly where you left off
 ```
 
 The wake-lock is acquired automatically by `~/.bashrc.local` on every shell start (release with `termux-wake-unlock` or delete the line).
