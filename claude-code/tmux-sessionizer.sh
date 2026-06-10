@@ -44,19 +44,33 @@ FZF="$HOME/.fzf/bin/fzf"
 
 # --- collect -------------------------------------------------------------
 # Zellij binary (WSL projects) + helpers to list active sessions per world.
-# WSL sessions: `zellij ls`. Windows (vault) sessions: read the IPC dir via
-# /mnt/c — the WSL binary can't talk to the Windows server (different OS), and
-# there's no interop over ssh. Glob contract_version_* for cross-version safety,
-# and the user glob /mnt/c/Users/* so nothing personal is hard-coded.
+# WSL sessions: `zellij ls`. Windows (vault) sessions: read Zellij's Windows
+# IPC/cache dirs via /mnt/c — the WSL binary can't talk to the Windows server
+# (different OS), and there's no interop over ssh. The `%TEMP%\zellij` socket
+# dir only lists sessions visible from the current Windows logon/window station;
+# phone-opened native pwsh sessions can be missing there but still appear under
+# `AppData/Local/Zellij/cache/.../session_info`. Glob contract_version_* for
+# cross-version safety, and /mnt/c/Users/* so nothing personal is hard-coded.
 ZJ="$(command -v zellij 2>/dev/null || echo "$HOME/.local/bin/zellij")"
 zj_actives_wsl() { "$ZJ" ls -ns 2>/dev/null | sort || true; }
 zj_actives_win() {
   local base d
-  for base in /mnt/c/Users/*/AppData/Local/Temp/zellij; do
-    for d in "$base"/contract_version_*; do
-      [[ -d "$d" ]] && find "$d" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null
+  {
+    # Live IPC files, visible for normal Windows Zellij sessions.
+    for base in /mnt/c/Users/*/AppData/Local/Temp/zellij; do
+      for d in "$base"/contract_version_*; do
+        [[ -d "$d" ]] && find "$d" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null
+      done
     done
-  done | sort -u
+
+    # Session metadata, needed for vault sessions opened via Windows sshd.
+    for base in /mnt/c/Users/*/AppData/Local/Zellij/cache; do
+      for d in "$base"/contract_version_*/session_info; do
+        [[ -d "$d" ]] && find "$d" -mindepth 1 -maxdepth 1 -type d \
+          -exec test -f '{}/session-metadata.kdl' ';' -printf '%f\n' 2>/dev/null
+      done
+    done
+  } | sort -u
 }
 actives=()   # filled per-view in the PC_VIEW case below
 
