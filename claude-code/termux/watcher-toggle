@@ -2,11 +2,15 @@
 # watcher-toggle — notif persistante Termux:API a 2 boutons pour piloter les flux
 # image (captures + photos) SANS taper de commande.
 #
-# Source de verite = les MEMES flags fichiers que le watcher / les alias photos-on/off :
+# Source de verite des FLUX = les MEMES flags fichiers que le watcher / les alias photos-on/off :
 #   ~/.screenshot-watcher.on      -> flux CAPTURES (dcim/Screenshots)
 #   ~/.screenshot-watcher.photos  -> flux PHOTOS   (dcim/Camera)
 # Le screenshot-watcher relit ces flags a chaque tour de boucle (0.5s) -> un tap prend
 # effet quasi immediatement sans redemarrer le watcher.
+#
+# Source de verite du SERVICE = processus vivants. Les flags peuvent rester "on"
+# apres un force-stop Android ; dans ce cas la notif DOIT dire offline, pas faire
+# croire que le pipeline images tourne encore.
 #
 # Sous-commandes :
 #   watcher-toggle show     -> (re)poste la notif selon l'etat courant des flags
@@ -43,6 +47,8 @@ SELF="/data/data/com.termux/files/home/bin/watcher-toggle"
 BASH_BIN="/data/data/com.termux/files/usr/bin/bash"
 ON_FLAG="$HOME/.screenshot-watcher.on"
 PHOTOS_FLAG="$HOME/.screenshot-watcher.photos"
+BOOT_WATCHER="$HOME/.termux/boot/screenshot-watcher"
+RUNTIME_WATCHER="$HOME/bin/screenshot-watcher"
 NOTIF_ID="watcher-toggle"
 CHANNEL_ID="watcher-control"
 GROUP_ID="watcher-control"
@@ -58,7 +64,29 @@ toggle_flag() {
 
 is_on() { [ -e "$1" ]; }
 
-status_text() {
+is_sshd_alive() {
+  pgrep -x sshd >/dev/null 2>&1
+}
+
+is_supervisor_alive() {
+  pgrep -f "$BOOT_WATCHER" >/dev/null 2>&1
+}
+
+is_watcher_alive() {
+  pgrep -f "$RUNTIME_WATCHER" >/dev/null 2>&1
+}
+
+service_state() {
+  if is_supervisor_alive && is_watcher_alive && is_sshd_alive; then
+    printf online
+  elif is_supervisor_alive && is_watcher_alive; then
+    printf images-only
+  else
+    printf offline
+  fi
+}
+
+flags_text() {
   if is_on "$ON_FLAG" && is_on "$PHOTOS_FLAG"; then
     printf 'Screenshots on - Photos on'
   elif is_on "$ON_FLAG"; then
@@ -68,6 +96,17 @@ status_text() {
   else
     printf 'Watching paused'
   fi
+}
+
+status_text() {
+  local flags state
+  flags=$(flags_text)
+  state=$(service_state)
+  case "$state" in
+    online)      printf '%s' "$flags" ;;
+    images-only) printf '%s - ssh phone offline' "$flags" ;;
+    *)           printf 'Service offline - open Termux' ;;
+  esac
 }
 
 action_label() {
