@@ -265,7 +265,48 @@ if ($Pick) {
     $choice = if ($out.Count -ge 2) { $out[1] } else { '' }
 }
 
-# --- Dispatch ----------------------------------------------------------------------
+# --- Meta-actions (--expect) sur une session ACTIVE : ^X kill, ^R rename ----------
+# Parite .sh : kill != delete (une session projet/vault killee reste listee ○ ;
+# une session jetable disparait). Rename d'une session detachee : impossible en
+# CLI zellij -> no-op documente. Apres l'action on REOUVRE le menu (recursion).
+function Restart-Menu {
+    if ($DryRun -or $Pick) { exit 0 }   # pas de boucle en mode test
+    & $PSCommandPath -View $View
+    exit $LASTEXITCODE
+}
+
+if ($key -eq 'ctrl-x') {
+    if ($choice) {
+        $f = $choice -split "`t"
+        if ($f[0] -eq 'active') {
+            $name = $f[1]
+            if (($projects -contains $name) -or ($vaults -contains $name)) {
+                [Console]::Error.Write("Kill '$name'? Stays listed as o inactive. [y/N] ")
+            } else {
+                [Console]::Error.Write("Kill '$name'? Disposable - disappears from the list. [y/N] ")
+            }
+            $ans = Read-OrCancel
+            if ($ans -match '^[yY]') {
+                Invoke-Step @('zellij', 'kill-session', $name)
+            }
+        }
+    }
+    Restart-Menu
+}
+if ($key -eq 'ctrl-r') {
+    if ($choice) {
+        $f = $choice -split "`t"
+        if ($f[0] -eq 'active') {
+            [Console]::Error.Write("New name for '$($f[1])': ")
+            $ans = Read-OrCancel
+            if ($ans) {
+                [Console]::Error.WriteLine('(rename via the menu is not supported with Zellij yet - skipped)')
+            }
+        }
+    }
+    Restart-Menu
+}
+
 if ($key -eq 'ctrl-n') { $type = 'new'; $name = '' }
 elseif (-not $choice)  { exit 0 }
 else {
