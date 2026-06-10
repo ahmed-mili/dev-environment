@@ -23,16 +23,18 @@ if ($env:ZELLIJ_SESSION_NAME) {
     } catch {}
 }
 
-# Invoke-Sessionizer : menu fzf (sessions/projets/vaults) qui tourne en WSL ; lie a F2 plus bas.
-# Execute comme une vraie commande (pas dans le ScriptBlock) pour que fzf recoive le TTY.
+# Invoke-Sessionizer : menu fzf natif (sessions zellij/projets/vaults) ; lie a F2 plus bas.
+# Execute comme une vraie commande (Insert+AcceptLine, pas dans le ScriptBlock) pour que
+# le TUI long-vivant (zellij attach) recoive le TTY.
+# PROPRETE : AcceptLine vient d'imprimer « PS> Invoke-Sessionizer » ; on remonte d'UNE
+# ligne et on l'efface AVANT de lancer le menu (curseur colonne 0). A la sortie, le
+# prompt suivant s'ecrit a la place de la ligne effacee -> aucune trace, scrollback
+# preserve. (L'ancienne version effacait APRES coup : fragile des que le sessionizer
+# sortait du texte ou echouait — c'etait le bug de la ligne residuelle.)
 function Invoke-Sessionizer {
-    wsl -d Ubuntu -e bash -lic "PC_VIEW=all ~/dev/dev-environment/claude-code/tmux-sessionizer.sh"
-    # F2 ne doit RIEN laisser (comme `ble-bind -c` en WSL). AcceptLine a imprime la ligne
-    # "PS> Invoke-Sessionizer" ; fzf/zellij (alternate screen) restaure le curseur juste dessous.
-    # On remonte d'1 ligne + efface jusqu'en bas -> le prompt reprend proprement, le scrollback
-    # au-dessus est PRESERVE (!= Clear-Host). ESC[1A = curseur up, ESC[0J = efface vers le bas.
     $ESC = [char]27
-    [Console]::Write("$ESC[1A$ESC[0J")
+    [Console]::Write("$ESC[1A$ESC[2K$ESC[G")
+    & "$env:USERPROFILE\.local\bin\sessionizer.ps1" -View all
 }
 
 # ---- PSReadLine: modern predictions + smart Tab + Catppuccin Mocha colors ----
