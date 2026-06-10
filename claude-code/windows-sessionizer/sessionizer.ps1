@@ -109,3 +109,102 @@ function Build-Menu {
 }
 
 if ($List) { Build-Menu | Write-Output; exit 0 }
+
+# --- Actions --------------------------------------------------------------------
+# Creation SANS commande injectee : zellij ouvre le shell par defaut (pwsh, profil
+# charge), l'utilisateur tape `claude` lui-meme (parite .sh). `attach -c` =
+# attach-or-create. Toujours `options --on-force-close detach` : une fermeture
+# brutale du terminal DETACHE (ne tue pas la session).
+#
+# Routage : DANS zellij ($env:ZELLIJ pose), un `zellij attach` imbrique est
+# interdit -> on ouvre un NOUVEL onglet Windows Terminal (wt.exe) qui porte la
+# session. HORS zellij : attach direct dans le terminal courant (il le remplace,
+# equivalent du exec bash). NB : le detour wt.exe systematique du .sh pour les
+# vaults etait un artefact du monde WSL->Windows ; en natif, vaults et projets
+# suivent le MEME chemin (uniforme).
+$InZellij = [bool]$env:ZELLIJ
+
+function Invoke-Step {   # commande de SETUP (equivalent step() du .sh)
+    param([string[]]$Argv)
+    if ($DryRun) { Write-Output ("DRYRUN: " + ($Argv -join ' ')) }
+    else { & $Argv[0] @($Argv | Select-Object -Skip 1) }
+}
+
+function Invoke-Run {    # commande FINALE (equivalent run()/exec du .sh)
+    param([string[]]$Argv)
+    if ($DryRun) { Write-Output ("DRYRUN: " + ($Argv -join ' ')); exit 0 }
+    & $Argv[0] @($Argv | Select-Object -Skip 1)
+    exit $LASTEXITCODE
+}
+
+# Attache (ou cree) la session $Name avec $Dir pour cwd.
+function Open-Session {
+    param([string]$Name, [string]$Dir)
+    if ($InZellij) {
+        # -w 0 : fenetre WT existante ; nt : new tab ; -p : profil (titre/icone) ;
+        # -d : repertoire de depart. La session zellij vit dans l'onglet.
+        Invoke-Run @('wt.exe', '-w', '0', 'nt', '-p', 'PowerShell', '-d', $Dir,
+                     'pwsh', '-NoProfile', '-NoExit', '-Command',
+                     "zellij attach -c $Name options --on-force-close detach")
+    } else {
+        if ($Dir -and (Test-Path $Dir)) { Invoke-Step @('Set-Location', $Dir) }
+        Invoke-Run @('zellij', 'attach', '-c', $Name, 'options', '--on-force-close', 'detach')
+    }
+}
+
+# Rejoint une session ACTIVE. Pour un nom de vault dont la session a ete ouverte
+# par le telephone (autre logon session), l'attach echouera : zellij affichera son
+# erreur, comportement assume (parite .sh : delegation impossible cote desktop).
+function Join-ActiveSession {
+    param([string]$Name)
+    $dir = if ($vaults -contains $Name) { Join-Path $VaultsDir $Name }
+           elseif ($projects -contains $Name) { Join-Path $DevDir $Name }
+           else { $null }
+    Open-Session -Name $Name -Dir $dir
+}
+
+# Premier caractere Esc -> $null (annulation). Enter seul -> ''. Sinon la ligne.
+function Read-OrCancel {
+    try { $first = [Console]::ReadKey($true) } catch { return $null }
+    if ($first.Key -eq 'Escape') { [Console]::Error.WriteLine(); return $null }
+    if ($first.Key -eq 'Enter')  { [Console]::Error.WriteLine(); return '' }
+    [Console]::Error.Write($first.KeyChar)
+    $rest = [Console]::In.ReadLine()
+    if ($null -eq $rest) { $rest = '' }
+    return "$($first.KeyChar)$rest"
+}
+
+# --- Selection -------------------------------------------------------------------
+if ($Pick) {
+    $key = $Key
+    $choice = $Pick
+} else {
+    Write-Error 'mode interactif branche en Task 4 (utiliser -Pick/-List en attendant)'
+    exit 1
+}
+
+# --- Dispatch ----------------------------------------------------------------------
+if ($key -eq 'ctrl-n') { $type = 'new'; $name = '' }
+elseif (-not $choice)  { exit 0 }
+else {
+    $f = $choice -split "`t"
+    $type = $f[0]; $name = $f[1]
+}
+
+switch ($type) {
+    'sep'     { if ($DryRun -or $Pick) { exit 0 }; & $PSCommandPath -View $View; exit $LASTEXITCODE }
+    'active'  { Join-ActiveSession -Name $name }
+    'project' { Open-Session -Name $name -Dir (Join-Path $DevDir $name) }
+    'vault'   { Open-Session -Name $name -Dir (Join-Path $VaultsDir $name) }
+    'new'     {
+        if (-not $name) {
+            [Console]::Error.Write('Session name: ')
+            $name = Read-OrCancel
+            if (-not $name) { if ($DryRun -or $Pick) { exit 0 }; & $PSCommandPath -View $View; exit $LASTEXITCODE }
+        }
+        $start = Join-Path $DevDir $name
+        if (-not (Test-Path $start)) { $start = $HOME }
+        Open-Session -Name $name -Dir $start
+    }
+    default   { Write-Error "unknown choice: $type"; exit 1 }
+}
