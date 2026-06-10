@@ -10,6 +10,19 @@ function isadmin {
 
 function dev { Set-Location C:\dev }
 
+# Zellij web sessions are created by session name, without a per-session cwd
+# flag. If the session name matches an Obsidian vault, land in that vault
+# automatically. Machine-specific roots can override PC_VAULTS_WIN locally.
+if ($env:ZELLIJ_SESSION_NAME) {
+    $vaultRoot = if ($env:PC_VAULTS_WIN) { $env:PC_VAULTS_WIN } else { 'C:\obsidian-vaults' }
+    try {
+        $candidate = Join-Path $vaultRoot $env:ZELLIJ_SESSION_NAME
+        if ((Test-Path (Join-Path $candidate '.obsidian')) -and (Test-Path $candidate)) {
+            Set-Location -LiteralPath $candidate
+        }
+    } catch {}
+}
+
 # Invoke-Sessionizer : menu fzf (sessions/projets/vaults) qui tourne en WSL ; lie a F2 plus bas.
 # Execute comme une vraie commande (pas dans le ScriptBlock) pour que fzf recoive le TTY.
 function Invoke-Sessionizer {

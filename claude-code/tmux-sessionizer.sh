@@ -328,7 +328,8 @@ open_wt_zellij() {  # $1 = vault name
 # open_vault: route a vault choice by where the menu runs.
 #   phone (ssh)  : the menu runs in WSL and WSL→Windows is broken (mirrored bug),
 #                  so we DELEGATE — record the name, exit 42; wsl()/pwsh() phone-side
-#                  catch 42 and ssh straight to the Windows sshd to `zellij attach`.
+#                  catch 42, open an SSH tunnel to the Windows Zellij web server,
+#                  then run the local Termux Zellij client against that tunnel.
 #   desktop (F2) : new WT tab (open_wt_zellij). Cf. memories reference_ssh-wsl-no-interop
 #                  / reference_wsl-mirrored-loopback-broken.
 open_vault() {  # $1 = vault name

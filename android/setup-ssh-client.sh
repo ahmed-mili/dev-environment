@@ -6,7 +6,8 @@
 #   - A polished Termux (Catppuccin Mocha colours, JetBrainsMono Nerd Font,
 #     Ubuntu-style prompt, fastfetch splash, fzf bindings)
 #   - The SSH stack needed to reach a remote PC over Tailscale:
-#     openssh client, mosh (resilient over flaky mobile networks), tmux
+#     openssh client, mosh (resilient over flaky mobile networks), tmux, zellij
+#     (local client for Windows vault sessions over a Zellij web SSH tunnel)
 #   - An ed25519 SSH key (printed at the end so you can paste it into
 #     ~/.ssh/authorized_keys on the remote host)
 #   - A wake lock on shell start so Android does not kill the mosh tunnel
@@ -170,7 +171,7 @@ pkg upgrade -y -o Dpkg::Options::="--force-confold" >/dev/null 2>&1 \
 
 PKGS=(
     # Core CLI
-    git openssh mosh curl wget nano rsync
+    git openssh mosh curl wget nano rsync zellij
     # Shell UX
     fzf fastfetch
     eza bat fd ripgrep
@@ -193,7 +194,7 @@ fi
 
 # Quick sanity-check on the SSH client stack — this is the whole point of
 # the bundle, so flag loudly if either binary refuses to load.
-for bin in ssh mosh; do
+for bin in ssh mosh zellij; do
     if ! command -v "$bin" >/dev/null 2>&1; then
         fail "$bin not on PATH after install — re-run \`pkg install $bin\` manually"
     fi
