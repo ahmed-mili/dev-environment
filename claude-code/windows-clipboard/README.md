@@ -12,7 +12,7 @@ entrante reçoit une window station éphémère (`Service-0x0-<LUID>$`) détruit
 la déconnexion. Conséquences :
 
 - Un `ssh -p 2222 … powershell SetImage` lancé par le téléphone (l'ancien
-  « maillon Windows natif » d'`img2claude`) **réussit** (exit 0)… dans un
+  « maillon Windows natif » d'`img2clip`) **réussit** (exit 0)… dans un
   presse-papiers fantôme que personne ne lira jamais. Faux positif permanent.
 - Le Claude pwsh vit dans la logon session du **serveur zellij** créé par la
   connexion SSH de l'user ; son Alt+V lit (via `powershell
@@ -29,7 +29,7 @@ window station du lecteur**.
 
 | Fichier | Rôle |
 |---|---|
-| `img-clip-watcher.ps1` | Watcher (PS 5.1, ASCII pur) : poll `\\wsl.localhost\<distro>\<home>\.claude-images` (1 s), pousse chaque nouvelle image dans le presse-papiers de SA window station. Mutex `Local\img-clip-watcher-<winsta>` (1 par clipboard), meurt avec son ancre (serveur zellij / shell appelant). |
+| `img-clip-watcher.ps1` | Watcher (PS 5.1, ASCII pur) : poll `%USERPROFILE%\.claude-images` en priorité, puis l'ancien dépôt `\\wsl.localhost\<distro>\<home>\.claude-images` en fallback (1 s), pousse chaque nouvelle image dans le presse-papiers de SA window station. Mutex `Local\img-clip-watcher-<winsta>` (1 par clipboard), meurt avec son ancre (serveur zellij / shell appelant). |
 | Wrappers `claude()` / `ollama()` (dans `windows/files/ps7-profile.ps1`) | Lancent le watcher avant le binaire (`claude`) ou avant `ollama launch claude`, via `Invoke-CimMethod Win32_Process Create` : le process échappe au job ConPTY du pane zellij (qui tue son arborescence à la fermeture) tout en gardant le token — donc la window station — de l'appelant. |
 | Launchers Bash `ollama-launcher.sh` / `ollama-claude-launcher.sh` | Lancent aussi le watcher avant Claude, pour couvrir `Ctrl+Y` dans Zellij et les shells Bash/Git-Bash qui contournent le profil pwsh. |
 | `windows/install.ps1` (étape 2b) | Déploie le watcher vers `~/.local/bin/img-clip-watcher.ps1`. |
@@ -37,10 +37,11 @@ window station du lecteur**.
 ## Chaîne complète (3 lecteurs, 1 envoi)
 
 ```
-téléphone (img2claude) --rsync--> WSL ~/.claude-images/img-<hash>.jpg
-    ├── wl-copy image/png            → Alt+V dans Claude WSL
+téléphone (img2clip) --sftp :2222--> Windows %USERPROFILE%\.claude-images\img-<hash>.jpg
     ├── img-clip-watcher (par winsta) → Alt+V dans Claude pwsh natif (chaque session zellij)
     └── (session interactive : pwsh au PC → wrapper claude() → même watcher → Win+V/Discord)
+
+Compat WSL : img2clip_TARGET=wsl garde l'ancien dépôt WSL + wl-copy image/png.
 ```
 
 ## Pièges appris (ne pas re-tomber dedans)

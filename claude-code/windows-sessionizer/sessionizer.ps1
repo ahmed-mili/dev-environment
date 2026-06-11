@@ -44,7 +44,7 @@ function Get-ActiveSessions {
         Get-ChildItem -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-Path (Join-Path $_.FullName 'session-metadata.kdl') } |
         ForEach-Object { [void]$names.Add($_.Name) }
-    return @($names)
+    return @($names | Where-Object { $_ -ne 'web_server_bus' })
 }
 
 function Get-Projects {
@@ -62,8 +62,8 @@ function Get-Vaults {
 $projects = Get-Projects
 $vaults   = Get-Vaults
 switch ($View) {
-    'dev'    { $vaults = @();   $actives = Get-ActiveSessions }
-    'vaults' { $projects = @(); $actives = Get-ActiveSessions }
+    'dev'    { $vaults = @();   $actives = @(Get-ActiveSessions | Where-Object { $projects -contains $_ }) }
+    'vaults' { $projects = @(); $actives = @(Get-ActiveSessions | Where-Object { $vaults -contains $_ }) }
     default  {                  $actives = Get-ActiveSessions }
 }
 
@@ -124,16 +124,23 @@ if ($List) { Build-Menu | Write-Output; exit 0 }
 # suivent le MEME chemin (uniforme).
 $InZellij = [bool]$env:ZELLIJ
 
+# PIEGE (vecu 2026-06-12) : `& $cmd @(pipeline)` ne splatte PAS -- l'expression
+# inline passe le tableau comme UN argument (Object[] -> -Path de Set-Location
+# explose). Le splatting n'opere que sur une VARIABLE (@rest).
 function Invoke-Step {   # commande de SETUP (equivalent step() du .sh)
     param([string[]]$Argv)
-    if ($DryRun) { Write-Output ("DRYRUN: " + ($Argv -join ' ')) }
-    else { & $Argv[0] @($Argv | Select-Object -Skip 1) }
+    if ($DryRun) { Write-Output ("DRYRUN: " + ($Argv -join ' ')); return }
+    $cmd  = $Argv[0]
+    $rest = @($Argv | Select-Object -Skip 1)
+    if ($rest.Count) { & $cmd @rest } else { & $cmd }
 }
 
 function Invoke-Run {    # commande FINALE (equivalent run()/exec du .sh)
     param([string[]]$Argv)
     if ($DryRun) { Write-Output ("DRYRUN: " + ($Argv -join ' ')); exit 0 }
-    & $Argv[0] @($Argv | Select-Object -Skip 1)
+    $cmd  = $Argv[0]
+    $rest = @($Argv | Select-Object -Skip 1)
+    if ($rest.Count) { & $cmd @rest } else { & $cmd }
     exit $LASTEXITCODE
 }
 
@@ -241,10 +248,15 @@ if ($Pick) {
     Remove-Item $hstate -Force -ErrorAction SilentlyContinue
     $ctrlGBatch = "if exist `"$hstate`" (del `"$hstate`" & echo $hdrMin) else (type nul > `"$hstate`" & echo $hdrFull)"
 
+    # Habillage : bordure arrondie + label, compteur masque (bruit), couleurs
+    # accordees au theme (violet 141 = vaults/accents, vert 108 = sessions
+    # actives, gris 240/245 = chrome). gutter:-1 = pas de colonne fantome.
     $fzfArgs = @(
         '--ansi', '--delimiter', "`t", '--with-nth=3',
         '--layout=reverse', '--no-multi',
-        '--color=pointer:8',
+        '--border=rounded', '--border-label', ' ◆ Sessionizer ', '--border-label-pos=3',
+        '--padding=0,1', '--info=hidden', '--ellipsis=…',
+        '--color=pointer:141,bg+:237,fg+:255,hl:141,hl+:141,header:245,prompt:108,border:240,label:141,gutter:-1',
         '--prompt', 'pc ❯ ',
         '--header', $hdrMin,
         '--expect=ctrl-n,ctrl-x,ctrl-r',

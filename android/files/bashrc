@@ -22,7 +22,7 @@ export LESSCHARSET=utf-8
 # (HyperOS task manager, swipe-up dans le recent apps, MIUI memory cleanup,
 # OOM), les services lances au boot disparaissent et Termux:Boot ne les rejoue
 # PAS a la prochaine ouverture de l'app -- la doc Termux:Boot est explicite la
-# dessus. Sans ce bloc, le pipeline tel -> PC (img2claude pour screenshots et
+# dessus. Sans ce bloc, le pipeline tel -> PC (img2clip pour screenshots et
 # photos, ssh phone pour debug) reste casse jusqu'au prochain reboot Android.
 # Idempotent : si deja vivants, no-op.
 # Constate 2026-05-28 apres force-stop+relance Termux pour recharger les aliases.
@@ -89,7 +89,7 @@ alias tls='tmux ls'
 isadmin() { [ "$(id -u)" -eq 0 ]; }
 
 # ---- Prompt: one-line WSL/Ubuntu style — user@host (green) : path (blue) $ (replaces Starship) ----
-# Same look as a stock Ubuntu/WSL shell (ahmed@HOST:/path$). user@host is built ONCE at shell
+# Same look as a stock Ubuntu/WSL shell (user@HOST:/path$). user@host is built ONCE at shell
 # init (real Termux user + getprop model = the same machine name as the splash header), so the
 # only per-prompt work is the path. ~ abbreviates $HOME and the full path shows elsewhere, like
 # WSL. Color codes are wrapped in \[ \] so readline measures the visible width correctly.
@@ -173,30 +173,45 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 
 # ---- Desktop connection (Tailscale, host alias `desktop` in ~/.ssh/config) ----
 #
-# We partition desktop access by WORLD (which side of the filesystem / where it runs best):
-#   wsl/wslm   : Linux/ext4 world — MENU of Zellij sessions + ~/dev projects (NO vaults).
-#                wsl = ssh (default, finger-scroll OK on a stable link); wslm = mosh
-#                (robust to network drops Wi-Fi<->4G/screen off, but no mouse scroll).
-#                If the link drops: run wsl again and reattach the same Zellij
-#                session. `/resume` is only the fallback if the PC-side session died.
-#   pwsh/pwshm : Windows/C: world in NATIVE PowerShell — SAME menu, filtered to Obsidian
-#                vaults (extensible to any C: folder better in pwsh). pwsh=ssh, pwshm=mosh.
-#                Pick a vault and it opens on its own — no command to type.
+# Desktop access now goes through native Windows PowerShell only:
+#   dev/devm   : Windows/C: world in NATIVE PowerShell. Lists folders from
+#                C:\dev through Windows sshd (:2222), then opens the selected
+#                project through a direct Windows SSH TTY. Saved Zellij state is
+#                forgotten on open so resurrected projects land in C:\dev\<name>.
+#   pwsh/pwshm : Windows/C: world in NATIVE PowerShell. Lists vaults through
+#                Windows sshd (:2222), then opens the selected vault through
+#                the Termux-local Zellij web client/tunnel. No WSL hop needed.
 #   sleep-pc   : suspend the desktop (sleep).   stop-pc : full shutdown.
 #                Both go through the Windows sshd (port 2222) + $WIN_USER, so native
-#                commands run (the WSL ssh on port 22 has no Windows interop).
+#                commands run.
 #
-# wsl/wslm (PC_VIEW=wsl) and pwsh/pwshm (PC_VIEW=ps) open the SAME fzf menu (sessionizer)
-# on the desktop, different perimeter (PC_VIEW var). Script versioned in the repo. Functions
-# (not aliases) to handle ~ expansion with mosh. NB: the `pwsh` function does NOT clash with
-# the remote pwsh — the latter lives in the string sent to ssh, run on Windows.
-# Picking a VAULT in the menu: the sessionizer (in WSL) can't reach Windows, so it records
-# the name and exits with code 42 -> _pc_open_vault reads the name and opens it HERE
-# through a Termux-local Zellij client + SSH tunnel to the Windows Zellij web server.
-_pc_open_vault() {
-  local v; v=$(ssh -o ConnectTimeout=8 -o LogLevel=ERROR desktop 'f="$HOME/.cache/pc-vault-request"; [ -f "$f" ] && cat "$f"; rm -f "$f" 2>/dev/null')
-  [ -n "$v" ] || return 0
-  [ -n "${WIN_USER:-}" ] || { echo "set WIN_USER in ~/.bashrc.local to open vaults" >&2; return 1; }
+# Retire previous WSL helpers even in already-open shells that source this file.
+unalias wsl wslm 2>/dev/null || true
+unset -f wsl wslm 2>/dev/null || true
+
+# dev/devm and pwsh/pwshm use the Windows sessionizer over sshd :2222.
+# Functions (not aliases) avoid clashing with remote pwsh.
+_pc_open_native_direct() {
+  local name="$1"
+  local root="$2"
+  local forget_saved="${3:-0}"
+  local name_b64 root_b64
+  name_b64=$(printf '%s' "$name" | base64 | tr -d '\n')
+  root_b64=$(printf '%s' "$root" | base64 | tr -d '\n')
+  ssh -tt -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
+    "pwsh -NoProfile -NoLogo -WorkingDirectory C:\\ -Command \"\$web = (Get-Command zellij.exe -ErrorAction Stop).Source; \$session = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$name_b64')); \$root = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$root_b64')); \$dir = Join-Path \$root \$session; if (Test-Path -LiteralPath \$dir) { Set-Location -LiteralPath \$dir } elseif (Test-Path -LiteralPath \$root) { Set-Location -LiteralPath \$root }; \$attachArgs = @('attach','-c'); if ('$forget_saved' -eq '1') { \$attachArgs += '--forget' }; \$attachArgs += @(\$session,'options','--default-cwd',\$dir,'--web-sharing','on','--on-force-close','detach'); & \$web @attachArgs\""
+}
+_pc_open_native_session() {
+  local name="$1"
+  local kind="${2:-project}"
+  local root="$3"
+  local label="$4"
+  [ -n "$name" ] || return 0
+  [ -n "${WIN_USER:-}" ] || { echo "set WIN_USER in ~/.bashrc.local to open $label sessions" >&2; return 1; }
+  if [ "$label" = "project" ]; then
+    _pc_open_native_direct "$name" "$root" 1
+    return $?
+  fi
   command -v zellij >/dev/null 2>&1 || { echo "install Termux zellij first: pkg install zellij" >&2; return 1; }
   local token_file="${PC_ZELLIJ_WEB_TOKEN_FILE:-$HOME/.config/pc-zellij-web-token}"
   [ -r "$token_file" ] || { echo "missing Zellij web token: $token_file" >&2; return 1; }
@@ -205,7 +220,7 @@ _pc_open_vault() {
   local local_port="${PC_ZELLIJ_WEB_LOCAL_PORT:-$((18082 + (RANDOM % 1000)))}"
   local remote_port="${PC_ZELLIJ_WEB_REMOTE_PORT:-8082}"
   clear 2>/dev/null
-  printf '\033[2m→ opening vault %s…\033[0m\n' "$v"   # feedback while the ssh connects
+  printf '\033[2m→ opening %s %s…\033[0m\n' "$label" "$name"   # feedback while the ssh connects
   # Open in NATIVE Windows pwsh through Zellij web, tunneled over the Windows sshd
   # (port 2222). A direct `zellij attach` inside sshd is not truly persistent on
   # Windows: each OpenSSH reconnect can get a different IPC/window-station scope,
@@ -217,41 +232,71 @@ _pc_open_vault() {
   # ~2min sur le timeout TCP par defaut). ssh renvoie 255 sur ECHEC DE CONNEXION
   # uniquement (une sortie normale de pwsh/claude renvoie son propre code, pas 255).
   ssh -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
-    "pwsh -NoProfile -NoLogo -WorkingDirectory C:\\obsidian-vaults -Command \"\$null = zellij web --status --timeout 2 2>&1; if (\$LASTEXITCODE -ne 0) { \$null = zellij web --daemonize --ip 127.0.0.1 --port $remote_port --server-startup-timeout 5 2>&1; \$null = zellij web --status --timeout 2 2>&1 }; exit \$LASTEXITCODE\"" </dev/null
+    "pwsh -NoProfile -NoLogo -WorkingDirectory C:\\ -Command \"\$web = (Get-Command zellij.exe -ErrorAction Stop).Source; \$status = & \$web web --status --timeout 2 --ip 127.0.0.1 --port $remote_port 2>&1 | Out-String; if (\$status -notmatch 'online') { Start-Process -FilePath \$web -WindowStyle Hidden -ArgumentList @('web','--daemonize','--ip','127.0.0.1','--port','$remote_port','--server-startup-timeout','8') | Out-Null; Start-Sleep -Milliseconds 700 }; \$status = & \$web web --status --timeout 4 --ip 127.0.0.1 --port $remote_port 2>&1 | Out-String; if (\$status -notmatch 'online') { [Console]::Error.WriteLine(\$status.Trim()); exit 1 }; exit 0\"" </dev/null
   if [ $? -eq 255 ]; then
-    printf '\033[33m⚠ sshd Windows (:2222) injoignable — reveille le desktop, ou au desktop: Restart-Service sshd. En attendant: `wsl`.\033[0m\n' >&2
+    printf '\033[33m⚠ sshd Windows (:2222) injoignable — reveille le desktop, ou au desktop: Restart-Service sshd.\033[0m\n' >&2
     return 255
   fi
 
   local had_monitor=0
   case $- in *m*) had_monitor=1; set +m ;; esac
-  ssh -N -L "127.0.0.1:${local_port}:127.0.0.1:${remote_port}" \
-    -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR \
-    -p 2222 "${WIN_USER}@desktop" &
-  local tunnel_pid=$!
+  local tunnel_pid
+  {
+    ssh -N -L "127.0.0.1:${local_port}:127.0.0.1:${remote_port}" \
+      -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR \
+      -p 2222 "${WIN_USER}@desktop" &
+    tunnel_pid=$!
+  } 2>/dev/null
   sleep 0.6
   if ! kill -0 "$tunnel_pid" >/dev/null 2>&1; then
     wait "$tunnel_pid" 2>/dev/null || true
     [ "$had_monitor" -eq 1 ] && set -m
-    printf '\033[33m⚠ impossible d ouvrir le tunnel Zellij web local (port %s). Relance `pwsh`.\033[0m\n' "$local_port" >&2
+    printf '\033[33m⚠ impossible d ouvrir le tunnel Zellij web local (port %s). Relance la commande.\033[0m\n' "$local_port" >&2
     return 1
   fi
-  zellij attach "http://127.0.0.1:${local_port}/$v" --token "$token"
+  local start_s end_s elapsed
+  start_s=$(date +%s)
+  zellij attach "http://127.0.0.1:${local_port}/$name" --token "$token"
   local rc=$?
+  end_s=$(date +%s)
+  elapsed=$((end_s - start_s))
   kill "$tunnel_pid" >/dev/null 2>&1 || true
   wait "$tunnel_pid" 2>/dev/null || true
   [ "$had_monitor" -eq 1 ] && set -m
+  if [ "$rc" -eq 0 ] && [ "$elapsed" -lt 2 ]; then
+    printf '\033[33mweb attach closed immediately; falling back to direct ssh...\033[0m\n' >&2
+    _pc_open_native_direct "$name" "$root"
+    return $?
+  fi
   return "$rc"
+}
+_pc_pick_native() {
+  local view="$1"
+  local item_type="$2"
+  local prompt="$3"
+  local root="$4"
+  local label="$5"
+  [ -n "${WIN_USER:-}" ] || { echo "set WIN_USER in ~/.bashrc.local to open $label sessions" >&2; return 1; }
+  command -v fzf >/dev/null 2>&1 || { echo "install fzf first: pkg install fzf" >&2; return 1; }
+  local sessionizer_win="${PC_SESSIONIZER_WIN:-C:\\dev\\dev-environment\\claude-code\\windows-sessionizer\\sessionizer.ps1}"
+  local rows choice kind name
+  rows=$(ssh -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
+    "pwsh -NoProfile -NoLogo -ExecutionPolicy Bypass -File \"$sessionizer_win\" -List -View \"$view\"" </dev/null) || return $?
+  choice=$(printf '%s\n' "$rows" | awk -F '\t' -v item_type="$item_type" '$1 == "active" || $1 == item_type' | fzf \
+    --ansi --delimiter=$'\t' --with-nth=3 --layout=reverse --no-multi --color=pointer:8 \
+    --prompt="$prompt" --header='Enter open - Esc cancel') || return 0
+  [ -n "$choice" ] || return 0
+  kind=$(printf '%s' "$choice" | cut -f1)
+  name=$(printf '%s' "$choice" | cut -f2)
+  _pc_open_native_session "$name" "$kind" "$root" "$label"
 }
 # LogLevel=ERROR: silences « Connection to desktop closed. » + the post-quantum WARNING
 # (INFO-level ssh messages) — without hiding real errors (auth, unreachable host).
-_pc_sess="~/dev/dev-environment/claude-code/tmux-sessionizer.sh"
-wsl()   { ssh -tt -o LogLevel=ERROR desktop "PC_VIEW=wsl $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
-wslm()  { mosh desktop -- bash -c          "PC_VIEW=wsl $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
-pwsh()  { ssh -tt -o LogLevel=ERROR desktop "PC_VIEW=ps  $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
-pwshm() { mosh desktop -- bash -c          "PC_VIEW=ps  $_pc_sess"; [ $? -eq 42 ] && _pc_open_vault; }
+dev()   { _pc_pick_native dev project 'dev ❯ ' 'C:\dev' project; }
+devm()  { _pc_pick_native dev project 'dev ❯ ' 'C:\dev' project; }
+pwsh()  { _pc_pick_native vaults vault 'pwsh ❯ ' 'C:\obsidian-vaults' vault; }
+pwshm() { _pc_pick_native vaults vault 'pwsh ❯ ' 'C:\obsidian-vaults' vault; }
 # Power control of the desktop, through the WINDOWS sshd (port 2222) so native commands run.
-# (The WSL ssh on port 22 has no Windows interop, so it can't launch rundll32 / shutdown.)
 # Needs $WIN_USER (~/.bashrc.local), like vaults.
 _win_run() {
   [ -n "${WIN_USER:-}" ] || { echo "set WIN_USER in ~/.bashrc.local — e.g. export WIN_USER=<account>" >&2; return 1; }

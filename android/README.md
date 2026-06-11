@@ -33,20 +33,20 @@ The script installs the packages listed below, deploys the Catppuccin configs, g
 
 ## What this bundle is NOT (any more)
 
-This installer no longer puts Claude Code, Node.js or git-sync hooks on the phone. Claude Code now runs on the **PC** and is reached from Termux with the `wsl` / `pwsh` helpers, which attach to persistent Zellij sessions on the desktop.
+This installer no longer puts Claude Code, Node.js or git-sync hooks on the phone. Claude Code now runs on the **PC** and is reached from Termux with `dev` for native Windows `C:\dev` projects, or `pwsh` for native Windows/C: vaults through the Windows Zellij web tunnel.
 
 If you were on either of the two previous setups (**Ollama + proot-distro Ubuntu**, or **native Claude Code on Termux** with auto-pull/push hooks), run `migrate-legacy.sh` — it detects and cleans up both generations (`~/.npm-global`, the SessionStart/SessionEnd hooks in `~/.claude/settings.json`, the autostart blocks in `~/.bashrc.local`, the empty `/storage/emulated/0/dev` tree if it still hangs around), then re-runs `setup-ssh-client.sh` for you. The top-level `bootstrap.sh` invokes it automatically when it detects either generation.
 
 ## Daily workflow
 
 ```bash
-wsl                            # Linux/ext4 projects on the PC
+dev                            # native Windows/C:\dev projects on the PC
 pwsh                           # native Windows/C: vaults on the PC
 # Pick an existing Zellij session, or pick a project/vault to create one.
 # Work in Claude Code, vim, whatever.
-# If 5G drops, run wsl/pwsh again and pick the same entry: Zellij reattaches.
+# If 5G drops, run dev/pwsh again and pick the same entry: Zellij reattaches.
 # later:
-wsl                            # or pwsh: pick up exactly where you left off
+dev                            # or pwsh: pick up exactly where you left off
 ```
 
 The wake-lock is acquired automatically by `~/.bashrc.local` on every shell start (release with `termux-wake-unlock` or delete the line).

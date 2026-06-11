@@ -43,7 +43,7 @@ Tout script d'installation (bootstrap, setup, deploy) doit pouvoir être relanc�
 
 ### 5. Non-régression sur le téléphone
 
-Tout changement côté desktop qui touche au pipeline téléphone→desktop (img2claude, screenshot-watcher, clip-watcher) doit être testé sur les 3 sources :
+Tout changement côté desktop qui touche au pipeline téléphone→desktop (img2clip, screenshot-watcher, clip-watcher) doit être testé sur les 3 sources :
 - Screenshot PC (`Win+Shift+S`)
 - Screenshot téléphone
 - Photo téléphone (appareil photo)
@@ -59,7 +59,7 @@ dev-environment/
 ├── android/        # Termux bash, Ubuntu-style prompt, fastfetch, ssh-client
 │   └── setup-ssh-client.sh
 ├── Codex/    # Config Codex (statusline, settings, hooks, skills)
-│   ├── termux/img2claude      # push image téléphone → desktop
+│   ├── termux/img2clip      # push image téléphone → desktop
 │   ├── wsl-clipboard/         # clip-watcher systemd (WSL)
 │   ├── deploy.ps1 / deploy.sh # sync repo ↔ ~/.Codex/
 │   └── skills/
@@ -76,14 +76,14 @@ dev-environment/
 
 Bidirectionnel (repo ↔ `~/.Codex/`). Whitelist explicite des fichiers trackés. Le reste de `~/.Codex/` (sessions, history, plugins officiels, credentials) est laissé intact.
 
-### `img2claude`
+### `img2clip`
 
 Pipeline téléphone → desktop :
 1. **Dépôt fichier** (`rsync`/`scp`) dans `~/.claude-images`
 2. **Wayland** (`wl-copy`) : pour Codex WSL
 3. **Windows natif** (`img-clip-watcher.ps1`) : pour Codex pwsh natif
 
-Ne pas réintroduire `ssh -p 2222 ... powershell.exe SetImage` dans `img2claude` : ce SetImage écrit dans la window station éphémère de la connexion SSH et renvoie un faux succès. Le presse-papiers Windows natif doit être alimenté côté PC par `img-clip-watcher.ps1`, lancé par le wrapper `claude()` dans la même window station que le Claude pwsh lecteur.
+Ne pas réintroduire `ssh -p 2222 ... powershell.exe SetImage` dans `img2clip` : ce SetImage écrit dans la window station éphémère de la connexion SSH et renvoie un faux succès. Le presse-papiers Windows natif doit être alimenté côté PC par `img-clip-watcher.ps1`, lancé par le wrapper `claude()` dans la même window station que le Claude pwsh lecteur.
 
 ---
 
@@ -101,5 +101,5 @@ Ne pas réintroduire `ssh -p 2222 ... powershell.exe SetImage` dans `img2claude`
 
 - [ ] `grep -rE "<prenom-perso>|<hostname-perso>|<ip-perso>" --include="*" .` → aucun match dans un fichier versionné (sauf commentaire documentant le pourquoi)
 - [ ] `deploy.ps1 -Pull` (ou `-Push`) testé
-- [ ] img2claude testé sur les 3 sources (PC screenshot, tel screenshot, tel photo)
+- [ ] img2clip testé sur les 3 sources (PC screenshot, tel screenshot, tel photo)
 - [ ] Pas de caractère non-ASCII dans un `.ps1`

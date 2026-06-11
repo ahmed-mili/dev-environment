@@ -331,10 +331,11 @@ Write-Ok (Short-Path $ps7Path)
 # 2b) img-clip-watcher (clipboard natif pour Claude Code pwsh)
 # ---------------------------------------------------------------------------
 # Le wrapper claude() du profil PS7 lance ce watcher, qui pousse chaque image
-# deposee par le telephone (WSL ~/.claude-images) dans le presse-papiers de la
-# window station du claude appelant (le presse-papiers Windows est PAR window
-# station : il est impossible de l'alimenter depuis une autre connexion SSH --
-# cf. claude-code/windows-clipboard/img-clip-watcher.ps1 pour la root cause).
+# deposee par le telephone (%USERPROFILE%\.claude-images en natif, ou ancien
+# depot WSL en fallback) dans le presse-papiers de la window station du claude
+# appelant (le presse-papiers Windows est PAR window station : il est
+# impossible de l'alimenter depuis une autre connexion SSH -- cf.
+# claude-code/windows-clipboard/img-clip-watcher.ps1 pour la root cause).
 # Source dans claude-code/ (machinerie Claude), pas dans windows/files/ -- on
 # ne le deploie que depuis un clone local ; en mode one-liner (irm) on skip
 # avec une note, le wrapper claude() degrade proprement (Test-Path).

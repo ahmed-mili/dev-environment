@@ -43,7 +43,7 @@ Tout script d'installation (bootstrap, setup, deploy) doit pouvoir être relanc�
 
 ### 5. Non-régression sur le téléphone
 
-Tout changement côté desktop qui touche au pipeline téléphone→desktop (img2claude, screenshot-watcher, clip-watcher) doit être testé sur les 3 sources :
+Tout changement côté desktop qui touche au pipeline téléphone→desktop (img2clip, screenshot-watcher, clip-watcher) doit être testé sur les 3 sources :
 - Screenshot PC (`Win+Shift+S`)
 - Screenshot téléphone
 - Photo téléphone (appareil photo)
@@ -59,7 +59,7 @@ dev-environment/
 ├── android/        # Termux bash, Ubuntu-style prompt, fastfetch, ssh-client
 │   └── setup-ssh-client.sh
 ├── claude-code/    # Config Claude Code (statusline, settings, hooks, skills)
-│   ├── termux/img2claude      # push image téléphone → desktop
+│   ├── termux/img2clip      # push image téléphone → desktop
 │   ├── wsl-clipboard/         # clip-watcher systemd (WSL)
 │   ├── deploy.ps1 / deploy.sh # sync repo ↔ ~/.claude/
 │   └── skills/
@@ -76,14 +76,14 @@ dev-environment/
 
 Bidirectionnel (repo ↔ `~/.claude/`). Whitelist explicite des fichiers trackés. Le reste de `~/.claude/` (sessions, history, plugins officiels, credentials) est laissé intact.
 
-### `img2claude` — règle à 2 lecteurs
+### `img2clip` — règle à 2 lecteurs
 
 Pipeline téléphone → desktop :
 1. **Dépôt fichier** (`rsync`/`scp`) dans `~/.claude-images`
 2. **Wayland** (`wl-copy`) : pour Claude Code WSL (wl-paste lit `image/png`)
 3. **Windows natif** (`img-clip-watcher.ps1`) : pour Claude Code pwsh natif
 
-Le presse-papiers Windows **ne doit plus** être alimenté par `ssh -p 2222 ... SetImage` depuis `img2claude` : ce SetImage écrit dans la window station éphémère de la connexion SSH et renvoie un faux succès. Le bon design est local au lecteur : le wrapper `claude()` du profil pwsh lance `img-clip-watcher.ps1` dans la même window station que Claude, et ce watcher lit `\\wsl.localhost\<distro>\home\...\.claude-images`.
+Le presse-papiers Windows **ne doit plus** être alimenté par `ssh -p 2222 ... SetImage` depuis `img2clip` : ce SetImage écrit dans la window station éphémère de la connexion SSH et renvoie un faux succès. Le bon design est local au lecteur : le wrapper `claude()` du profil pwsh lance `img-clip-watcher.ps1` dans la même window station que Claude, et ce watcher lit `\\wsl.localhost\<distro>\home\...\.claude-images`.
 
 ---
 
@@ -101,5 +101,5 @@ Le presse-papiers Windows **ne doit plus** être alimenté par `ssh -p 2222 ... 
 
 - [ ] `grep -rE "<prenom-perso>|<hostname-perso>|<ip-perso>" --include="*" .` → aucun match dans un fichier versionné (sauf commentaire documentant le pourquoi)
 - [ ] `deploy.ps1 -Pull` (ou `-Push`) testé
-- [ ] img2claude testé sur les 3 sources (PC screenshot, tel screenshot, tel photo)
+- [ ] img2clip testé sur les 3 sources (PC screenshot, tel screenshot, tel photo)
 - [ ] Pas de caractère non-ASCII dans un `.ps1`

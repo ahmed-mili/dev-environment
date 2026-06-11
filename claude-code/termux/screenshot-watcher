@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # screenshot-watcher — pousse automatiquement chaque NOUVELLE image du telephone
-# dans la session Claude Code du desktop, via img2claude.
+# dans la session Claude Code du desktop, via img2clip.
 #
 # Deux flux, deux flags :
 #   ~/.screenshot-watcher.on       -> surveille les CAPTURES  (dcim/Screenshots)
 #   ~/.screenshot-watcher.photos   -> surveille EN PLUS les PHOTOS (dcim/Camera)
 # Les DEUX flux sont ON par defaut (crees par install.sh, flags persistants dans
 # $HOME). Le flux photos etait historiquement OFF "pour ne pas que chaque photo
-# perso parte dans Claude" -- ce motif a DISPARU : img2claude ne fait plus que
+# perso parte dans Claude" -- ce motif a DISPARU : img2clip ne fait plus que
 # STAGER l'image dans le presse-papier desktop (l'envoi reste un Alt+V MANUEL de
-# l'user, cf. img2claude). Une photo stagee n'entre donc dans Claude que si l'user
+# l'user, cf. img2clip). Une photo stagee n'entre donc dans Claude que si l'user
 # le decide -> aucun risque de deversement automatique, photos ON par defaut est sur.
 #
 # Toggle sans tuer le service (la boucle relit le flag a chaque tour) :
@@ -36,7 +36,7 @@ INTERVAL=0.5
 DISABLED_INTERVAL=2
 STABLE_INTERVAL=0.15
 STABLE_TRIES=14
-NOTIF_ID="img2claude"
+NOTIF_ID="img2clip"
 CHANNEL_ID="watcher-images"
 CHANNEL_NAME="Image-ready"
 GROUP_ID="watcher-images"
@@ -125,12 +125,12 @@ process_dir() {
   [ -n "$file" ] || return 0
   notify_detected "$file"
   wait_until_stable "$file" || return 0
-  # Curseur avance UNIQUEMENT si img2claude reussit. Sinon (scp timeout en
+  # Curseur avance UNIQUEMENT si img2clip reussit. Sinon (scp timeout en
   # tunnel/RER...) on garde le cutoff -> la capture sera RE-tentee au prochain
   # tour, jamais perdue silencieusement. Comme on vise toujours la PLUS recente,
   # une capture encore plus neuve qui arrive entre-temps prend la priorite (la
   # bloquee est sautee naturellement, pas de wedge permanent).
-  if bash "$HOME/img2claude" "$file" </dev/null >/dev/null 2>&1; then
+  if bash "$HOME/img2clip" "$file" </dev/null >/dev/null 2>&1; then
     echo "$mtime" > "$state"
   fi
 }

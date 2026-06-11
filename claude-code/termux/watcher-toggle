@@ -33,7 +33,7 @@
 # Channel dedie : la notif est postee sur un channel Termux:API a part
 # ("watcher-control"), cree a la volee (best-effort). Effet : elle apparait comme une
 # CATEGORIE distincte dans Reglages HyperOS > Apps > Termux:API > Notifications,
-# separee des notifs d'image (channel watcher-images d'img2claude). L'user
+# separee des notifs d'image (channel watcher-images d'img2clip). L'user
 # peut la passer en silencieux cote HyperOS pour la faire descendre en bas du volet.
 # Repli sans --channel si la creation echoue (cf show) -> aucune notif perdue.
 #
@@ -129,7 +129,7 @@ show() {
   photos_action=$(action_label "$PHOTOS_FLAG" "Pause photos" "Enable photos")
 
   # Channel dedie (best-effort) : isole cette notif permanente des autres notifs
-  # Termux:API (ex notifs d'image d'img2claude), qui restent sur le channel
+  # Termux:API (ex notifs d'image d'img2clip), qui restent sur le channel
   # par defaut. termux-notification-channel est idempotent et NE reinitialise PAS les
   # reglages user d'un channel deja existant (importance/silence regles cote HyperOS
   # sont preserves). On n'ajoute --channel QUE si la creation reussit : un --channel

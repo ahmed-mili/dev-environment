@@ -21,16 +21,16 @@ default_shell "pwsh"
 
 // F2 = sessionizer natif (pane flottant ; les ouvertures partent en onglets wt.exe,
 // un `zellij attach` imbrique etant interdit). Esc/choix -> le pane se ferme seul.
-// Ctrl+Y = Ollama launcher : PORT WSL MORT depuis la migration (2026-06-10) — pointe
-// encore vers le script WSL supprime ; a porter dans un plan dedie (hors scope ici).
+// Ctrl+Y = Ollama Claude natif. Le profil pwsh reste charge pour que le wrapper
+// ollama() demarre aussi img-clip-watcher.ps1 dans la bonne window station.
 keybinds {
     shared_except "locked" {
         bind "F2" {
-            Run "pwsh" "-NoProfile" "-File" "C:\\Users\\Ahmed\\.local\\bin\\sessionizer.ps1" {
+            Run "pwsh" "-NoProfile" "-ExecutionPolicy" "Bypass" "-Command" "& (Join-Path $env:USERPROFILE '.local\\bin\\sessionizer.ps1')" {
                 floating true
                 close_on_exit true
             }
         }
-        bind "Ctrl y" { Run "wsl.exe" "-d" "Ubuntu" "-e" "bash" "-lic" "~/dev/dev-environment/claude-code/ollama-launcher.sh"; }
+        bind "Ctrl y" { Run "pwsh" "-NoLogo" "-NoExit" "-Command" "ollama launch claude --dangerously-skip-permissions --verbose --debug"; }
     }
 }

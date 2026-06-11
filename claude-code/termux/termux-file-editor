@@ -6,6 +6,6 @@
 # https://github.com/termux/termux-app/issues/1888 .
 #
 # Doit etre depose dans ~/bin/termux-file-editor sur le telephone.
-# Delegue toute la logique au coeur d'envoi img2claude.
+# Delegue toute la logique au coeur d'envoi img2clip.
 
-exec bash "$HOME/img2claude" "$1"
+exec bash "$HOME/img2clip" "$1"

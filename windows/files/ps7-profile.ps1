@@ -3,6 +3,11 @@
 [Console]::InputEncoding  = [System.Text.UTF8Encoding]::new()
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 $OutputEncoding           = [System.Text.UTF8Encoding]::new()
+$script:PowerShellArgs = @([Environment]::GetCommandLineArgs() | ForEach-Object { $_.ToLowerInvariant() })
+$script:RunsCommandOrFile = [bool]($script:PowerShellArgs | Where-Object {
+    $_ -in @('-command', '-c', '-encodedcommand', '-e', '-file', '-f', '-noninteractive')
+})
+$script:HasInteractiveConsole = (-not $script:RunsCommandOrFile) -and (-not [System.Console]::IsInputRedirected) -and (-not [System.Console]::IsOutputRedirected)
 
 function isadmin {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -10,15 +15,19 @@ function isadmin {
 
 function dev { Set-Location C:\dev }
 
-# Zellij web sessions are created by session name, without a per-session cwd
-# flag. If the session name matches an Obsidian vault, land in that vault
-# automatically. Machine-specific roots can override PC_VAULTS_WIN locally.
+# Zellij web/direct sessions are created by session name. If the session name
+# matches a known Windows project/vault, land in that folder automatically.
+# Machine-specific roots can override PC_DEV_DIR / PC_VAULTS_WIN locally.
 if ($env:ZELLIJ_SESSION_NAME) {
-    $vaultRoot = if ($env:PC_VAULTS_WIN) { $env:PC_VAULTS_WIN } else { 'C:\obsidian-vaults' }
     try {
-        $candidate = Join-Path $vaultRoot $env:ZELLIJ_SESSION_NAME
-        if ((Test-Path (Join-Path $candidate '.obsidian')) -and (Test-Path $candidate)) {
-            Set-Location -LiteralPath $candidate
+        $devRoot = if ($env:PC_DEV_DIR) { $env:PC_DEV_DIR } else { 'C:\dev' }
+        $vaultRoot = if ($env:PC_VAULTS_WIN) { $env:PC_VAULTS_WIN } else { 'C:\obsidian-vaults' }
+        foreach ($root in @($devRoot, $vaultRoot)) {
+            $candidate = Join-Path $root $env:ZELLIJ_SESSION_NAME
+            if (Test-Path -LiteralPath $candidate) {
+                Set-Location -LiteralPath $candidate
+                break
+            }
         }
     } catch {}
 }
@@ -26,11 +35,11 @@ if ($env:ZELLIJ_SESSION_NAME) {
 # Invoke-Sessionizer : menu fzf natif (sessions zellij/projets/vaults) ; lie a F2 plus bas.
 # Execute comme une vraie commande (Insert+AcceptLine, pas dans le ScriptBlock) pour que
 # le TUI long-vivant (zellij attach) recoive le TTY.
-# PROPRETE : AcceptLine vient d'imprimer « PS> Invoke-Sessionizer » ; on remonte d'UNE
+# PROPRETE : AcceptLine vient d'imprimer "PS> Invoke-Sessionizer" ; on remonte d'UNE
 # ligne et on l'efface AVANT de lancer le menu (curseur colonne 0). A la sortie, le
 # prompt suivant s'ecrit a la place de la ligne effacee -> aucune trace, scrollback
 # preserve. (L'ancienne version effacait APRES coup : fragile des que le sessionizer
-# sortait du texte ou echouait — c'etait le bug de la ligne residuelle.)
+# sortait du texte ou echouait -- c'etait le bug de la ligne residuelle.)
 function Invoke-Sessionizer {
     $ESC = [char]27
     [Console]::Write("$ESC[1A$ESC[2K$ESC[G")
@@ -42,7 +51,7 @@ function Invoke-Sessionizer {
 # - Tab accepts the inline prediction if one is visible, else MenuComplete.
 # - Right Arrow / Ctrl+RightArrow also accept (standard PSReadLine behavior).
 # - Syntax-highlight colors aligned with the Catppuccin Mocha palette.
-if (Get-Module -Name PSReadLine -ListAvailable) {
+if ($script:HasInteractiveConsole -and (Get-Module -Name PSReadLine -ListAvailable)) {
     Set-PSReadLineOption -PredictionSource HistoryAndPlugin -PredictionViewStyle InlineView -ErrorAction SilentlyContinue
     Set-PSReadLineOption -Colors @{
         Command            = '#89B4FA'  # Blue
@@ -114,12 +123,24 @@ Register-ArgumentCompleter -CommandName cd, Set-Location, sl -ParameterName Path
 
 # ---- Terminal-Icons: Nerd Font icons in Get-ChildItem (`ls`) output ----
 if (Get-Module -ListAvailable -Name Terminal-Icons) {
-    Import-Module Terminal-Icons -ErrorAction SilentlyContinue
+    $terminalIconsDir = Join-Path $env:APPDATA 'powershell\Community\Terminal-Icons'
+    if (Test-Path $terminalIconsDir) {
+        Get-ChildItem $terminalIconsDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $themeFile = $_.FullName
+            try {
+                $null = Import-Clixml -LiteralPath $themeFile -ErrorAction Stop
+            } catch {
+                $badPath = "$themeFile.bad-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+                Move-Item -LiteralPath $themeFile -Destination $badPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    try { Import-Module Terminal-Icons -ErrorAction Stop } catch {}
 }
 
 # ---- PSFzf: Ctrl+R fuzzy reverse-history, Ctrl+T fuzzy file/dir picker ----
 # Only loaded when fzf.exe is available on PATH.
-if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction SilentlyContinue)) {
+if ($script:HasInteractiveConsole -and (Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction SilentlyContinue)) {
     Import-Module PSFzf -ErrorAction SilentlyContinue
     Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r' -ErrorAction SilentlyContinue
 }
@@ -127,7 +148,7 @@ if ((Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction S
 # ---- Fastfetch splash (Windows logo + system info) ----
 # Uses the config at ~/.config/fastfetch/config.jsonc deployed by this bundle.
 # Runs only in interactive sessions to avoid polluting scripted/piped pwsh calls.
-if ((-not [System.Console]::IsOutputRedirected) -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
+if ($script:HasInteractiveConsole -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
     # Aggregate physical-memory info via WMI (portable across any Windows PC) and
     # expose as $env:FF_RAM so fastfetch's `command` module can echo it cheaply
     # instead of paying CIM cost on every fastfetch invocation.
@@ -191,10 +212,10 @@ function wdev {
 }
 
 # ---- Claude Code clipboard watcher ----------------------------------------
-# Pushes every new phone image (img2claude -> WSL ~/.claude-images) into the
-# clipboard of THIS window station. Called by both `claude` and `ollama launch
-# claude`; the watcher mutex keeps one instance per clipboard, so extra starts
-# are cheap no-ops.
+# Pushes every new phone image (img2clip -> Windows ~/.claude-images, with a
+# WSL fallback) into the clipboard of THIS window station. Called by both
+# `claude` and `ollama launch claude`; the watcher mutex keeps one instance per
+# clipboard, so extra starts are cheap no-ops.
 function Start-ClaudeClipboardWatcher {
     param([switch]$Fast)
     $watcher = "$env:USERPROFILE\.local\bin\img-clip-watcher.ps1"

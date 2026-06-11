@@ -15,7 +15,7 @@
 #   start-sshd              -> ~/.termux/boot/start-sshd
 #   screenshot-watcher      -> ~/bin/screenshot-watcher
 #   termux-file-editor      -> ~/bin/termux-file-editor
-#   img2claude              -> ~/img2claude                         (home racine)
+#   img2clip              -> ~/img2clip                         (home racine)
 #
 # Le shebang absolu /data/data/com.termux/files/usr/bin/bash est obligatoire :
 # Termux:Boot ne charge pas termux-exec donc /usr/bin/env ne résoudrait pas.
@@ -33,7 +33,7 @@ DEPLOY_MAP=(
     "screenshot-watcher:$BIN_DIR/screenshot-watcher"
     "termux-file-editor:$BIN_DIR/termux-file-editor"
     "watcher-toggle:$BIN_DIR/watcher-toggle"
-    "img2claude:$HOME/img2claude"
+    "img2clip:$HOME/img2clip"
 )
 
 say()  { printf '[install] %s\n' "$*"; }
@@ -62,7 +62,7 @@ done
 # persistants dans $HOME (survivent aux reboots ET à un redéploiement de scripts,
 # qui ne touche pas $HOME). On ne les (re)crée QUE s'ils sont absents -> idempotent :
 # un `photos-off` (ou un `rm` du flag) explicite par l'user n'est PAS ré-écrasé à la
-# prochaine exécution. Photos ON par défaut est sûr depuis qu'img2claude ne fait que
+# prochaine exécution. Photos ON par défaut est sûr depuis qu'img2clip ne fait que
 # STAGER (envoi = Alt+V manuel) -> aucune photo ne part toute seule dans Claude.
 # Pour désactiver durablement les photos : `photos-off` (rm ~/.screenshot-watcher.photos).
 say "Flux par défaut (captures + photos)"
