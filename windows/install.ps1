@@ -374,7 +374,12 @@ Write-Step 'Zellij web server (logon task)'
 $zellijExe = Join-Path $env:LOCALAPPDATA 'Zellij\zellij.exe'
 if (Test-Path $zellijExe) {
     $webArgs = 'web --daemonize --ip 127.0.0.1 --port 8082'
-    $action   = New-ScheduledTaskAction -Execute 'pwsh.exe' `
+    # Chemin ABSOLU obligatoire : le Planificateur ne resout pas pwsh.exe via le
+    # PATH user (0x80070002). L'alias WindowsApps est stable a travers les mises
+    # a jour MSIX, contrairement au chemin versionne de Program Files.
+    $pwshExe = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
+    if (-not (Test-Path $pwshExe)) { $pwshExe = (Get-Command pwsh.exe).Source }
+    $action   = New-ScheduledTaskAction -Execute $pwshExe `
         -Argument "-NoProfile -WindowStyle Hidden -Command `"& '$zellijExe' $webArgs`""
     $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
