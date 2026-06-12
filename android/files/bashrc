@@ -191,16 +191,12 @@ unset -f wsl wslm 2>/dev/null || true
 
 # dev/devm and pwsh/pwshm use the Windows sessionizer over sshd :2222.
 # Functions (not aliases) avoid clashing with remote pwsh.
-_pc_open_native_direct() {
-  local name="$1"
-  local root="$2"
-  local forget_saved="${3:-0}"
-  local name_b64 root_b64
-  name_b64=$(printf '%s' "$name" | base64 | tr -d '\n')
-  root_b64=$(printf '%s' "$root" | base64 | tr -d '\n')
-  ssh -tt -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
-    "pwsh -NoProfile -NoLogo -WorkingDirectory C:\\ -Command \"\$web = (Get-Command zellij.exe -ErrorAction Stop).Source; \$session = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$name_b64')); \$root = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$root_b64')); \$dir = Join-Path \$root \$session; if (Test-Path -LiteralPath \$dir) { Set-Location -LiteralPath \$dir } elseif (Test-Path -LiteralPath \$root) { Set-Location -LiteralPath \$root }; \$attachArgs = @('attach','-c'); if ('$forget_saved' -eq '1') { \$attachArgs += '--forget' }; \$attachArgs += @(\$session,'options','--default-cwd',\$dir,'--web-sharing','on','--on-force-close','detach'); & \$web @attachArgs\""
-}
+# Projets ET vaults passent par le web server zellij du bureau : une session
+# creee via lui nait dans la logon session interactive (Session 1) et reste
+# joignable depuis le bureau (F2). L'ancien chemin direct (`zellij attach -c`
+# dans le contexte sshd) creait des sessions Session 0 fantomes, invisibles et
+# injoignables du bureau (bug du 2026-06-12) -- supprime. Le cwd est applique
+# par le bloc ZELLIJ_SESSION_NAME du profil pwsh bureau.
 _pc_open_native_session() {
   local name="$1"
   local kind="${2:-project}"
@@ -208,10 +204,6 @@ _pc_open_native_session() {
   local label="$4"
   [ -n "$name" ] || return 0
   [ -n "${WIN_USER:-}" ] || { echo "set WIN_USER in ~/.bashrc.local to open $label sessions" >&2; return 1; }
-  if [ "$label" = "project" ]; then
-    _pc_open_native_direct "$name" "$root" 1
-    return $?
-  fi
   command -v zellij >/dev/null 2>&1 || { echo "install Termux zellij first: pkg install zellij" >&2; return 1; }
   local token_file="${PC_ZELLIJ_WEB_TOKEN_FILE:-$HOME/.config/pc-zellij-web-token}"
   [ -r "$token_file" ] || { echo "missing Zellij web token: $token_file" >&2; return 1; }
@@ -231,11 +223,20 @@ _pc_open_native_session() {
   # message clair, au lieu de figer sur « opening vault… » (sans ConnectTimeout, ssh pend
   # ~2min sur le timeout TCP par defaut). ssh renvoie 255 sur ECHEC DE CONNEXION
   # uniquement (une sortie normale de pwsh/claude renvoie son propre code, pas 255).
+  # Verifie que le web server zellij tourne COTE BUREAU (tache planifiee
+  # zellij-web-server au logon, ou secours du profil pwsh). On ne le demarre
+  # JAMAIS d'ici : lance depuis sshd il naitrait en Session 0 et les sessions
+  # seraient injoignables depuis le bureau (bug 2026-06-12).
   ssh -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -p 2222 "${WIN_USER}@desktop" \
-    "pwsh -NoProfile -NoLogo -WorkingDirectory C:\\ -Command \"\$web = (Get-Command zellij.exe -ErrorAction Stop).Source; \$status = & \$web web --status --timeout 2 --ip 127.0.0.1 --port $remote_port 2>&1 | Out-String; if (\$status -notmatch 'online') { Start-Process -FilePath \$web -WindowStyle Hidden -ArgumentList @('web','--daemonize','--ip','127.0.0.1','--port','$remote_port','--server-startup-timeout','8') | Out-Null; Start-Sleep -Milliseconds 700 }; \$status = & \$web web --status --timeout 4 --ip 127.0.0.1 --port $remote_port 2>&1 | Out-String; if (\$status -notmatch 'online') { [Console]::Error.WriteLine(\$status.Trim()); exit 1 }; exit 0\"" </dev/null
-  if [ $? -eq 255 ]; then
+    "pwsh -NoProfile -NoLogo -Command \"\$web = (Get-Command zellij.exe -ErrorAction Stop).Source; \$status = & \$web web --status --timeout 4 --ip 127.0.0.1 --port $remote_port 2>&1 | Out-String; if (\$status -match 'online') { exit 0 }; exit 9\"" </dev/null
+  local pre_rc=$?
+  if [ "$pre_rc" -eq 255 ]; then
     printf '\033[33m⚠ sshd Windows (:2222) injoignable — reveille le desktop, ou au desktop: Restart-Service sshd.\033[0m\n' >&2
     return 255
+  fi
+  if [ "$pre_rc" -ne 0 ]; then
+    printf '\033[33m⚠ zellij web offline sur le PC — PC pas loggue ? Ouvre une session Windows sur le bureau (la tache zellij-web-server le lance au logon).\033[0m\n' >&2
+    return 1
   fi
 
   local had_monitor=0
@@ -254,20 +255,11 @@ _pc_open_native_session() {
     printf '\033[33m⚠ impossible d ouvrir le tunnel Zellij web local (port %s). Relance la commande.\033[0m\n' "$local_port" >&2
     return 1
   fi
-  local start_s end_s elapsed
-  start_s=$(date +%s)
   zellij attach "http://127.0.0.1:${local_port}/$name" --token "$token"
   local rc=$?
-  end_s=$(date +%s)
-  elapsed=$((end_s - start_s))
   kill "$tunnel_pid" >/dev/null 2>&1 || true
   wait "$tunnel_pid" 2>/dev/null || true
   [ "$had_monitor" -eq 1 ] && set -m
-  if [ "$rc" -eq 0 ] && [ "$elapsed" -lt 2 ]; then
-    printf '\033[33mweb attach closed immediately; falling back to direct ssh...\033[0m\n' >&2
-    _pc_open_native_direct "$name" "$root"
-    return $?
-  fi
   return "$rc"
 }
 _pc_pick_native() {
