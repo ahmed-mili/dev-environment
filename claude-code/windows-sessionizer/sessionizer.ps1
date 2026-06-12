@@ -29,27 +29,72 @@ $DevDir    = if ($env:PC_DEV_DIR)    { $env:PC_DEV_DIR }    else { 'C:\dev' }
 $VaultsDir = if ($env:PC_VAULTS_WIN) { $env:PC_VAULTS_WIN } else { 'C:\obsidian-vaults' }
 
 # --- Collecte -----------------------------------------------------------------
-# Sessions zellij actives, DEUX sources (parite zj_actives_win du .sh) :
-#   1. zellij ls -ns          : sessions JOIGNABLES depuis CETTE logon session
-#   2. dossiers IPC + cache   : sessions des AUTRES logon sessions (ssh :2222 du tel)
-# DISTINCTION VITALE (vecu 2026-06-12, des dizaines de panics dans zellij.log) :
-# un `zellij attach` vers une session d'une autre logon session = panic
-# "Acces refusu" cote serveur (pipe nomme inaccessible), retries, et `attach -c`
-# cree un DOUBLON du meme nom. On garde donc DEUX ensembles : $JoinableSessions
-# (attach ok) et le reste (affiche, mais attach refuse avec un message clair).
+# Sessions zellij actives, deux sources vivantes :
+#   1. zellij ls -ns              : sessions joignables depuis cette logon session
+#   2. zellij.exe --server <path> : sessions d'autres logon sessions (tel/web)
+# Ne pas relire les dossiers IPC/cache directement : ils survivent au reboot et
+# produisent de faux "active - tel/web" alors que le serveur n'existe plus.
 $JoinableSessions = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
+function Get-ZellijServerSessions {
+    $names = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
+    Get-CimInstance Win32_Process -Filter "Name = 'zellij.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match '(?i)(^|\s)--server\s+' } |
+        ForEach-Object {
+            $serverPath = $null
+            if ($_.CommandLine -match '(?i)--server\s+"([^"]+)"') {
+                $serverPath = $Matches[1]
+            } elseif ($_.CommandLine -match '(?i)--server\s+(\S+)') {
+                $serverPath = $Matches[1]
+            }
+            if ($serverPath) {
+                $name = Split-Path -Leaf $serverPath
+                if ($name -and $name -ne 'web_server_bus') { [void]$names.Add($name) }
+            }
+        }
+    return @($names)
+}
+
+# Source 3 (vecu 2026-06-12) : named pipes Windows. Un serveur zellij d'une autre
+# logon session (tel/SSH = session 0) peut etre invisible des DEUX sources ci-dessus
+# (CommandLine WMI protege + marqueur disque absent de contract_version_1), mais son
+# pipe nomme \\.\pipe\<TEMP>\zellij\contract_version_1\<name> reste visible globalement.
+# Sans cette source, le menu affiche la session comme inactive (o), `attach -c` tente
+# de la CREER, collisionne avec le pipe cross-logon et FIGE le client apres le rendu.
+function Get-ZellijPipeSessions {
+    $names = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
+    $prefix = Join-Path $env:TEMP 'zellij\contract_version_1\'
+    $pipes = try { [System.IO.Directory]::GetFiles('\\.\pipe\') } catch { @() }
+    foreach ($p in $pipes) {
+        $rel = $p -replace '^\\\\\.\\pipe\\', ''
+        if ($rel.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            $name = Split-Path -Leaf $rel
+            if ($name -and $name -notlike '*-reply' -and $name -ne 'web_server_bus') {
+                [void]$names.Add($name)
+            }
+        }
+    }
+    return @($names)
+}
+
 function Get-ActiveSessions {
     foreach ($l in (& zellij ls -ns 2>$null)) {
         if ($l -and $l.Trim()) { [void]$JoinableSessions.Add($l.Trim()) }
     }
     $names = [System.Collections.Generic.SortedSet[string]]::new($JoinableSessions, [StringComparer]::Ordinal)
-    Get-ChildItem "$env:TEMP\zellij\contract_version_*" -Directory -ErrorAction SilentlyContinue |
-        Get-ChildItem -ErrorAction SilentlyContinue |
-        ForEach-Object { [void]$names.Add($_.Name) }
-    Get-ChildItem "$env:LOCALAPPDATA\Zellij\cache\contract_version_*\session_info" -Directory -ErrorAction SilentlyContinue |
-        Get-ChildItem -Directory -ErrorAction SilentlyContinue |
-        Where-Object { Test-Path (Join-Path $_.FullName 'session-metadata.kdl') } |
-        ForEach-Object { [void]$names.Add($_.Name) }
+    foreach ($s in Get-ZellijServerSessions) { [void]$names.Add($s) }
+    foreach ($s in Get-ZellijPipeSessions)   { [void]$names.Add($s) }
+    # Fallback : zellij ls connait aussi les sessions d'autres logon sessions (cache IPC).
+    # Get-ZellijServerSessions peut rater un processus dont le CommandLine WMI est
+    # protege (ex: session SSH depuis le telephone). Risque : sessions fantomes post-reboot.
+    # zellij ls colore sa sortie meme hors TTY : strip ANSI sinon le nom pollue
+    # (\e[32;1mfoo\e[0m) cree un DOUBLON du nom propre venant de ls -ns.
+    foreach ($l in (& zellij ls 2>$null)) {
+        if ($l -and $l.Trim()) {
+            $l = $l -replace "$([char]27)\[[0-9;]*m", ''
+            $firstToken = ($l.Trim() -split '\s+')[0]
+            if ($firstToken -and $firstToken -ne 'web_server_bus') { [void]$names.Add($firstToken) }
+        }
+    }
     return @($names | Where-Object { $_ -ne 'web_server_bus' })
 }
 
