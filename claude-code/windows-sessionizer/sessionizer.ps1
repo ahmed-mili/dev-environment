@@ -67,7 +67,10 @@ function Get-ZellijPipeSessions {
     foreach ($p in $pipes) {
         $rel = $p -replace '^\\\\\.\\pipe\\', ''
         if ($rel.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
-            $name = Split-Path -Leaf $rel
+            # Enfants DIRECTS uniquement : les pipes internes du web server vivent
+            # en sous-dossier (web_server_bus\<id>) et ne sont pas des sessions.
+            $name = $rel.Substring($prefix.Length)
+            if ($name.Contains('\')) { continue }
             if ($name -and $name -notlike '*-reply' -and $name -ne 'web_server_bus') {
                 [void]$names.Add($name)
             }
