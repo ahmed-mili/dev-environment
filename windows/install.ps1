@@ -274,12 +274,14 @@ Install-WingetPackage -Id 'ajeetdsouza.zoxide'            -DisplayName 'zoxide'
 # cette derniere remplace les codepoints emoji BMP (U+2705 CHECK, U+274C CROSS, U+26A0 WARNING
 # etc.) par des glyphes monochromes qui ecrasent le fallback Segoe UI Emoji
 # colore. Resultat avec la Nerd Font seule : tableaux et docs avec emojis BMP
-# illisibles en noir et blanc. Le combo recommande par Nerd Fonts eux-memes :
+# illisibles en noir et blanc. Le combo recommande par Nerd Fonts eux-memes,
+# plus Noto Naskh Arabic pour un fallback arabe lisible :
 #   1) JetBrains Mono vanille  : base + ligatures de code, ne touche pas aux
 #      codepoints emoji.
-#   2) Symbols Nerd Font Mono  : icones uniquement (PUA U+E000-F8FF + plans
+#   2) Noto Naskh Arabic      : ecriture arabe en style naskh, type Droid.
+#   3) Symbols Nerd Font Mono  : icones uniquement (PUA U+E000-F8FF + plans
 #      supplementaires U+F0000+), aucun caractere de base, aucun patch emoji.
-#   3) Segoe UI Emoji          : natif Windows, gere tous les emojis colores.
+#   4) Segoe UI Emoji          : natif Windows, gere tous les emojis colores.
 # Chaque police s'occupe de SON domaine de codepoints -- zero collision. Voir
 # wt-settings.json -> profiles.defaults.font.face pour la chaine de fallback.
 $jbmZipUrl = Get-LatestGithubReleaseAsset -Repo 'JetBrains/JetBrainsMono' -NamePattern 'JetBrainsMono-*.zip'
@@ -287,6 +289,12 @@ Install-UserFont -DisplayName 'JetBrains Mono (vanilla)' `
     -Url         $jbmZipUrl `
     -FilePattern 'JetBrainsMono-*.ttf' `
     -MarkerFile  'JetBrainsMono-Regular.ttf'
+Install-UserFont -DisplayName 'Noto Naskh Arabic' `
+    -Url         'https://raw.githubusercontent.com/notofonts/notofonts.github.io/main/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Regular.ttf' `
+    -MarkerFile  'NotoNaskhArabic-Regular.ttf'
+Install-UserFont -DisplayName 'Noto Naskh Arabic Bold' `
+    -Url         'https://raw.githubusercontent.com/notofonts/notofonts.github.io/main/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Bold.ttf' `
+    -MarkerFile  'NotoNaskhArabic-Bold.ttf'
 Install-UserFont -DisplayName 'Symbols Nerd Font Mono' `
     -Url         'https://github.com/ryanoasis/nerd-fonts/releases/latest/download/NerdFontsSymbolsOnly.zip' `
     -FilePattern 'SymbolsNerdFontMono-*.ttf' `
@@ -351,6 +359,31 @@ if (Test-Path $watcherSrc) {
     Write-Ok (Short-Path $watcherDest)
 } else {
     Write-Note 'source absente (install one-liner sans clone) -- deployer depuis un clone : claude-code/windows-clipboard/img-clip-watcher.ps1 -> ~/.local/bin/'
+}
+
+# ---------------------------------------------------------------------------
+# 2c) Zellij web server -- sessions telephone natives bureau
+# ---------------------------------------------------------------------------
+# La tache tourne AU LOGON dans la session interactive : les sessions zellij
+# creees via le web server (port 8082) naissent donc dans cette logon session
+# et restent joignables depuis le bureau (F2). Ne JAMAIS demarrer ce serveur
+# depuis un contexte ssh (Session 0) -- c'est le bug du 2026-06-12 (session
+# fantome injoignable, freeze de l'attach F2).
+
+Write-Step 'Zellij web server (logon task)'
+$zellijExe = Join-Path $env:LOCALAPPDATA 'Zellij\zellij.exe'
+if (Test-Path $zellijExe) {
+    $webArgs = 'web --daemonize --ip 127.0.0.1 --port 8082'
+    $action   = New-ScheduledTaskAction -Execute 'pwsh.exe' `
+        -Argument "-NoProfile -WindowStyle Hidden -Command `"& '$zellijExe' $webArgs`""
+    $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+    Register-ScheduledTask -TaskName 'zellij-web-server' -Action $action `
+        -Trigger $trigger -Settings $settings -Force | Out-Null
+    Write-Ok "scheduled task 'zellij-web-server' registered (at logon)"
+} else {
+    Write-Note 'zellij.exe introuvable -- tache zellij-web-server non creee'
 }
 
 # ---------------------------------------------------------------------------
