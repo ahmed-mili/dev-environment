@@ -94,6 +94,25 @@ case "${ext,,}" in
   *) echo "Type non supporte: .$ext (attendu: jpg/jpeg/png/webp)" >&2; exit 1 ;;
 esac
 
+# --- Bouton "Open image" de la notif finale -----------------------------------
+# Ouvre l'image envoyee dans la visionneuse Android par defaut. PAS termux-open :
+# son FileProvider (content://com.termux.files/...) sert des metadonnees vides
+# (0 octet / 0x0px) a la galerie MIUI/HyperOS -> "fichier corrompu" (constate
+# 2026-06-12). Le seul chemin fiable : l'`am` de Termux (PAS /system/bin/am,
+# SecurityException uid) + URI file:// vers le stockage partage, que la galerie
+# lit directement avec ses propres permissions media.
+# Contraintes des actions termux-notification (cf --help-actions) :
+#   - executees par `dash -c` SANS environnement (pas de $PATH) -> chemins absolus
+#   - %q blinde le path pour le shell (les paths DCIM/Screenshots n'ont pas d'espace)
+AM_BIN="/data/data/com.termux/files/usr/bin/am"
+real_path=$(readlink -f "$newest")
+case "${ext,,}" in
+  jpg|jpeg) mime="image/jpeg" ;;
+  png)      mime="image/png" ;;
+  webp)     mime="image/webp" ;;
+esac
+open_action="$AM_BIN start -a android.intent.action.VIEW -d file://$(printf '%q' "$real_path") -t $mime >/dev/null 2>&1"
+
 ext="${newest##*.}"
 # dest DETERMINISTE (hash du chemin source) : le watcher re-appelle avec la meme
 # source sur echec -> meme dest -> rsync --partial REPREND le partiel au lieu de
@@ -156,7 +175,7 @@ if command -v termux-notification >/dev/null 2>&1; then
      && termux-notification-channel watcher-images "Image-ready" >/dev/null 2>&1; then
     img_channel=(--channel watcher-images)
   fi
-  notify_img --ongoing --icon sync --title "Image to PC clipboard" \
+  notify_img --ongoing --icon sync --title "Sending image to PC" \
     --content "$(progress_content 0)"
   # SECURITE : si on sort AVANT le succes (scp/stage rate, timeout), le ⏳ ne doit pas
   # rester fige. trap EXIT -> retire la notif tant que staged != 1. On capture puis
@@ -170,8 +189,8 @@ if [ "$use_windows_native" = 1 ]; then
   [ -n "${WIN_USER:-}" ] || { echo "WIN_USER requis pour img2clip_TARGET=windows" >&2; exit 1; }
   WIN_REMOTE="${WIN_USER}@${WIN_DESK}"
 
-  notify_img --ongoing --alert-once --icon sync --title "Image to PC clipboard" \
-    --content "Transfer in progress (Windows native)"
+  notify_img --ongoing --alert-once --icon sync --title "Sending image to PC" \
+    --content "Transferring to the PC..."
 
   sftp_batch="$(mktemp)"
   local_path_escaped=$(printf '%s' "$newest" | sed 's/\\/\\\\/g; s/"/\\"/g')
@@ -189,9 +208,13 @@ if [ "$use_windows_native" = 1 ]; then
   staged=1
   echo "OK. Image staged on the PC (native Windows watcher takes over)."
   if [ "$have_notif" = 1 ]; then
-    notify_img --icon check_circle --title "Ready to paste" \
-      --content "Alt+V in Claude (pwsh)" --priority high --vibrate 200 \
-      --led-color 00c853 --led-on 250 --led-off 1000
+    # Bouton "Open image" : ouvre l'image envoyee dans la visionneuse par defaut
+    # (cf. open_action en tete : am + file://, JAMAIS termux-open -> galerie MIUI
+    # voit 0 octet). Bouton explicite plutot que tap-sur-notif : plus intuitif.
+    notify_img --icon check_circle --title "Image ready on your PC" \
+      --content "Copied to the Windows clipboard - ready to paste" --priority high --vibrate 200 \
+      --led-color 00c853 --led-on 250 --led-off 1000 \
+      --button1 "Open image" --button1-action "$open_action"
   else
     printf '\a' >&2
   fi
@@ -235,7 +258,7 @@ if command -v rsync >/dev/null 2>&1; then
     # vient du ⏳ initial (deja poste) et le buzz "prete" du ✅ final (sans --alert-once).
     [ -n "$pct" ] && [ "$have_notif" = 1 ] && \
       notify_img --ongoing --alert-once \
-        --icon sync --title "Image to PC clipboard" --content "$(progress_content "$pct" "$sent_bytes")"
+        --icon sync --title "Sending image to PC" --content "$(progress_content "$pct" "$sent_bytes")"
     sleep 1
   done
   # `rc=0; wait || rc=$?` OBLIGATOIRE : sous set -e un wait non-zero sortirait AVANT
@@ -244,12 +267,10 @@ if command -v rsync >/dev/null 2>&1; then
   rm -f "$pf"
   [ "$rc" = 0 ] || exit "$rc"   # echec -> trap retire ⏳ + curseur watcher NON avance -> reprise
 else
-  notify_img --ongoing --alert-once --icon sync --title "Image to PC clipboard" \
-    --content "Transfer in progress (install rsync for live %)"
+  notify_img --ongoing --alert-once --icon sync --title "Sending image to PC" \
+    --content "Transferring to the PC (install rsync for live %)"
   timeout "$NET_TIMEOUT" scp "${SSH_OPTS[@]}" -q "$newest" "$DESK:$DEST_DIR/$dest"
 fi
-notify_img --ongoing --alert-once --icon content_paste --title "Staging PC clipboard" \
-  --content "Preparing clipboard"
 
 # Cote desktop, en une connexion :
 #   1. purge auto (ne garde que les 30 plus recentes)
@@ -292,9 +313,11 @@ echo "OK. Image staged on the PC (Wayland armed, native watcher takes over)."
 # le ⏳ par le ✅ EN PLACE. Le channel + la garde notif sont calcules tout en haut
 # (etat 1/2), on les REUTILISE ici. --vibrate 200 = buzz "prete". Repli cloche si absent.
 if [ "$have_notif" = 1 ]; then
-  notify_img --icon check_circle --title "Ready to paste" \
-    --content "Alt+V in Claude (WSL & pwsh)" --priority high --vibrate 200 \
-    --led-color 00c853 --led-on 250 --led-off 1000
+  # Bouton "Open image" : meme mecanisme que la branche native (cf. open_action).
+  notify_img --icon check_circle --title "Image ready on your PC" \
+    --content "Copied to the Windows clipboard - ready to paste" --priority high --vibrate 200 \
+    --led-color 00c853 --led-on 250 --led-off 1000 \
+    --button1 "Open image" --button1-action "$open_action"
 else
   printf '\a' >&2
 fi

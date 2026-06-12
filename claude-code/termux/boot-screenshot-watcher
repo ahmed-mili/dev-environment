@@ -45,6 +45,19 @@ log() { echo "[$(date +%Y-%m-%d_%H:%M:%S)] $*" >> "$LOG"; }
 exec 9>"$LOCKFILE" || exit 1
 flock -n 9 || exit 0
 
+# PURGE DES ORPHELINS : on vient d'acquerir le lock, donc tout watcher deja
+# vivant est par definition un orphelin hors-supervision (superviseur tue par
+# le Phantom Process Killer HyperOS, FD 9 perdu en route...). Constate
+# 2026-06-12 : watcher ppid 1 sans FD 9, lock libre -> le prochain login
+# bashrc aurait lance un 2e watcher en parallele (double notif/envoi). On
+# tue ces orphelins AVANT de lancer le notre : l'etat redevient sain tout
+# seul a chaque boot / login. pkill -f cible le chemin exact du watcher ;
+# $$ et nos enfants ne matchent pas (on n'a pas encore lance le watcher).
+if pkill -f "bash $WATCHER" 2>/dev/null; then
+  log "orphelin(s) watcher purge(s) (lock etait libre)"
+  sleep 1
+fi
+
 termux-wake-lock
 log "BOOT supervisor demarre - wake-lock acquis (PID $$)"
 
