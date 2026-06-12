@@ -32,6 +32,28 @@ if ($env:ZELLIJ_SESSION_NAME) {
     } catch {}
 }
 
+# Zellij web server de secours : la tache planifiee 'zellij-web-server' (install.ps1)
+# le lance au logon ; si elle manque ou a crashe, on le relance ici. UNIQUEMENT
+# depuis un shell interactif local : un demarrage via ssh (Session 0) recreerait
+# des sessions injoignables depuis le bureau (bug du 2026-06-12, session fantome
+# dev-environment qui figeait l'attach F2).
+if ($script:HasInteractiveConsole -and -not $env:SSH_CONNECTION -and -not $env:SSH_CLIENT) {
+    try {
+        $zellijExe = Join-Path $env:LOCALAPPDATA 'Zellij\zellij.exe'
+        if (Test-Path $zellijExe) {
+            # TcpClient direct (~20 ms) : Get-NetTCPConnection charge le module
+            # CIM (~1 s) -- inacceptable a chaque ouverture de shell.
+            $tcp = [System.Net.Sockets.TcpClient]::new()
+            try { $tcp.Connect('127.0.0.1', 8082); $webOnline = $true } catch { $webOnline = $false }
+            $tcp.Dispose()
+            if (-not $webOnline) {
+                Start-Process -FilePath $zellijExe -WindowStyle Hidden `
+                    -ArgumentList 'web','--daemonize','--ip','127.0.0.1','--port','8082' | Out-Null
+            }
+        }
+    } catch {}
+}
+
 # Invoke-Sessionizer : menu fzf natif (sessions zellij/projets/vaults) ; lie a F2 plus bas.
 # Execute comme une vraie commande (Insert+AcceptLine, pas dans le ScriptBlock) pour que
 # le TUI long-vivant (zellij attach) recoive le TTY.
