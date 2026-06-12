@@ -30,13 +30,19 @@ $VaultsDir = if ($env:PC_VAULTS_WIN) { $env:PC_VAULTS_WIN } else { 'C:\obsidian-
 
 # --- Collecte -----------------------------------------------------------------
 # Sessions zellij actives, DEUX sources (parite zj_actives_win du .sh) :
-#   1. zellij ls -ns          : sessions joignables depuis CETTE window station
+#   1. zellij ls -ns          : sessions JOIGNABLES depuis CETTE logon session
 #   2. dossiers IPC + cache   : sessions des AUTRES logon sessions (ssh :2222 du tel)
+# DISTINCTION VITALE (vecu 2026-06-12, des dizaines de panics dans zellij.log) :
+# un `zellij attach` vers une session d'une autre logon session = panic
+# "Acces refusu" cote serveur (pipe nomme inaccessible), retries, et `attach -c`
+# cree un DOUBLON du meme nom. On garde donc DEUX ensembles : $JoinableSessions
+# (attach ok) et le reste (affiche, mais attach refuse avec un message clair).
+$JoinableSessions = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
 function Get-ActiveSessions {
-    $names = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
     foreach ($l in (& zellij ls -ns 2>$null)) {
-        if ($l -and $l.Trim()) { [void]$names.Add($l.Trim()) }
+        if ($l -and $l.Trim()) { [void]$JoinableSessions.Add($l.Trim()) }
     }
+    $names = [System.Collections.Generic.SortedSet[string]]::new($JoinableSessions, [StringComparer]::Ordinal)
     Get-ChildItem "$env:TEMP\zellij\contract_version_*" -Directory -ErrorAction SilentlyContinue |
         Get-ChildItem -ErrorAction SilentlyContinue |
         ForEach-Object { [void]$names.Add($_.Name) }
@@ -75,21 +81,32 @@ $orphans = @($actives | Where-Object { ($projects -notcontains $_) -and ($vaults
 # dessus rouvre le menu -> non selectionnable. Parite build_menu du .sh.
 $e = [char]27
 $G = "$e[32m"; $D = "$e[90m"; $R = "$e[0m"; $M = "$e[38;5;141m"   # M = violet (vaults)
+$Y = "$e[33m"                                                     # Y = jaune (tel/web)
 $T = [char]9
+
+# Ligne menu d'une session active : verte si joignable d'ici, jaune + suffixe
+# "(tel/web)" si elle vit dans une autre logon session (attach impossible).
+function Get-ActiveLine {
+    param([string]$Name)
+    if ($JoinableSessions.Contains($Name)) {
+        return "active$T$Name$T$G●$R $Name  $G(active)$R"
+    }
+    return "active$T$Name$T$Y●$R $Name  $Y(active - tel/web)$R"
+}
 
 function Build-Menu {
     $lines = [System.Collections.Generic.List[string]]::new()
     if ($orphans.Count) {
         $lines.Add("sep$T$T$D──────  $R◆ Sessions$D  ──────$R")
         foreach ($s in $orphans) {
-            $lines.Add("active$T$s$T$G●$R $s  $G(active)$R")
+            $lines.Add((Get-ActiveLine $s))
         }
     }
     if ($projects.Count) {
         $lines.Add("sep$T$T$D──────  $R◆ Projects$D  ──────$R")
         foreach ($p in $projects) {
             if ($actives -contains $p) {
-                $lines.Add("active$T$p$T$G●$R $p  $G(active)$R")
+                $lines.Add((Get-ActiveLine $p))
             } else {
                 $lines.Add("project$T$p$T$D○$R $p")
             }
@@ -99,7 +116,7 @@ function Build-Menu {
         $lines.Add("sep$T$T$D──────  $M◆ Obsidian Vaults$D  ──────$R")
         foreach ($v in $vaults) {
             if ($actives -contains $v) {
-                $lines.Add("active$T$v$T$G●$R $v  $G(active)$R")
+                $lines.Add((Get-ActiveLine $v))
             } else {
                 $lines.Add("vault$T$v$T$M○$R $v")
             }
@@ -159,11 +176,21 @@ function Open-Session {
     }
 }
 
-# Rejoint une session ACTIVE. Pour un nom de vault dont la session a ete ouverte
-# par le telephone (autre logon session), l'attach echouera : zellij affichera son
-# erreur, comportement assume (parite .sh : delegation impossible cote desktop).
+# Rejoint une session ACTIVE. GARDE anti-panic (vecu 2026-06-12) : une session
+# d'une autre logon session (tel/web) est INJOIGNABLE d'ici -- l'attach faisait
+# paniquer le serveur zellij ("Acces refuse" sur le pipe nomme) et `attach -c`
+# creait un doublon du meme nom. Message clair + retour menu a la place.
 function Join-ActiveSession {
     param([string]$Name)
+    if (-not $JoinableSessions.Contains($Name)) {
+        [Console]::Error.WriteLine("'$Name' est ouverte dans une AUTRE logon session Windows (tel/web).")
+        [Console]::Error.WriteLine("Attach impossible depuis ce terminal. Options : la fermer depuis le tel,")
+        [Console]::Error.WriteLine("ou Ctrl+X dessus pour tenter un kill (best effort).")
+        [Console]::Error.Write('Appuie sur une touche pour revenir au menu...')
+        try { [void][Console]::ReadKey($true) } catch {}
+        [Console]::Error.WriteLine()
+        Restart-Menu
+    }
     $dir = if ($vaults -contains $Name) { Join-Path $VaultsDir $Name }
            elseif ($projects -contains $Name) { Join-Path $DevDir $Name }
            else { $null }
@@ -292,7 +319,9 @@ if ($key -eq 'ctrl-x') {
         $f = $choice -split "`t"
         if ($f[0] -eq 'active') {
             $name = $f[1]
-            if (($projects -contains $name) -or ($vaults -contains $name)) {
+            if (-not $JoinableSessions.Contains($name)) {
+                [Console]::Error.Write("Kill '$name'? Session tel/web (autre logon session) - le kill peut echouer d'ici. [y/N] ")
+            } elseif (($projects -contains $name) -or ($vaults -contains $name)) {
                 [Console]::Error.Write("Kill '$name'? Stays listed as o inactive. [y/N] ")
             } else {
                 [Console]::Error.Write("Kill '$name'? Disposable - disappears from the list. [y/N] ")

@@ -21,12 +21,17 @@ default_shell "pwsh"
 
 // F2 = sessionizer natif (pane flottant ; les ouvertures partent en onglets wt.exe,
 // un `zellij attach` imbrique etant interdit). Esc/choix -> le pane se ferme seul.
+// PIEGE (vecu 2026-06-12) : zellij Windows MANGE les backslashes des arguments Run
+// au respawn ('.local\bin\x.ps1' -> '.localbinx.ps1') -> pwsh echouait instantanement
+// et close_on_exit refermait le pane en un flash invisible ("F2 ne fait rien").
+// => ZERO backslash dans la commande (pwsh accepte les forward slashes), et un
+// try/catch qui garde le pane ouvert pour LIRE l'erreur au lieu de la perdre.
 // Ctrl+Y = Ollama Claude natif. Le profil pwsh reste charge pour que le wrapper
 // ollama() demarre aussi img-clip-watcher.ps1 dans la bonne window station.
 keybinds {
     shared_except "locked" {
         bind "F2" {
-            Run "pwsh" "-NoProfile" "-ExecutionPolicy" "Bypass" "-Command" "& (Join-Path $env:USERPROFILE '.local\\bin\\sessionizer.ps1')" {
+            Run "pwsh" "-NoProfile" "-ExecutionPolicy" "Bypass" "-Command" "try { & ($env:USERPROFILE + '/.local/bin/sessionizer.ps1') } catch { $_ | Out-String | Write-Host; [void][Console]::ReadKey($true) }" {
                 floating true
                 close_on_exit true
             }
