@@ -40,6 +40,10 @@ function prompt {
 # matches a known Windows project/vault, land in that folder automatically.
 # Machine-specific roots can override PC_DEV_DIR / PC_VAULTS_WIN locally.
 if ($env:ZELLIJ_SESSION_NAME) {
+    # Nom de dossier BRUT (logique) de la session, resolu par l'auto-cd ci-dessous.
+    # Sert au titre d'onglet WT (UI Windows = BiDi+shaping comme Explorer -> brut).
+    # Defaut = nom de session (ASCII ou legacy deja brut).
+    $resolvedRaw = $env:ZELLIJ_SESSION_NAME
     try {
         $devRoot = if ($env:PC_DEV_DIR) { $env:PC_DEV_DIR } else { 'C:\dev' }
         $vaultRoot = if ($env:PC_VAULTS_WIN) { $env:PC_VAULTS_WIN } else { 'C:\obsidian-vaults' }
@@ -61,34 +65,28 @@ if ($env:ZELLIJ_SESSION_NAME) {
                 $hit = Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
                        Where-Object { (ConvertTo-ArabicDisplay $_.Name) -eq $env:ZELLIJ_SESSION_NAME } |
                        Select-Object -First 1
-                if ($hit) { Set-Location -LiteralPath $hit.FullName; break }
+                if ($hit) { Set-Location -LiteralPath $hit.FullName; $resolvedRaw = $hit.Name; break }
             }
         }
     } catch {}
 
-    # WT et Zellij n'appliquent pas le BiDi/shaping arabe : un nom de session
-    # arabe brut sort inverse et deconnecte dans le label "Zellij (nom)" de la
-    # tab-bar, le nom de tab, le titre d'onglet WT et `zellij ls`. On pre-shape
-    # tout ca avec le module partage (idempotent : si pas d'arabe, $disp == nom).
+    # TROIS renderers, trois besoins pour le nom de session arabe :
+    #  - label "Zellij (nom)" de la tab-bar : rendu par ZELLIJ (pas de BiDi) ->
+    #    nom de session PRE-SHAPE (ordre visuel U+FExx).
+    #  - titre d'onglet Windows Terminal : rendu par l'UI de WT (DirectWrite =
+    #    BiDi + shaping, comme Explorer) -> nom BRUT (logique). Le pre-shape y
+    #    serait re-inverse -> casse (capture du 2026-06-13).
     try {
         $zellijName = $env:ZELLIJ_SESSION_NAME
         $disp = ConvertTo-ArabicDisplay $zellijName
-        # Session arabe (nom brut U+06xx OU deja pre-shape U+FExx). On distingue
-        # migration (rename-session, une fois) et affichage (tab + titre, TOUJOURS).
-        # Sans ca, une session deja pre-shapee a $disp == $zellijName -> l'ancienne
-        # garde unique sautait rename-tab/OSC -> la fleche restait "Tab #1" et le
-        # titre d'onglet WT montrait le chemin de pwsh.exe.
         $isArabic = [bool]($zellijName.ToCharArray() | Where-Object { ([int]$_ -ge 0x0600 -and [int]$_ -le 0x06FF) -or ([int]$_ -ge 0xFE70 -and [int]$_ -le 0xFEFF) })
         if ($isArabic) {
-            # Migration legacy : nom de session brut -> pre-shape (no-op si deja
-            # fait). C'est lui qui corrige le label "Zellij (nom)" de la tab-bar.
+            # Label "Zellij (nom)" : nom de session PRE-SHAPE (visuel). Migration
+            # legacy (brut -> pre-shape) si besoin ; no-op si deja pre-shape.
             if ($disp -ne $zellijName) { $null = & zellij action rename-session $disp 2>$null }
-            # On NE renomme PAS la tab : la fleche garde son nom zellij naturel
-            # ("Tab #1"). Le nom du vault est deja visible dans "Zellij (nom)"
-            # juste a cote -- renommer la tab serait redondant.
-            # Titre d'onglet WT (OSC 0) en pre-shape : utile pour un shell pur ;
-            # Claude Code impose son propre titre de session quand il tourne.
-            [Console]::Write("$([char]27)]0;$disp$([char]7)")
+            # On NE renomme PAS la tab (la fleche garde "Tab #1", non redondant).
+            # Titre d'onglet WT (OSC 0) = nom BRUT : l'UI de WT fait le BiDi+shaping.
+            [Console]::Write("$([char]27)]0;$resolvedRaw$([char]7)")
         }
     } catch {}
 }
