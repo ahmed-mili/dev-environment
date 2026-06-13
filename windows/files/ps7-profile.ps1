@@ -73,11 +73,16 @@ if ($env:ZELLIJ_SESSION_NAME) {
     try {
         $zellijName = $env:ZELLIJ_SESSION_NAME
         $disp = ConvertTo-ArabicDisplay $zellijName
-        if ($disp -and ($disp -ne $zellijName)) {
-            # Renomme la SESSION (corrige le label "Zellij (nom)" et `zellij ls`),
-            # migre les sessions legacy creees en nom brut vers le pre-shape.
-            $null = & zellij action rename-session $disp 2>$null
-            # Nom de l'onglet zellij (fleche) + titre d'onglet WT (OSC 0).
+        # Session arabe (nom brut U+06xx OU deja pre-shape U+FExx). On distingue
+        # migration (rename-session, une fois) et affichage (tab + titre, TOUJOURS).
+        # Sans ca, une session deja pre-shapee a $disp == $zellijName -> l'ancienne
+        # garde unique sautait rename-tab/OSC -> la fleche restait "Tab #1" et le
+        # titre d'onglet WT montrait le chemin de pwsh.exe.
+        $isArabic = [bool]($zellijName.ToCharArray() | Where-Object { ([int]$_ -ge 0x0600 -and [int]$_ -le 0x06FF) -or ([int]$_ -ge 0xFE70 -and [int]$_ -le 0xFEFF) })
+        if ($isArabic) {
+            # Migration legacy : nom de session brut -> pre-shape (no-op si deja fait).
+            if ($disp -ne $zellijName) { $null = & zellij action rename-session $disp 2>$null }
+            # Toujours : nom de tab zellij (fleche) + titre d'onglet WT (OSC 0).
             $null = & zellij action rename-tab $disp 2>$null
             [Console]::Write("$([char]27)]0;$disp$([char]7)")
         }
