@@ -554,21 +554,14 @@ if ($Pick) {
     $dblBatch   = $enterBatch
 
     # Tab toggle projets <-> vaults (uniquement si les DEUX sections existent).
-    # IMPORTANT : calcule AVANT $ctrlGBatch, qui fige $hdrFull dans sa chaine batch.
+    # Header complet, TOUJOURS affiche : pas de toggle Ctrl+G (le gap entre
+    # sections aere deja l'affichage, masquer l'aide n'apportait rien).
     $tabBatch = $null
-    $hdrMin  = 'Ctrl+G  help'
-    $hdrFull = 'Up/Down move - Enter open - Ctrl+N new - Ctrl+R rename - Ctrl+X kill - Ctrl+G hide'
+    $hdr = 'Up/Down move - Enter open - Ctrl+F search - Ctrl+N new - Ctrl+R rename - Ctrl+X kill'
     if ($projects.Count -and $vaults.Count) {
         $tabBatch = "if not {q}==`"`" (echo ignore) else (if %FZF_POS% LSS $vfirst (echo pos^($vfirst^)) else (echo pos^($pfirst^)))"
-        $hdrFull  = 'Up/Down move - Tab switch category - Enter open - Ctrl+N new - Ctrl+R rename - Ctrl+X kill - Ctrl+G hide'
+        $hdr  = 'Up/Down move - Tab switch category - Enter open - Ctrl+F search - Ctrl+N new - Ctrl+R rename - Ctrl+X kill'
     }
-
-    # Aide toggleable Ctrl+G. ASCII PUR : ces echo passent par cmd (codepage OEM),
-    # tout glyphe Unicode y devient du mojibake (piege no 3). L'etat min/full est
-    # porte par l'existence d'un fichier temoin.
-    $hstate = Join-Path $env:TEMP 'pc-sessionizer-hdr-full'
-    Remove-Item $hstate -Force -ErrorAction SilentlyContinue
-    $ctrlGBatch = "if exist `"$hstate`" (del `"$hstate`" & echo $hdrMin) else (type nul > `"$hstate`" & echo $hdrFull)"
 
     $rowsPath = Join-Path $env:TEMP ("pc-sessionizer-rows-{0}.tsv" -f ([guid]::NewGuid().ToString('N')))
     $filterPath = Join-Path $env:TEMP ("pc-sessionizer-filter-{0}.ps1" -f ([guid]::NewGuid().ToString('N')))
@@ -647,17 +640,27 @@ $matches | Sort-Object Score, Index | ForEach-Object { $_.Line }
         '--pointer', '', '--marker', '', '--ellipsis', $Ellipsis,
         '--color=bg:-1,bg+:#202942,current-bg:#202942,selected-bg:#202942,fg:#bac2de,fg+:#89b4fa,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1',
         '--prompt', $fzfPrompt,
-        '--header', $hdrMin,
+        '--header', $hdr,
         '--expect=ctrl-n,ctrl-x,ctrl-r',
         '--bind', "load:pos($cursor0)",
+        # Champ de saisie cache par defaut : il n'y a alors AUCUN curseur d'input
+        # a reveler -> ni un spawn cmd (binds transform) ni l'activite souris (mode
+        # mouse de WT) ne fait clignoter de curseur. Ctrl+F bascule la recherche.
+        '--bind', "start:hide-input",
+        '--bind', "ctrl-f:toggle-input",
         '--bind', "change:reload($filterCmd)",
         '--bind', "down:transform:$downBatch",
         '--bind', "up:transform:$upBatch",
+        # Molette : meme skip DIRECTIONNEL que les fleches (scroll-up/scroll-down
+        # sont des evenements distincts de up/down). Sinon la molette bouge en
+        # natif, tombe sur un separateur, et le bind focus (echo down) renvoie
+        # toujours vers le bas -> blocage en scroll vers le haut (vecu 2026-06-14).
+        '--bind', "scroll-up:transform:$upBatch",
+        '--bind', "scroll-down:transform:$downBatch",
         '--bind', "focus:transform:$focusBatch",
         '--bind', "enter:transform:$enterBatch",
         '--bind', "left-click:transform:$clickBatch",
-        '--bind', "double-click:transform:$dblBatch",
-        '--bind', "ctrl-g:transform-header:$ctrlGBatch"
+        '--bind', "double-click:transform:$dblBatch"
     )
     if ($tabBatch) {
         $fzfArgs += @('--bind', "tab:transform:$tabBatch")
