@@ -62,7 +62,12 @@ function Test-ArDiacritic([int]$Cp) {
 }
 
 function ConvertTo-ArabicDisplay {
-    param([string]$Text)
+    # -Logical : shape les lettres MAIS garde l'ordre LOGIQUE (pas d'inversion).
+    # A utiliser quand le RENDERER applique lui-meme le BiDi (la TUI de claude.exe
+    # inverse l'ordre) : on lui envoie le logique, il l'inverse vers le visuel
+    # correct. Par defaut (sans -Logical) : ordre VISUEL (inverse), pour les
+    # terminaux sans BiDi (WT, zellij).
+    param([string]$Text, [switch]$Logical)
     if ([string]::IsNullOrEmpty($Text)) { return $Text }
     if ($Text -notmatch '[\u0621-\u064A]') { return $Text }
 
@@ -119,7 +124,7 @@ function ConvertTo-ArabicDisplay {
             }
             $visual.Add($piece.ToString())
         }
-        $visual.Reverse()
+        if (-not $Logical) { $visual.Reverse() }
         foreach ($piece in $visual) { [void]$out.Append($piece) }
     }
     return $out.ToString()
@@ -699,7 +704,11 @@ $pathTextFG = RGB 25 28 42
 # soit un fond UNI (modes safety) soit un dégradé per-character (mode par défaut)
 # sans dupliquer la logique de mise en page.
 $bannerSegs = @(
-    @{ text = " $(ConvertTo-ArabicDisplay $dir)";       fg = $pathTextFG }
+    # -Logical : la statusline est rendue par la TUI de claude.exe, qui applique
+    # son propre BiDi (il inverse). On envoie donc l'arabe SHAPE en ordre LOGIQUE
+    # (non inverse) ; claude l'inverse vers le visuel correct (lecture RTL). Le
+    # brut ne marcherait pas : claude inverse mais ne shape pas (-> deconnecte).
+    @{ text = " $(ConvertTo-ArabicDisplay $dir -Logical)";       fg = $pathTextFG }
 )
 if ($branch) {
     # Indicateurs de sync vs upstream :
@@ -743,7 +752,9 @@ if ($gradStops) {
     $sb = [System.Text.StringBuilder]::new()
     $idx = 0
     foreach ($s in $bannerSegs) {
-        foreach ($c in $s.text.ToCharArray()) {
+        $chars = $s.text.ToCharArray()
+        $j = 0
+        while ($j -lt $chars.Length) {
             $u = if ($totalLen -gt 1) { ($idx / ($totalLen - 1)) * $segCount } else { 0 }
             $seg = [Math]::Min([int][Math]::Floor($u), $segCount - 1)
             $tFrac = $u - $seg
@@ -751,8 +762,23 @@ if ($gradStops) {
             $r  = [int][Math]::Round($a[0] + ($b[0] - $a[0]) * $tFrac)
             $g  = [int][Math]::Round($a[1] + ($b[1] - $a[1]) * $tFrac)
             $bb = [int][Math]::Round($a[2] + ($b[2] - $a[2]) * $tFrac)
-            [void]$sb.Append("$esc[48;2;$r;$g;${bb}m$($s.fg)$c")
-            $idx++
+            $cp = [int]$chars[$j]
+            if (($cp -ge 0x0600 -and $cp -le 0x06FF) -or ($cp -ge 0xFE70 -and $cp -le 0xFEFF)) {
+                # Run arabe emis d'un BLOC sous une seule couleur (debut du run),
+                # SANS SGR entre les caracteres. claude.exe re-rend mal un run
+                # arabe pre-shape coupe par des SGR par caractere (ordre/liaisons
+                # casses dans sa TUI) ; contigu il reste correct. Le latin garde
+                # son degrade per-caractere.
+                [void]$sb.Append("$esc[48;2;$r;$g;${bb}m$($s.fg)")
+                while ($j -lt $chars.Length) {
+                    $cp2 = [int]$chars[$j]
+                    if (-not (($cp2 -ge 0x0600 -and $cp2 -le 0x06FF) -or ($cp2 -ge 0xFE70 -and $cp2 -le 0xFEFF))) { break }
+                    [void]$sb.Append($chars[$j]); $j++; $idx++
+                }
+            } else {
+                [void]$sb.Append("$esc[48;2;$r;$g;${bb}m$($s.fg)$($chars[$j])")
+                $j++; $idx++
+            }
         }
     }
     $line1 = $sb.ToString() + $reset
