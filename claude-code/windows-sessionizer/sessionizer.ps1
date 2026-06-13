@@ -533,7 +533,7 @@ if ($Pick) {
         '--border=rounded', '--border-label', $fzfLabel, '--border-label-pos=3',
         '--input-border=rounded', '--ghost', $fzfGhost,
         '--padding=0,1', '--info=hidden', '--ellipsis', $Ellipsis,
-        '--color=pointer:#78aaff,bg+:237,fg+:255,hl:#78aaff,hl+:#78aaff,header:245,prompt:#78aaff,query:255,ghost:#78aaff,border:240,input-border:#78aaff,label:#78aaff,gutter:-1',
+        '--color=pointer:#78aaff,bg+:237,fg+:255,hl:#78aaff,hl+:#78aaff,header:245,prompt:245,query:255,ghost:245,border:240,input-border:#78aaff,label:#78aaff,gutter:-1',
         '--prompt', $fzfPrompt,
         '--header', $hdrMin,
         '--expect=ctrl-n,ctrl-x,ctrl-r',
