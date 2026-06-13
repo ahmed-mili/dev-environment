@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # Detect device context and write to ~/.claude/.device-context
-# Works on: WSL, native Linux, Termux (Android), SSH sessions
+# Works on: native Linux, Termux (Android), SSH sessions
 #
 # This script is called by the claude() wrapper in each shell's profile/rc,
 # or manually when needed. It produces a small JSON file that the assistant
 # can read to know which machine/shell/context it is talking to.
 #
-# Example output (WSL, direct):
-#   {"device":"desktop","context":"wsl","shell":"bash","distro":"Ubuntu","timestamp":"2026-06-09T07:00:00+02:00"}
+# Example output (Linux desktop, direct):
+#   {"device":"desktop","context":"linux","shell":"bash","timestamp":"2026-06-09T07:00:00+02:00"}
 #
 # Example output (Termux, direct):
 #   {"device":"phone","context":"termux","shell":"bash","model":"Xiaomi 13T Pro","timestamp":"..."}
 #
-# Example output (SSH from phone to WSL):
-#   {"device":"phone","context":"ssh-to-wsl","shell":"bash","ssh_from":"100.x.x.x","timestamp":"..."}
+# Example output (SSH from phone to desktop):
+#   {"device":"phone","context":"ssh-to-desktop","shell":"bash","ssh_from":"100.x.x.x","timestamp":"..."}
 
 set -euo pipefail
 
@@ -32,15 +32,6 @@ detect_device() {
     local model
     model=$(getprop ro.product.model 2>/dev/null || echo "unknown")
     extra_fields+=("\"model\":\"$model\"")
-
-  # -- WSL ------------------------------------------------------------------
-  elif [ -n "${WSL_DISTRO_NAME:-}" ]; then
-    context="wsl"
-    extra_fields+=("\"distro\":\"$WSL_DISTRO_NAME\"")
-
-  elif [ -f "/proc/version" ] && grep -qi "microsoft" /proc/version 2>/dev/null; then
-    context="wsl"
-    extra_fields+=("\"distro\":\"unknown\"")
   fi
 
   # -- SSH connection (likely from phone to desktop) ------------------------

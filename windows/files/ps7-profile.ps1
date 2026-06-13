@@ -92,12 +92,12 @@ if ($script:HasInteractiveConsole -and (Get-Module -Name PSReadLine -ListAvailab
         Default            = '#CDD6F4'  # Text
         ContinuationPrompt = '#A6ADC8'  # Subtext0
     } -ErrorAction SilentlyContinue
-    # F3 : bascule InlineView <-> ListView (deplace de F2 pour liberer F2, comme en WSL).
+    # F3 : bascule InlineView <-> ListView (deplace de F2 pour liberer F2).
     Set-PSReadLineKeyHandler -Key F3 -Function SwitchPredictionView
-    # F2 : menu sessionizer - MEME menu fzf qu'en WSL (sessions/projets/vaults).
+    # F2 : menu sessionizer - sessions/projets/vaults.
     #      On INSERE `Invoke-Sessionizer` + AcceptLine (l'execute comme une vraie ligne) : lancer
     #      un TUI plein ecran DANS le ScriptBlock ne lui passe pas le TTY -> fzf reste fige.
-    Set-PSReadLineKeyHandler -Key F2 -BriefDescription 'Sessionizer' -LongDescription 'Menu sessions/projets/vaults (idem WSL F2)' -ScriptBlock {
+    Set-PSReadLineKeyHandler -Key F2 -BriefDescription 'Sessionizer' -LongDescription 'Menu sessions/projets/vaults' -ScriptBlock {
         [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
         [Microsoft.PowerShell.PSConsoleReadLine]::Insert('Invoke-Sessionizer')
         [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
@@ -227,15 +227,9 @@ if ($script:HasInteractiveConsole -and (Get-Command fastfetch -ErrorAction Silen
     fastfetch
 }
 
-# `wdev` : atterrit dans la session tmux `main` du Claude WSL (Ubuntu).
-# Meme session que celle que mosh attache depuis le telephone -> relais PC <-> mobile.
-function wdev {
-    wsl -d Ubuntu -e bash -lic "cd ~/dev/dev-environment; tmux attach -t main 2>/dev/null || tmux new -s main"
-}
-
 # ---- Claude Code clipboard watcher ----------------------------------------
-# Pushes every new phone image (img2clip -> Windows ~/.claude-images, with a
-# WSL fallback) into the clipboard of THIS window station. Called by both
+# Pushes every new phone image (img2clip -> Windows ~/.claude-images)
+# into the clipboard of THIS window station. Called by both
 # `claude` and `ollama launch claude`; the watcher mutex keeps one instance per
 # clipboard, so extra starts are cheap no-ops.
 function Start-ClaudeClipboardWatcher {
@@ -243,7 +237,7 @@ function Start-ClaudeClipboardWatcher {
     $watcher = "$env:USERPROFILE\.local\bin\img-clip-watcher.ps1"
     if (Test-Path $watcher) {
         $args = @(
-            '-Sta', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-Sta', '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
             '-File', $watcher, '-CallerPid', $PID
         )
         if ($Fast) {
@@ -257,9 +251,14 @@ function Start-ClaudeClipboardWatcher {
         # son arborescence a la fermeture du pane), mais avec le token de
         # l'appelant -> la bonne logon session. Le watcher ne meurt qu'avec
         # son ancre (serveur zellij / shell), pas avec ce pane.
-        $cmd = "powershell.exe -Sta -NoProfile -ExecutionPolicy Bypass -File `"$watcher`" -CallerPid $PID"
+        $cmd = "powershell.exe -Sta -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$watcher`" -CallerPid $PID"
         try {
-            Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Out-Null
+            # Keep WMI detachment, but avoid a visible Windows Terminal window.
+            $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+            Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+                CommandLine = $cmd
+                ProcessStartupInformation = $startup
+            } | Out-Null
         } catch {
             # Degrade gracefully : clipboard phone->pwsh may be unavailable, but
             # Claude itself must still start.

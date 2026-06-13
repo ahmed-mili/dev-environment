@@ -1,9 +1,6 @@
 # img-clip-watcher.ps1 -- alimente le presse-papiers de SA logon session avec
 # chaque nouvelle image deposee par le telephone dans ~/.claude-images
-# (dossier Windows natif ET depot WSL surveilles EN PARALLELE : img2clip
-# ecrit dans l'un OU l'autre selon WIN_USER cote telephone, le watcher prend
-# la plus recente des deux -- un seul dossier surveille = pipeline casse des
-# que l'ecrivain et le lecteur ne sont pas d'accord, vecu 2026-06-12).
+# (dossier Windows natif uniquement).
 #
 # ENCODAGE : ce fichier doit rester 100% ASCII. Il est execute par Windows
 # PowerShell 5.1, qui lit les .ps1 SANS BOM en CP-1252 : tout caractere UTF-8
@@ -43,16 +40,12 @@
 #     process fantome qui s'accumule.
 #
 # Limites connues :
-#   - .webp : GDI+ (System.Drawing) ne decode pas WebP -> log + skip. La voie
-#     WSL (wl-copy/sharp) le gere, la voie pwsh natif non. Captures MIUI = jpg.
+#   - .webp : GDI+ (System.Drawing) ne decode pas WebP -> log + skip. Captures MIUI = jpg.
 #   - Le dossier natif %USERPROFILE%\.claude-images est cree au demarrage.
-#   - Si le fallback WSL est utilise et que l'UNC \\wsl.localhost est
-#     indisponible, le watcher reessaie silencieusement.
 
 param(
     [int]$CallerPid = 0,
     [string]$ImagesDir = '',
-    [string]$Distro = 'Ubuntu',
     [int]$PollMs = 1000,
     [int]$FreshWindowMin = 10
 )
@@ -119,16 +112,8 @@ try {
     }
 } catch {}
 
-# --- Resolution des dossiers d'images ------------------------------------------
-# DEUX depots possibles, surveilles ENSEMBLE (pas l'un OU l'autre) :
-#   1. natif  : %USERPROFILE%\.claude-images   (img2clip mode windows, WIN_USER set)
-#   2. WSL    : \\wsl.localhost\...\.claude-images (img2clip mode wsl, le defaut tel)
-# PIEGE (vecu 2026-06-12) : la version precedente retournait le natif en
-# "priorite" en le CREANT au demarrage -> il existait toujours, toujours vide,
-# et le fallback WSL etait du code mort pendant que le telephone y deposait
-# ses images. Surveiller les deux rend le bug impossible par construction.
-# Pas de chemin personnel en dur : natif via %USERPROFILE%, WSL via wsl.exe
-# (resolution cachee une fois trouvee, re-tentee tant que WSL est down).
+# --- Resolution du dossier d'images ------------------------------------------
+# Unique depot : %USERPROFILE%\.claude-images (img2clip ecrit ici via sftp).
 function Resolve-ImagesDirs {
     # -ImagesDir explicite : on ne surveille QUE lui (comportement historique).
     if ($script:ImagesDir) {
@@ -145,36 +130,12 @@ function Resolve-ImagesDirs {
         }
         if (Test-Path $candidate) { $dirs += $candidate }
     } catch {}
-    if ($script:WslImagesDir) {
-        try {
-            if (Test-Path $script:WslImagesDir) { $dirs += $script:WslImagesDir }
-        } catch {}
-    } else {
-        try {
-            $wslHome = (& "$env:SystemRoot\System32\wsl.exe" -d $Distro -e sh -c 'echo $HOME' 2>$null | Select-Object -First 1)
-            if ($wslHome) { $wslHome = $wslHome.Trim() }
-            if ($wslHome) {
-                $candidate = "\\wsl.localhost\$Distro$($wslHome -replace '/', '\')\.claude-images"
-                if (Test-Path $candidate) { $script:WslImagesDir = $candidate; $dirs += $candidate }
-            }
-        } catch {}
-        if (-not $script:WslImagesDir) {
-            try {
-                $candidate = Get-ChildItem "\\wsl.localhost\$Distro\home" -Directory -ErrorAction SilentlyContinue |
-                    ForEach-Object { Join-Path $_.FullName '.claude-images' } |
-                    Where-Object { Test-Path $_ } | Select-Object -First 1
-                if ($candidate) { $script:WslImagesDir = $candidate; $dirs += $candidate }
-            } catch {}
-        }
-    }
     return ,$dirs
 }
 
 function Get-LatestImage([string[]]$dirs) {
     # Dotfiles exclus : rsync ecrit son temporaire en `.img-....XXXX` puis
     # renomme atomiquement -> on ne voit que des fichiers complets de sa part.
-    # Un dossier illisible (UNC WSL flaky) ne doit pas masquer l'autre : try
-    # par dossier, on garde la plus recente tous dossiers confondus.
     $latest = $null
     foreach ($d in $dirs) {
         try {
@@ -213,7 +174,6 @@ try {
     # doit etre collable tout de suite. Plus vieille -> simple baseline (ne pas
     # re-coller l'historique).
     $lastSeen = ''   # cle "FullName|Ticks|Length" de la derniere image traitee
-    $uncWarned = $false
     $loopErrorWarned = $false
     try {
         $dirs = Resolve-ImagesDirs
@@ -227,7 +187,7 @@ try {
                 $lastSeen = $key
             }
         } else {
-            Write-Log 'dossier images introuvable au demarrage (WSL down ?) : retries en boucle'
+            Write-Log 'dossier images introuvable au demarrage : retries en boucle'
         }
     } catch { Write-Log "scan initial impossible : $($_.Exception.Message)" }
 
@@ -244,12 +204,11 @@ try {
 
             $dirs = Resolve-ImagesDirs
             if ($dirs.Count -eq 0) {
-                if (-not $uncWarned) { Write-Log 'dossiers images inaccessibles : attente'; $uncWarned = $true }
+                if (-not $loopErrorWarned) { Write-Log 'dossier images introuvable : attente'; $loopErrorWarned = $true }
                 continue
             }
 
             $latest = Get-LatestImage $dirs
-            $uncWarned = $false
             $loopErrorWarned = $false
             if (-not $latest) { continue }
 

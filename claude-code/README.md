@@ -1,6 +1,6 @@
 # claude-code/
 
-Claude Code config shared between Windows, WSL/Linux and Android. Single source of truth.
+Claude Code config shared between Windows and Android. Single source of truth.
 
 ## Contents
 
@@ -12,10 +12,9 @@ Claude Code config shared between Windows, WSL/Linux and Android. Single source 
 | `hooks/` | `auto-pull.ps1`, `auto-push.ps1`, `resolve-sync-conflicts.ps1` — reserved for manual/future use, no longer called from SessionStart/End |
 | `skills/` | Custom skills: claude-file-recovery, copy-edit, css-layout-check, deploy-safety, edit-block, lucide-icons, release, root-cause-fix, smart-edit, sticky-column-bleed-fix, webapp-deploy |
 | `deploy.ps1` | Manual bidirectional sync between this folder and the **Windows** `~/.claude/` |
-| `deploy.sh` | Same, for the **WSL/Linux** `$HOME/.claude/` (keybindings.json + tmux.conf + custom skills). The desktop is WSL-primary. |
-| `keybindings.json` | Custom Claude Code keybindings (`Alt+V` image paste on WSL — see the Obsidian guide) |
-| `tmux.conf` | Deployed to `~/.tmux.conf` by `deploy.sh`. Lets tmux forward 24-bit color so Claude Code renders truecolor over `mosh`+`tmux` (see the SSH Android guide) |
-| `termux/img2clip` | Termux (Android) script: stages a phone photo/screenshot on the desktop. Default/auto mode uses the Windows native path when `$WIN_USER` is set: `sftp -P 2222` uploads to `%USERPROFILE%\.claude-images`, then `windows-clipboard/img-clip-watcher.ps1` (launched beside `claude()` / `ollama()`) fills the clipboard in the reader's window station. `img2clip_TARGET=wsl` keeps the old WSL path: upload to WSL `~/.claude-images` + `wl-copy --type image/png`. It deliberately never runs `ssh -p 2222 ... SetImage`: that writes to an ephemeral SSH window station and returns a false success. **Always called with a file-path argument** — by `screenshot-watcher` (auto) and by the `termux-file-editor` share hook. Notifications reuse the `img2clip` id and finish with `Ready to paste`; failures preserve a non-zero exit code so the watcher retries and never counts a failed upload as sent. |
+| `keybindings.json` | Custom Claude Code keybindings (`Alt+V` image paste — see the Obsidian guide) |
+| `tmux.conf` | tmux forward 24-bit color so Claude Code renders truecolor over `mosh`+`tmux` (see the SSH Android guide) |
+| `termux/img2clip` | Termux (Android) script: stages a phone photo/screenshot on the desktop by streaming the image over SSH to `%USERPROFILE%\.claude-images`. This avoids relying on the Windows OpenSSH SFTP subsystem, which can be disabled even when shell SSH works. The Windows watcher `img-clip-watcher.ps1` (launched beside `claude()` / `ollama()`) detects the file and fills the clipboard in the reader's window station. It deliberately never runs `ssh -p 2222 ... SetImage`: that writes to an ephemeral SSH window station and returns a false success. **Always called with a file-path argument** — by `screenshot-watcher` (auto) and by the `termux-file-editor` share hook. Notifications reuse the `img2clip` id and finish with `Ready to paste`; failures preserve a non-zero exit code so the watcher retries and never counts a failed upload as sent. |
 | `termux/termux-file-editor` | Termux built-in hook (deployed to `~/bin/`): triggered by **Share → Termux → EDIT** on any image, delegates to `img2clip`. Requires the Android permission *Display over other apps* on Termux. Lives on the phone, not synced by `deploy.sh` — installed via the express block in the SSH Android guide. |
 | `termux/screenshot-watcher` | Polling watcher (every 0.5s while enabled) on the phone's image dirs. As soon as a new screenshot/photo is detected, it posts `Image detected` on the same `img2clip` notification id, then waits until the file size is stable before handing it to `img2clip`; the notification is later replaced in place by transfer progress and final clipboard state. Two streams, both **ON by default** (flags created by `install.sh`, persistent in `$HOME`): `~/.screenshot-watcher.on` = `dcim/Screenshots`, `~/.screenshot-watcher.photos` = `dcim/Camera`. Only the **most recent** new image per stream is staged (not a FIFO replay): the clipboard holds one image, so converging to the newest avoids stale uploads on slow links. The cursor only advances on success, so a failed upload is retried, never silently dropped. Polling vs inotify because FUSE on `/sdcard` doesn't deliver inotify events from other apps. Toggle without killing: `touch`/`rm` the flag (aliases `photos-on`/`photos-off`). Deployed to `~/bin/screenshot-watcher`. |
 | `termux/boot-screenshot-watcher` | Termux:Boot wrapper that starts `screenshot-watcher` at phone boot (acquires `termux-wake-lock` first). Deployed to `~/.termux/boot/screenshot-watcher` on the phone — Termux:Boot APK from F-Droid required. |
@@ -51,18 +50,16 @@ Each shell profile defines a `claude()` wrapper that calls a small detector befo
 | Field | Example | Meaning |
 | --- | --- | --- |
 | `device` | `desktop` / `phone` | Which physical device |
-| `context` | `wsl` / `termux` / `ssh-to-wsl` / `pwsh-native` | Which shell / path |
+| `context` | `termux` / `pwsh-native` / `ssh-to-desktop` | Which shell / path |
 | `shell` | `bash` / `pwsh` | Shell type |
-| `distro` | `Ubuntu` | WSL distro (WSL only) |
 | `model` | `Xiaomi 13T Pro` | Phone model (Termux only) |
 | `ssh_from` | `100.x.y.z` | Client IP if connected via SSH |
 | `timestamp` | ISO 8601 | When the context was last written |
 
-**WSL / Linux** : the `claude()` wrapper in `~/.bashrc` calls `detect.sh` then `env -u TMUX claude`.
 **Windows pwsh** : the `claude()` function in `$PROFILE` calls `detect.ps1` then the binary.
-**Termux** : same wrapper as WSL — `detect.sh` detects Termux via `$PREFIX`.
+**Termux** : the `claude()` wrapper in `~/.bashrc` calls `detect.sh` then `claude`.
 
-The assistant can read this file with `Read ~/.claude/.device-context` to know whether the user is on their phone, their PC, or SSH-ing from one to the other. This avoids proposing PC-only actions when the user is on Termux, or phone-only actions when the user is on WSL.
+The assistant can read this file with `Read ~/.claude/.device-context` to know whether the user is on their phone, their PC, or SSH-ing from one to the other. This avoids proposing PC-only actions when the user is on Termux, or phone-only actions when the user is on their desktop.
 
 ### Plugin integrity check
 
@@ -70,7 +67,7 @@ Plugins listed in `settings.json` -> `enabledPlugins` may appear "enabled" but n
 
 **Detect missing plugins:**
 ```bash
-# WSL / Linux / Termux
+# Termux
 bash ~/.claude/scripts/check-plugins.sh
 
 # Windows PowerShell
@@ -89,21 +86,10 @@ Run this after any `deploy --pull` or `bootstrap` on a new machine, or whenever 
 
 Edit `deploy.ps1` line `$CustomSkills = @(...)` and add your skill's folder name.
 
-## WSL / Linux sync (`deploy.sh`)
-
-The desktop runs Claude Code in **WSL**, so the WSL `$HOME/.claude/` is the source of truth for dev. `deploy.sh` is the bash counterpart of `deploy.ps1`:
-
-```bash
-cd ~/dev/dev-environment
-./claude-code/deploy.sh --pull     # repo -> ~/.claude/  (bootstrap a WSL machine)
-./claude-code/deploy.sh --push     # ~/.claude/ -> repo  (before git commit)
-```
-
-It syncs only what is platform-independent: `keybindings.json`, `tmux.conf` (deployed to `~/.tmux.conf`), and the 11 custom skills. It deliberately does **not** touch `settings.json` (diverges: statusline path `/home/...` vs `C:\...`, marketplaces, effortLevel), `statusline.ps1` / `statusline-rs/` or `hooks/` (Windows-only). Pull uses `rsync --update`, so it never overwrites a local file newer than the repo (deploy-safety). `deploy.ps1` (Windows) is kept frozen for the gaming/admin install.
 
 ### One-time bashrc snippet (not auto-synced)
 
-Claude Code downgrades to 256-color whenever it sees `$TMUX` (it ignores `COLORTERM` and `FORCE_COLOR` in that case). A small wrapper in `~/.bashrc` makes `claude` always launch without `TMUX`, so it emits real 24-bit again — `tmux.conf` then forwards it untouched. **Zellij does not trigger this** (it sets `$ZELLIJ`, not `$TMUX`), so truecolor works out of the box there; the wrapper is kept anyway for when `claude` runs inside a real tmux (agent orchestrators, the `wdev` shortcut). Add this once on a fresh WSL machine:
+Claude Code downgrades to 256-color whenever it sees `$TMUX` (it ignores `COLORTERM` and `FORCE_COLOR` in that case). A small wrapper in `~/.bashrc` makes `claude` always launch without `TMUX`, so it emits real 24-bit again — `tmux.conf` then forwards it untouched. **Zellij does not trigger this** (it sets `$ZELLIJ`, not `$TMUX`), so truecolor works out of the box there; the wrapper is kept anyway for when `claude` runs inside a real tmux (agent orchestrators). Add this once on a fresh Linux machine (Termux or autre) :
 
 ```bash
 cat >> ~/.bashrc <<'EOF'
@@ -118,7 +104,7 @@ EOF
 ### Shell autosuggestions: ble.sh + atuin + zoxide (opt-in, not auto-synced)
 
 PSReadLine-style inline "ghost text" autosuggestions, fuzzy history search and a
-frecency `cd`, so WSL/Termux feels like the Windows PowerShell 7 profile:
+frecency `cd`, so Termux feels like the Windows PowerShell 7 profile:
 
 | Tool | Role | Install |
 | --- | --- | --- |
@@ -161,8 +147,9 @@ if [[ ${BLE_VERSION-} ]]; then
   ble-bind -m auto_complete -f 'TAB' 'auto_complete/@end insert'  # Tab accepts
   ble-bind -m auto_complete -f 'C-i' 'auto_complete/@end insert'  # the suggestion
   ble-bind -f 'f3' 'menu-complete'      # F3 = navigable completion menu
-  # F2 = tmux sessionizer (same fzf menu as `pc` on the phone). -c runs an external
-  # fullscreen program (fzf) with the terminal restored, then redraws the prompt.
+  # F2 = sessionizer (menu fzf natif Windows, appele via SSH depuis le tel).
+  # -c lance un programme plein ecran externe (fzf) avec le terminal restaure,
+  # puis redessine le prompt.
   ble-bind -c 'f2' "$HOME/dev/dev-environment/claude-code/tmux-sessionizer.sh"
 fi
 
@@ -224,23 +211,22 @@ ssh phone 'termux-reload-settings'
 
 Rollback: `ssh phone 'cp ~/.termux/font.ttf.bak ~/.termux/font.ttf && termux-reload-settings'`. Re-run the patch if a Termux font update overwrites it.
 
-## Sessionizer (`dev` / `pwsh` / F2)
+## Sessionizer (`pwsh` / F2)
 
-`tmux-sessionizer.sh` (kept name; it now drives **Zellij**, not tmux) is the shared fzf menu that merges, in one list: `●` **active** Zellij sessions (attach), `○` **`~/dev` projects** with no session (create one in the folder), `○` **Obsidian vaults** in violet (native PowerShell), and **new** ad-hoc sessions (Ctrl+N). From Termux, the supported entry points are native Windows `dev` for `C:\dev` projects and `pwsh` for vaults; the old phone `wsl` / `wslm` helpers are no longer installed.
+`windows-sessionizer/sessionizer.ps1` est le menu fzf natif Windows qui fusionne, en une liste : `●` **sessions** Zellij actives (attach), `○` **projets** sous `C:\dev` sans session (créer dans le dossier), `○` **vaults Obsidian** en violet (PowerShell natif), et **nouvelles** sessions ad-hoc (Ctrl+N). Depuis Termux, `pwsh` demande cette même vue `all` que F2 au PC, puis ouvre le choix via le tunnel Zellij web pour que la session reste joignable depuis le bureau.
 
 > **Why Zellij, not tmux?** tmux has no native Windows build, and the only native-Windows tmux clone (psmux) was too buggy (laggy Claude TUI, Esc-blocked-after-Ctrl+letter, truecolor off). Zellij ships a native-Windows ConPTY binary (≥ 0.44) that runs `pwsh` natively (full-speed C: I/O) **with** detach/reattach. So Windows-native Zellij is now the daily mux. tmux stays installed as a dependency of agent orchestrators and a `0.x` fallback.
 
 | Entry point | View | World — shows |
 |---|---|---|
-| `dev` / `devm` — phone | `dev` | **Windows/C: in native pwsh**: folders directly under `C:\dev` |
-| `pwsh` / `pwshm` — phone | `vaults` | **Windows/C: in native pwsh**: Obsidian vaults as Zellij sessions (extensible to any C: folder better in PowerShell) |
+| `pwsh` / `pwshm` — phone | `all` | same unified scope as F2: native Windows sessions, projects and vaults |
 | **F2** — desktop Windows shell | `all` (default) | native Windows sessions, projects and vaults |
 
 `sleep-pc` suspends the desktop, `stop-pc` shuts it down — both run a native Windows command through the Windows sshd (port 2222) + `$WIN_USER`.
 
-`dev` opens projects through a direct Windows SSH TTY: it resolves `C:\dev\<project>`, starts `zellij attach -c --forget <project>`, and passes `--default-cwd` to the project directory. The `--forget` is deliberate: if Zellij has serialized an old project session that was sitting at `C:\`, `dev` starts from the real project folder instead of resurrecting that stale cwd.
+> **Picking anything from the phone opens native Windows PowerShell — automatically.** Termux lists the unified menu through the Windows sshd, then attaches the local Zellij web client through an SSH tunnel: `127.0.0.1:<local> -> desktop:127.0.0.1:8082`. A token lives only in `~/.config/pc-zellij-web-token` on the phone. The Windows account for the SSH tunnel can't be derived from the phone, so it's read from **`$WIN_USER`** — set it in `~/.bashrc.local` (`export WIN_USER=<your Windows account>`), kept out of git so the versioned `bashrc` stays shareable.
 
-> **Picking a vault from the phone opens native Windows PowerShell — automatically.** A vault lives on `C:`, so it runs in native `pwsh`. Termux lists vaults through the Windows sshd, then tries the local Zellij web client through an SSH tunnel: `127.0.0.1:<local> -> desktop:127.0.0.1:8082`. If the web attach closes immediately, the wrapper falls back to a direct Windows SSH TTY and runs `zellij attach -c` there. A token lives only in `~/.config/pc-zellij-web-token` on the phone. The Windows account for the SSH tunnel can't be derived from the phone, so it's read from **`$WIN_USER`** — set it in `~/.bashrc.local` (`export WIN_USER=<your Windows account>`), kept out of git so the versioned `bashrc` stays shareable.
+On Termux, the `pwsh` menu auto-refreshes while it is open, keeping the last good list if the PC is briefly unreachable. It starts on the first selectable row and skips decorative section titles for arrows and taps.
 
 | Key | Action |
 |---|---|

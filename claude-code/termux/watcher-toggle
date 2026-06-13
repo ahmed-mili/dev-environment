@@ -22,7 +22,7 @@
 # en CHEMIN ABSOLU ($BASH_BIN) : l'action s'execute dans un env PATH minimal (comme
 # Termux:Boot, sans termux-exec) ou un `bash` nu ne serait pas forcement resolu ->
 # aucune resolution relative possible. cf. reference_termux-boot-shebang et
-# reference_wsl-task-scheduler-path (meme piege : forcer les binaires en dur).
+# reference_task-scheduler-path (meme piege : forcer les binaires en dur).
 #
 # Persistance : --ongoing + --on-delete. HyperOS peut quand meme laisser disparaitre
 # une notif "ongoing" dans certains gestes/groupes ; --on-delete rappelle `restore`,

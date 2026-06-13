@@ -1,12 +1,12 @@
-// Zellij — config partagée (projets WSL & vaults Windows).
+// Zellij — config Linux/Termux (historique, pour compatibilité tierce).
 // Cf. docs/superpowers/plans/2026-06-02-zellij-everywhere.md
 //
 // Zellij fusionne ce fichier avec ses défauts : on ne met QUE les overrides.
 // Déploiement :
-//   WSL     -> ~/.config/zellij/config.kdl
-//   Windows -> %APPDATA%\zellij\config\config.kdl  (retirer copy_command ; theme = night-owl)
+//   Linux/Termux -> ~/.config/zellij/config.kdl
+//   Windows      -> %APPDATA%\zellij\config\config.kdl  (utiliser config-windows.kdl à la place)
 
-// WSL/Linux : gruvbox adouci (custom, plus doux que gruvbox-dark built-in).
+// Linux/Termux : gruvbox adouci (custom, plus doux que gruvbox-dark built-in).
 // Windows   : remplacer par theme "night-owl" (bleu ≈ console PowerShell).
 theme "gruvbox-material"
 mouse_mode true              // scroll molette + clic panes/tabs
@@ -44,7 +44,7 @@ themes {
     }
 }
 
-// F2 = sessionizer universel (projets WSL + vaults Windows).
+// F2 = sessionizer universel (projets Linux + vaults Windows).
 // Ctrl+Y = Ollama model launcher (menu dédié, pas une session Zellij).
 keybinds {
     shared_except "locked" {
