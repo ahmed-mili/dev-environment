@@ -59,6 +59,15 @@ function Copy-One($from, $to) {
         Remove-Item $to -Recurse -Force
     }
     Copy-Item $from $to -Force -Recurse
+    # MOTW : un .ps1 copie peut porter un Zone.Identifier (ZoneId=3) qui, sous
+    # ExecutionPolicy RemoteSigned, bloque l'execution ("not digitally signed").
+    # install.ps1 unblock deja tout ce qu'il deploie ; deploy.ps1 doit faire pareil
+    # (vecu 2026-06-13 : ~/.claude/device-context/detect.ps1 bloque le wrapper claude()).
+    if (Test-Path $to -PathType Leaf) {
+        if ($to -like '*.ps1') { Unblock-File $to -ErrorAction SilentlyContinue }
+    } else {
+        Get-ChildItem $to -Recurse -Filter *.ps1 -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+    }
     return 'OK'
 }
 
