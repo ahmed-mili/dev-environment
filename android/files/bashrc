@@ -384,23 +384,16 @@ _pc_pick_native() {
     cursor0=$(printf '%s\n' "$rows" | awk -F '\t' '$1 != "sep" { print NR; exit } END { if (NR == 0) print 1 }')
     [ -n "$cursor0" ] || cursor0=1
     seps=$(printf '%s\n' "$rows" | awk -F '\t' '$1 == "sep" { printf " %d", NR }')
-    # Header toggleable : titre "Sessionizer" par defaut, Ctrl+G affiche l'aide.
-    hstate="${TMPDIR:-/tmp}/pc-sessionizer-hdr.$$.$(id -u)"
-    rm -f "$hstate"
-    hdr_min='Sessionizer'
-    hdr_full='Sessionizer · Enter open · Ctrl+N new · Ctrl+R refresh · Esc cancel'
     out=$(printf '%s\n' "$rows" | fzf \
       --ansi --delimiter=$'\t' --with-nth=3 --layout=reverse --no-multi \
       --track --id-nth=2 \
-      --border=bottom --header-first \
+      --border=rounded --border-label=' ◆ Sessionizer ' --border-label-pos=3 \
       --padding=0,1 --info=hidden --ellipsis='…' \
-      --color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,gutter:-1 \
-      --prompt="$prompt" --header="$hdr_min" \
+      --color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,label:117,gutter:-1 \
+      --prompt="$prompt" --header='Enter open · Ctrl+N new · Ctrl+R refresh · Esc cancel' \
       --expect=ctrl-n \
-      --listen="$listen_sock" \
       --bind "load:transform:[ -e '$pos_flag' ] || { touch '$pos_flag'; echo 'pos($cursor0)'; }" \
       --bind "ctrl-r:reload($refresh_script)" \
-      --bind "ctrl-g:transform-header:if [ \"\$(cat '$hstate' 2>/dev/null)\" = full ]; then printf min > '$hstate'; printf '%s' \"$hdr_min\"; else printf full > '$hstate'; printf '%s' \"$hdr_full\"; fi" \
       --bind "down:transform:[ -z '{q}' ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac" \
       --bind "up:transform:[ -z '{q}' ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac" \
       --bind "left-click:transform:[ -n '{q}' ] && echo ignore || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo ignore;; esac; }" \

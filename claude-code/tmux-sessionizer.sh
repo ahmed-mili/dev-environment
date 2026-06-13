@@ -177,9 +177,10 @@ else
   # $seps = positions of ALL present titles (the ↑↓ step over them, via `case`).
   # The `[ -z {q} ]` guard disables skip/toggle as soon as a filter is typed: once
   # the list is filtered, these absolute positions no longer mean anything.
-  # Header : titre "Sessionizer" par defaut; Ctrl+G toggle l'aide complete.
-  nav=(); hdr_min='Sessionizer'
-  hdr_full='Sessionizer · ↑↓ navigate · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
+  # Help: a minimal « ^G help » header is ALWAYS visible; Ctrl-G toggles it
+  # with the FULL list (hdr_full).
+  nav=(); hdr_min='Ctrl+G  help'
+  hdr_full='↑↓ navigate · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
   ssep=0; psep=0; vsep=0; pfirst=0; vfirst=0; pos=0
   (( n_orphan )) && { ssep=$(( pos + 1 )); pos=$(( pos + 1 + n_orphan )); }
   (( n_proj ))   && { psep=$(( pos + 1 )); pfirst=$(( psep + 1 )); pos=$(( pos + 1 + n_proj )); }
@@ -244,9 +245,9 @@ else
   out="$(build_menu | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
-      --border=bottom --header-first \
+      --border=rounded \
       --padding=0,1 --info=hidden --ellipsis='…' \
-      --color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,gutter:-1 \
+      --color=pointer:117 \
       --prompt='🔍 Search ❯ ' \
       --header="$hdr_min" \
       --expect=ctrl-n,ctrl-x,ctrl-r \
