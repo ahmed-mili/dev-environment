@@ -100,8 +100,8 @@ case "${PC_VIEW:-all}" in
 esac
 
 # ANSI colors (interpreted by fzf --ansi)
-G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[38;5;141m'   # M = violet (vaults)
-ITEM_PREFIX='  ▌ '
+G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[38;5;141m'; F=$'\e[38;2;249;226;175m'   # F = folder yellow
+ITEM_PREFIX='▌ '
 
 # Each project/vault stays in ITS place within its section; if it has an active
 # session of the same name we mark it ● (active) instead of moving it to the top.
@@ -128,29 +128,30 @@ build_menu() {
   if (( n_orphan )); then
     printf 'sep\t__sep_sessions\t%s──────  %s◆ Sessions%s  ──────%s\n' "$D" "$R" "$D" "$R"
     for s in "${orphans[@]}"; do
-      printf 'active\t%s\t%s%s●%s %s  %s(active)%s\n' "$s" "$ITEM_PREFIX" "$G" "$R" "$s" "$G" "$R"
+      printf 'active\t%s\t%s%s●%s %s  %s(active)%s\t%s\n' "$s" "$ITEM_PREFIX" "$G" "$R" "$s" "$G" "$R" "$s"
     done
   fi
   # 2) ~/dev projects under « ◆ Projects » (light text on grey dashes); each in ITS
   #    place; active -> ● (active), otherwise ○ grey.
   if (( n_proj )); then
-    printf 'sep\t__sep_projects\t%s──────  %s◆ Projects%s  ──────%s\n' "$D" "$R" "$D" "$R"
+    printf 'sep\t__gap_projects\t\t\n'
+    printf 'sep\t__sep_projects\t%s──────  %s◆ Projects%s  ──────%s\t\n' "$D" "$F" "$D" "$R"
     for p in "${projects[@]}"; do
       if is_active "$p"; then
-        printf 'active\t%s\t%s%s●%s %s  %s(active)%s\n' "$p" "$ITEM_PREFIX" "$G" "$R" "$p" "$G" "$R"
+        printf 'active\t%s\t%s%s●%s %s  %s(active)%s\t%s\n' "$p" "$ITEM_PREFIX" "$G" "$R" "$p" "$G" "$R" "$p"
       else
-        printf 'project\t%s\t%s%s○%s %s\n' "$p" "$ITEM_PREFIX" "$D" "$R" "$p"
+        printf 'project\t%s\t%s○ %s\t%s\n' "$p" "$ITEM_PREFIX" "$p" "$p"
       fi
     done
   fi
   # 3) Obsidian vaults under « ◆ Obsidian Vaults » (violet); same active rule.
   if (( n_vault )); then
-    printf 'sep\t__sep_vaults\t%s──────  %s◆ Obsidian Vaults%s  ──────%s\n' "$D" "$M" "$D" "$R"
+    printf 'sep\t__sep_vaults\t%s──────  %s◆ Obsidian Vaults%s  ──────%s\t\n' "$D" "$M" "$D" "$R"
     for v in "${vaults[@]}"; do
       if is_active "$v"; then
-        printf 'active\t%s\t%s%s●%s %s  %s(active)%s\n' "$v" "$ITEM_PREFIX" "$G" "$R" "$v" "$G" "$R"
+        printf 'active\t%s\t%s%s●%s %s  %s(active)%s\t%s\n' "$v" "$ITEM_PREFIX" "$G" "$R" "$v" "$G" "$R" "$v"
       else
-        printf 'vault\t%s\t%s%s○%s %s\n' "$v" "$ITEM_PREFIX" "$M" "$R" "$v"
+        printf 'vault\t%s\t%s○ %s\t%s\n' "$v" "$ITEM_PREFIX" "$v" "$v"
       fi
     done
   fi
@@ -165,40 +166,70 @@ if [[ -n "${PC_PICK:-}" ]]; then
   key="${PC_KEY:-}"; choice="$PC_PICK"
 else
   [[ -x "$FZF" ]] || { echo "fzf not found (~/.fzf/bin/fzf) — run: ~/.fzf/install --bin" >&2; exit 1; }
-  # --with-nth=3: we only DISPLAY the label (field 3), which already holds the name
-  # -> typing filters on what you see (WYSIWYG). No --nth: fzf rewrites the line
-  # before applying --nth, so --nth=2,3 would look for vanished fields -> zero
-  # match. The RETURNED value stays the original line (3 fields).
+  # --with-nth=3 displays the styled label. Filtering is handled by a tiny
+  # reload script so decorative section rows disappear as soon as a query is
+  # typed, instead of being searchable/selectable.
   # Navigation: skip the « ◆ … » titles (↑↓), toggle projects ⇄ vaults (Tab),
   # create a session (Ctrl-N, via --expect below).
   # 1-based positions (reverse layout, UNfiltered list):
   #   [« ◆ Sessions »] [orphans ..] [« ◆ Projects »] [projects ..] [« ◆ Vaults »] [vaults ..]
-  # ssep/psep/vsep/osep = title lines; pfirst/vfirst/ofirst = first item of each section;
   # cursor0 = first SELECTABLE item (where the cursor starts — never on a title);
-  # $seps = positions of ALL present titles (the ↑↓ step over them, via `case`).
+  # $seps = positions of ALL decorative rows (titles + gaps).
   # The `[ -z {q} ]` guard disables skip/toggle as soon as a filter is typed: once
   # the list is filtered, these absolute positions no longer mean anything.
   # Help: a minimal « ^G help » header is ALWAYS visible; Ctrl-G toggles it
   # with the FULL list (hdr_full).
   nav=(); hdr_min='Ctrl+G  help'
   hdr_full='↑↓ navigate · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
-  ssep=0; psep=0; vsep=0; pfirst=0; vfirst=0; pos=0
-  (( n_orphan )) && { ssep=$(( pos + 1 )); pos=$(( pos + 1 + n_orphan )); }
-  (( n_proj ))   && { psep=$(( pos + 1 )); pfirst=$(( psep + 1 )); pos=$(( pos + 1 + n_proj )); }
-  (( n_vault ))  && { vsep=$(( pos + 1 )); vfirst=$(( vsep + 1 )); pos=$(( pos + 1 + n_vault )); }
-  if   (( n_orphan )); then cursor0=$(( ssep + 1 ))
-  elif (( n_proj ));   then cursor0=$pfirst
-  elif (( n_vault ));  then cursor0=$vfirst
-  else                      cursor0=1; fi
-  seps=""
-  (( ssep )) && seps="$seps $ssep"
-  (( psep )) && seps="$seps $psep"
-  (( vsep )) && seps="$seps $vsep"
-  if (( ssep || psep || vsep )); then
+  menu="$(build_menu)"
+  ROWS_TMP="$(mktemp "${TMPDIR:-/tmp}/pc-sessionizer-rows.XXXXXX")"
+  FILTER_TMP="$(mktemp "${TMPDIR:-/tmp}/pc-sessionizer-filter.XXXXXX")"
+  printf '%s\n' "$menu" > "$ROWS_TMP"
+  cat > "$FILTER_TMP" <<'EOF'
+#!/usr/bin/env bash
+set -u
+rows_file="${1:?rows file missing}"
+q="${2:-}"
+if [[ -z "$q" ]]; then
+  cat "$rows_file" 2>/dev/null
+  exit 0
+fi
+awk -F '\t' -v q="$q" '
+function fuzzy(needle, haystack, i, j, c) {
+  needle = tolower(needle); haystack = tolower(haystack); j = 1
+  for (i = 1; i <= length(needle); i++) {
+    c = substr(needle, i, 1)
+    while (j <= length(haystack) && substr(haystack, j, 1) != c) j++
+    if (j > length(haystack)) return 0
+    j++
+  }
+  return 1
+}
+BEGIN { n = split(q, terms, /[[:space:]]+/) }
+$1 != "sep" {
+  ok = 1; exact = 1; key = tolower($4)
+  for (i = 1; i <= n; i++) {
+    if (terms[i] != "") {
+      term = tolower(terms[i])
+      if (index(key, term) == 0) exact = 0
+      if (!fuzzy(term, key)) { ok = 0; break }
+    }
+  }
+  if (ok) printf "%d\t%09d\t%s\n", exact ? 0 : 1, NR, $0
+}
+' "$rows_file" 2>/dev/null | sort -n -k1,1 -k2,2 | cut -f3-
+EOF
+  chmod 700 "$FILTER_TMP"
+  cursor0="$(awk -F '\t' '$1 != "sep" { print NR; found = 1; exit } END { if (!found) print 1 }' <<<"$menu")"
+  seps="$(awk -F '\t' '$1 == "sep" { printf " %d", NR }' <<<"$menu")"
+  pfirst="$(awk -F '\t' '$2 == "__sep_projects" { seen = 1; next } seen && $1 != "sep" { print NR; exit }' <<<"$menu")"
+  vfirst="$(awk -F '\t' '$2 == "__sep_vaults" { seen = 1; next } seen && $1 != "sep" { print NR; exit }' <<<"$menu")"
+  [[ -n "$cursor0" ]] || cursor0=1
+  if [[ -n "$seps" ]]; then
     nav+=(
       --bind "load:pos($cursor0)"
-      --bind "down:transform:[ -z '{q}' ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac"
-      --bind "up:transform:[ -z '{q}' ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac"
+      --bind "down:transform:[ -z '{q}' ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); a=down; while case \" $seps \" in *\" \$n \"*) true;; *) false;; esac; do a=\"\$a+down\"; n=\$((n+1)); done; echo \"\$a\""
+      --bind "up:transform:[ -z '{q}' ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); a=up; while case \" $seps \" in *\" \$p \"*) true;; *) false;; esac; do [ \$p -le 1 ] && { echo ignore; exit 0; }; a=\"\$a+up\"; p=\$((p-1)); done; echo \"\$a\""
       # Mouse: OPEN on DOUBLE-click; the SINGLE click acts as a « hover » (true hover
       # is impossible in fzf — no « all-motion » 1003 tracking): it moves the ▌ cursor
       # onto the line WITHOUT opening, you confirm with the 2nd click.
@@ -222,7 +253,7 @@ else
       --bind "left-click:transform:case \"{1}\" in sep) echo down;; *) echo ignore;; esac"
       --bind "double-click:transform:case \"{1}\" in sep) echo down;; *) echo accept;; esac"
     )
-    if (( n_proj && n_vault )); then
+    if [[ -n "$pfirst" && -n "$vfirst" ]]; then
       nav+=( --bind "tab:transform:[ -n '{q}' ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
       # ↹ = U+21B9, the TWO-arrow « Tab key » symbol. Missing from JetBrainsMono
       # Nerd Font but rendered by the fallback font (Unicode Arrows block, like ⇄).
@@ -233,29 +264,24 @@ else
   # default, Ctrl-G toggles to/from the full list. fzf has no state variable, so we
   # store min/full in a file. ^G (not ^H = Backspace).
   HSTATE="${TMPDIR:-/tmp}/.pc-sessionizer-hdr.$(id -u)"; printf min > "$HSTATE"
+  trap 'rm -f "$HSTATE" "$ROWS_TMP" "$FILTER_TMP"' EXIT
   nav+=( --bind "ctrl-g:transform-header:if [ \"\$(cat '$HSTATE' 2>/dev/null)\" = full ]; then printf min > '$HSTATE'; printf '%s' \"$hdr_min\"; else printf full > '$HSTATE'; printf '%s' \"$hdr_full\"; fi" )
-  # --color=pointer:8: by default fzf paints its pointer (the ▌ of the current
-  # line) in pink-red (color 161), the only off-palette color
-  # (green/violet/grey). We set it to neutral grey (8 = the $D of the ○)
-  # so it reads as a pure cursor; the TYPE is already carried by the colored
-  # bullet to its right (● green / ○ grey / ○ violet).
-  # NB: a "chameleon" pointer (color depending on the targeted item) is IMPOSSIBLE in
-  # fzf — --color=pointer is global, no change-color action exists, and
-  # ANSI inside the pointer is rejected (uniseg width ≤ 2). Verified in the
-  # 0.73.1 source (terminal.go:7952, options.go:3605). Do not retry.
+  # The current row uses a muted blue background, approximating a low-opacity
+  # overlay while preserving the active green dot and status text.
   # --expect: these keys make fzf quit, putting the key on the 1st output line
   # (empty for Enter), the selection on the 2nd. ^N = create, ^X = kill,
   # ^R = rename. (^G toggles help WITHOUT quitting fzf -> not in --expect.)
-  out="$(build_menu | "$FZF" \
+  out="$(printf '%s\n' "$menu" | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
-      --layout=reverse --no-multi \
+      --layout=reverse --no-multi --disabled --track --id-nth=2 \
       --border=rounded \
       --input-border=rounded --ghost='Search...' \
       --padding=0,1 --info=hidden --no-scrollbar --scrollbar='' --pointer='' --marker='' --ellipsis='…' \
-      --color=bg:-1,bg+:-1,current-bg:-1,selected-bg:-1,fg:#cdd6f4,fg+:#cdd6f4,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1 \
+      --color=bg:-1,bg+:#202942,current-bg:#202942,selected-bg:#202942,fg:#bac2de,fg+:#89b4fa,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1 \
       --prompt='⌕ ' \
       --header="$hdr_min" \
       --expect=ctrl-n,ctrl-x,ctrl-r \
+      --bind "change:reload($FILTER_TMP $ROWS_TMP {q})" \
       "${nav[@]}" \
     )" || exit 0
   key="$(sed -n '1p' <<<"$out")"

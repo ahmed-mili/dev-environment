@@ -311,13 +311,14 @@ $orphans = @($actives | Where-Object { ($projects -notcontains (Get-CanonicalNam
 $e = [char]27
 $G = "$e[32m"; $D = "$e[90m"; $R = "$e[0m"; $M = "$e[38;5;141m"   # M = violet (vaults)
 $Y = "$e[33m"                                                     # Y = jaune (tel/web)
+$F = "$e[38;2;249;226;175m"                                      # F = folder yellow (projects)
 $T = [char]9
 $BulletOn  = [char]0x25CF
 $BulletOff = [char]0x25CB
 $Diamond   = [char]0x25C6
 $Rule      = ([string][char]0x2500) * 6
 $TreeLine  = [char]0x258C
-$ItemPrefix = "  $TreeLine "
+$ItemPrefix = "$TreeLine "
 
 # Ligne menu d'une session active : verte si joignable d'ici, jaune + suffixe
 # "(tel/web)" si elle vit dans une autre logon session (attach impossible).
@@ -326,9 +327,9 @@ function Get-ActiveLine {
     param([string]$Name)
     $disp = ConvertTo-ArabicDisplay $Name
     if ($JoinableSessions.Contains($Name)) {
-        return "active$T$Name$T$ItemPrefix$G$BulletOn$R $disp  $G(active)$R"
+        return "active$T$Name$T$ItemPrefix$G$BulletOn$R $disp  $G(active)$R$T$Name"
     }
-    return "active$T$Name$T$ItemPrefix$Y$BulletOn$R $disp  $Y(active - tel/web)$R"
+    return "active$T$Name$T$ItemPrefix$G$BulletOn$R $disp  $Y(active - tel/web)$R$T$Name"
 }
 
 function Build-Menu {
@@ -340,22 +341,23 @@ function Build-Menu {
         }
     }
     if ($projects.Count) {
-        $lines.Add("sep${T}__sep_projects$T$D$Rule  $R$Diamond Projects$D  $Rule$R")
+        $lines.Add("sep${T}__gap_projects${T}${T}")
+        $lines.Add("sep${T}__sep_projects$T$D$Rule  $F$Diamond Projects$D  $Rule$R$T")
         foreach ($p in $projects) {
             if ($activesCanon -contains $p) {
                 $lines.Add((Get-ActiveLine (Get-ActualName $p)))
             } else {
-                $lines.Add("project$T$p$T$ItemPrefix$D$BulletOff$R $(ConvertTo-ArabicDisplay $p)")
+                $lines.Add("project$T$p$T$ItemPrefix$BulletOff $(ConvertTo-ArabicDisplay $p)$T$p")
             }
         }
     }
     if ($vaults.Count) {
-        $lines.Add("sep${T}__sep_vaults$T$D$Rule  $M$Diamond Obsidian Vaults$D  $Rule$R")
+        $lines.Add("sep${T}__sep_vaults$T$D$Rule  $M$Diamond Obsidian Vaults$D  $Rule$R$T")
         foreach ($v in $vaults) {
             if ($activesCanon -contains $v) {
                 $lines.Add((Get-ActiveLine (Get-ActualName $v)))
             } else {
-                $lines.Add("vault$T$v$T$ItemPrefix$M$BulletOff$R $(ConvertTo-ArabicDisplay $v)")
+                $lines.Add("vault$T$v$T$ItemPrefix$BulletOff $(ConvertTo-ArabicDisplay $v)$T$v")
             }
         }
     }
@@ -460,20 +462,38 @@ if ($Pick) {
     }
     $menu = Build-Menu
 
-    # Positions 1-based (layout reverse, liste NON filtree) des titres et des
-    # premiers items, pour les binds de navigation. Parite .sh, MAIS : fzf Windows
+    # Positions 1-based (layout reverse, liste NON filtree) des lignes non
+    # selectionnables, pour les binds de navigation. Parite .sh, MAIS : fzf Windows
     # execute les transform via `cmd /s/c` -> pas d'arithmetique runtime possible
-    # en batch one-liner (pas de delayed expansion). On PRE-CALCULE donc tout :
-    #   down : saute si FZF_POS+1 est un titre  <=> FZF_POS dans (seps - 1)
-    #   up   : saute si FZF_POS-1 est un titre  <=> FZF_POS dans (seps + 1)
-    #          (cas special titre en position 1 : ignore, on ne remonte pas dessus)
-    #   clic : bounce si FZF_POS est un titre   <=> FZF_POS dans seps
-    $ssep = 0; $psep = 0; $vsep = 0; $pfirst = 0; $vfirst = 0; $pos = 0
-    if ($orphans.Count)  { $ssep = $pos + 1; $pos += 1 + $orphans.Count }
-    if ($projects.Count) { $psep = $pos + 1; $pfirst = $psep + 1; $pos += 1 + $projects.Count }
-    if ($vaults.Count)   { $vsep = $pos + 1; $vfirst = $vsep + 1; $pos += 1 + $vaults.Count }
-    $cursor0 = if ($ssep) { $ssep + 1 } elseif ($pfirst) { $pfirst } elseif ($vfirst) { $vfirst } else { 1 }
-    $seps = @($ssep, $psep, $vsep) | Where-Object { $_ -gt 0 }
+    # en batch one-liner (pas de delayed expansion). On PRE-CALCULE donc tout
+    # depuis le TSV reel pour supporter les gaps decoratifs avant les titres.
+    $seps = [System.Collections.Generic.List[int]]::new()
+    $cursor0 = 1
+    $cursorFound = $false
+    $psep = 0; $vsep = 0; $pfirst = 0; $vfirst = 0
+    for ($idx = 0; $idx -lt $menu.Count; $idx++) {
+        $fields = $menu[$idx] -split "`t", 3
+        $pos1 = $idx + 1
+        if ($fields[0] -eq 'sep') {
+            $seps.Add($pos1)
+            if ($fields.Count -ge 2 -and $fields[1] -eq '__sep_projects') { $psep = $pos1 }
+            if ($fields.Count -ge 2 -and $fields[1] -eq '__sep_vaults')   { $vsep = $pos1 }
+        } elseif (-not $cursorFound) {
+            $cursor0 = $pos1
+            $cursorFound = $true
+        }
+    }
+    function Get-FirstSelectableAfter {
+        param([int]$After)
+        if (-not $After) { return 0 }
+        for ($idx = $After; $idx -lt $menu.Count; $idx++) {
+            $fields = $menu[$idx] -split "`t", 2
+            if ($fields[0] -ne 'sep') { return ($idx + 1) }
+        }
+        return 0
+    }
+    $pfirst = Get-FirstSelectableAfter $psep
+    $vfirst = Get-FirstSelectableAfter $vsep
 
     # Genere une chaine batch `if "%FZF_POS%"=="a" (echo ACTION) else if ... (echo DEFAULT)`.
     function New-PosBind {
@@ -485,20 +505,44 @@ if ($Pick) {
         }
         return $expr
     }
+    function New-RepeatAction {
+        param([string]$Action, [int]$Count)
+        if ($Count -le 0) { return 'ignore' }
+        return (@($Action) * $Count) -join '+'
+    }
+    function New-SkipDownBind {
+        $expr = 'echo down'
+        for ($pos1 = $menu.Count; $pos1 -ge 1; $pos1--) {
+            $target = $pos1 + 1
+            while ($seps -contains $target) { $target++ }
+            if ($target -ne ($pos1 + 1) -and $target -le $menu.Count) {
+                $action = New-RepeatAction 'down' ($target - $pos1)
+                $expr = "if `"%FZF_POS%`"==`"$pos1`" (echo $action) else ($expr)"
+            }
+        }
+        return $expr
+    }
+    function New-SkipUpBind {
+        $expr = 'echo up'
+        for ($pos1 = 1; $pos1 -le $menu.Count; $pos1++) {
+            $target = $pos1 - 1
+            while ($seps -contains $target) { $target-- }
+            if ($target -ne ($pos1 - 1)) {
+                if ($target -lt 1) { $action = 'ignore' }
+                else { $action = New-RepeatAction 'up' ($pos1 - $target) }
+                $expr = "if `"%FZF_POS%`"==`"$pos1`" (echo $action) else ($expr)"
+            }
+        }
+        return $expr
+    }
 
     # Garde "filtre tape" : {q} est substitue PAR FZF avec quotes (query vide -> "").
     # Une fois filtree, les positions absolues ne veulent plus rien dire -> action de base.
-    $downBatch  = "if {q}==`"`" ($(New-PosBind -Positions @($seps | ForEach-Object { $_ - 1 }) -Action 'down+down' -Default 'down')) else (echo down)"
-    $upPositions = @($seps | ForEach-Object { $_ + 1 })
-    $upInner = New-PosBind -Positions $upPositions -Action 'up+up' -Default 'up'
-    if ($seps -contains 1) {
-        # le titre est en position 1 : depuis la position 2, ne pas remonter dessus
-        $upInner = "if `"%FZF_POS%`"==`"2`" (echo ignore) else ($upInner)"
-    }
+    $downBatch  = "if {q}==`"`" ($(New-SkipDownBind)) else (echo down)"
+    $upInner = New-SkipUpBind
     $upBatch    = "if {q}==`"`" ($upInner) else (echo up)"
     # Les titres restent visibles pendant le filtre, donc on les ejecte aussi via
     # le type TSV courant ({1}) quand les positions absolues ne sont plus fiables.
-    $focusBatch = 'if "{1}"=="sep" (echo down) else (echo ignore)'
     $enterBatch = 'if "{1}"=="sep" (echo down) else (echo accept)'
     $clickBatch = 'if "{1}"=="sep" (echo down) else (echo ignore)'
     $dblBatch   = $enterBatch
@@ -520,6 +564,62 @@ if ($Pick) {
     Remove-Item $hstate -Force -ErrorAction SilentlyContinue
     $ctrlGBatch = "if exist `"$hstate`" (del `"$hstate`" & echo $hdrMin) else (type nul > `"$hstate`" & echo $hdrFull)"
 
+    $rowsPath = Join-Path $env:TEMP ("pc-sessionizer-rows-{0}.tsv" -f ([guid]::NewGuid().ToString('N')))
+    $filterPath = Join-Path $env:TEMP ("pc-sessionizer-filter-{0}.ps1" -f ([guid]::NewGuid().ToString('N')))
+    $menu | Set-Content -LiteralPath $rowsPath -Encoding utf8
+    @'
+param([string]$RowsPath, [string]$Query = '')
+function Test-Fuzzy {
+    param([string]$Needle, [string]$Haystack)
+    if ([string]::IsNullOrEmpty($Needle)) { return $true }
+    if ([string]::IsNullOrEmpty($Haystack)) { return $false }
+    $pos = 0
+    foreach ($ch in $Needle.ToCharArray()) {
+        $found = $false
+        while ($pos -lt $Haystack.Length) {
+            if ([char]::ToLowerInvariant($Haystack[$pos]) -eq [char]::ToLowerInvariant($ch)) {
+                $found = $true
+                $pos++
+                break
+            }
+            $pos++
+        }
+        if (-not $found) { return $false }
+    }
+    return $true
+}
+$rows = Get-Content -LiteralPath $RowsPath -Encoding utf8
+if ([string]::IsNullOrWhiteSpace($Query)) {
+    $rows
+    exit 0
+}
+$terms = @($Query -split '\s+' | Where-Object { $_ })
+$matches = [System.Collections.Generic.List[object]]::new()
+$rowIndex = 0
+foreach ($row in $rows) {
+    $rowIndex++
+    $fields = $row -split "`t", 4
+    if ($fields.Count -lt 4 -or $fields[0] -eq 'sep') { continue }
+    $ok = $true
+    $exact = $true
+    foreach ($term in $terms) {
+        if ($fields[3].IndexOf($term, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $exact = $false
+        }
+        if (-not (Test-Fuzzy $term $fields[3])) {
+            $ok = $false
+            break
+        }
+    }
+    if ($ok) {
+        $score = if ($exact) { 0 } else { 1 }
+        $matches.Add([pscustomobject]@{ Score = $score; Index = $rowIndex; Line = $row })
+    }
+}
+$matches | Sort-Object Score, Index | ForEach-Object { $_.Line }
+'@ | Set-Content -LiteralPath $filterPath -Encoding ascii
+    $filterCmd = "pwsh -NoProfile -NoLogo -ExecutionPolicy Bypass -File `"$filterPath`" `"$rowsPath`" {q}"
+
     # Input : petite loupe + ghost text "Search..." dans une vraie bordure fzf.
     # Les glyphes sont construits par code Unicode pour garder le fichier .ps1
     # ASCII-only (regle projet).
@@ -527,22 +627,24 @@ if ($Pick) {
     $fzfPrompt  = "$SearchIcon "
     $fzfGhost   = 'Search...'
     $Ellipsis   = [char]0x2026
+    $focusBatch = 'if "{1}"=="sep" (echo down) else (echo ignore)'
 
     # Habillage : bordure arrondie + label, compteur masque (bruit), couleurs
     # accordees au theme (bleu #89b4fa = chrome/input, violet 141 reserve aux
     # vaults Obsidian dans les labels de lignes). gutter:-1 = pas de colonne fantome.
     $fzfArgs = @(
         '--ansi', '--delimiter', "`t", '--with-nth=3',
-        '--layout=reverse', '--no-multi',
+        '--layout=reverse', '--no-multi', '--disabled', '--track', '--id-nth=2',
         '--border=rounded',
         '--input-border=rounded', '--ghost', $fzfGhost,
         '--padding=0,1', '--info=hidden', '--no-scrollbar', '--scrollbar', '',
         '--pointer', '', '--marker', '', '--ellipsis', $Ellipsis,
-        '--color=bg:-1,bg+:-1,current-bg:-1,selected-bg:-1,fg:#cdd6f4,fg+:#cdd6f4,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1',
+        '--color=bg:-1,bg+:#202942,current-bg:#202942,selected-bg:#202942,fg:#bac2de,fg+:#89b4fa,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1',
         '--prompt', $fzfPrompt,
         '--header', $hdrMin,
         '--expect=ctrl-n,ctrl-x,ctrl-r',
         '--bind', "load:pos($cursor0)",
+        '--bind', "change:reload($filterCmd)",
         '--bind', "down:transform:$downBatch",
         '--bind', "up:transform:$upBatch",
         '--bind', "focus:transform:$focusBatch",
@@ -556,6 +658,7 @@ if ($Pick) {
     }
 
     $out = @($menu | & fzf @fzfArgs)
+    Remove-Item $rowsPath, $filterPath -Force -ErrorAction SilentlyContinue
     if ($LASTEXITCODE -ne 0 -and $out.Count -eq 0) { exit 0 }   # Esc / Ctrl-C (130) = annulation propre
     $key    = if ($out.Count -ge 1) { $out[0] } else { '' }
     $choice = if ($out.Count -ge 2) { $out[1] } else { '' }

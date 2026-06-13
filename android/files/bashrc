@@ -348,12 +348,13 @@ _pc_pick_native() {
   _pc_require_win_user || return 1
   command -v fzf >/dev/null 2>&1 || { echo "install fzf first: pkg install fzf" >&2; return 1; }
   local sessionizer_win="${PC_SESSIONIZER_WIN:-C:\\dev\\dev-environment\\claude-code\\windows-sessionizer\\sessionizer.ps1}"
-  local rows out key choice kind name cursor0 seps refresh_script rows_cache listen_sock pos_flag
+  local rows out key choice kind name cursor0 seps refresh_script filter_script rows_cache listen_sock pos_flag
   rows=$(_pc_ssh_win "lister le sessionizer du PC" \
     "pwsh -NoProfile -NoLogo -ExecutionPolicy Bypass -File \"$sessionizer_win\" -List -View \"$view\"") || return $?
   [ -n "$rows" ] || { echo "sessionizer PC vide: aucun projet, vault ou session active trouve" >&2; return 1; }
   rows_cache="$(mktemp "${TMPDIR:-/tmp}/pc-sessionizer-rows.XXXXXX")" || return 1
   refresh_script="$(mktemp "${TMPDIR:-/tmp}/pc-sessionizer-refresh.XXXXXX")" || { rm -f "$rows_cache"; return 1; }
+  filter_script="$(mktemp "${TMPDIR:-/tmp}/pc-sessionizer-filter.XXXXXX")" || { rm -f "$rows_cache" "$refresh_script"; return 1; }
   listen_sock="${TMPDIR:-/tmp}/pc-sessionizer-fzf.$$.sock"
   printf '%s\n' "$rows" > "$rows_cache"
   {
@@ -373,6 +374,15 @@ _pc_pick_native() {
     printf '%s\n' 'cat "$rows_cache" 2>/dev/null'
   } > "$refresh_script"
   chmod 700 "$refresh_script"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'set -u'
+    printf 'rows_cache=%q\n' "$rows_cache"
+    printf '%s\n' 'q="${1:-}"'
+    printf '%s\n' 'if [ -z "$q" ]; then cat "$rows_cache" 2>/dev/null; exit 0; fi'
+    printf '%s\n' 'awk -F '\''\t'\'' -v q="$q" '\''function fuzzy(needle, haystack, i, j, c) { needle=tolower(needle); haystack=tolower(haystack); j=1; for (i=1; i<=length(needle); i++) { c=substr(needle,i,1); while (j<=length(haystack) && substr(haystack,j,1)!=c) j++; if (j>length(haystack)) return 0; j++; } return 1 } BEGIN { n=split(q, terms, /[[:space:]]+/) } $1 != "sep" { ok=1; exact=1; key=tolower($4); for (i=1; i<=n; i++) if (terms[i] != "") { term=tolower(terms[i]); if (index(key, term) == 0) exact=0; if (!fuzzy(term, key)) { ok=0; break } } if (ok) printf "%d\t%09d\t%s\n", exact ? 0 : 1, NR, $0 }'\'' "$rows_cache" 2>/dev/null | sort -n -k1,1 -k2,2 | cut -f3-'
+  } > "$filter_script"
+  chmod 700 "$filter_script"
   pos_flag="${TMPDIR:-/tmp}/pc-sessionizer-pos.$$"
   while true; do
     # fzf starts on the first real item, not on decorative section titles.
@@ -386,17 +396,18 @@ _pc_pick_native() {
     seps=$(printf '%s\n' "$rows" | awk -F '\t' '$1 == "sep" { printf " %d", NR }')
     out=$(printf '%s\n' "$rows" | fzf \
       --ansi --delimiter=$'\t' --with-nth=3 --layout=reverse --no-multi \
-      --track --id-nth=2 \
+      --disabled --track --id-nth=2 \
       --border=rounded \
       --input-border=rounded --ghost='Search...' \
       --padding=0,1 --info=hidden --no-scrollbar --scrollbar='' --pointer='' --marker='' --ellipsis='…' \
-      --color=bg:-1,bg+:-1,current-bg:-1,selected-bg:-1,fg:#cdd6f4,fg+:#cdd6f4,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1 \
+      --color=bg:-1,bg+:#202942,current-bg:#202942,selected-bg:#202942,fg:#bac2de,fg+:#89b4fa,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1 \
       --prompt="$prompt" --header='Enter open · Ctrl+N new · Ctrl+R refresh · Esc cancel' \
       --expect=ctrl-n \
       --bind "load:transform:[ -e '$pos_flag' ] || { touch '$pos_flag'; echo 'pos($cursor0)'; }" \
-      --bind "ctrl-r:reload($refresh_script)" \
-      --bind "down:transform:[ -z '{q}' ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac" \
-      --bind "up:transform:[ -z '{q}' ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac" \
+      --bind "ctrl-r:reload($refresh_script >/dev/null; $filter_script {q})" \
+      --bind "change:reload($filter_script {q})" \
+      --bind "down:transform:[ -z '{q}' ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); a=down; while case \" $seps \" in *\" \$n \"*) true;; *) false;; esac; do a=\"\$a+down\"; n=\$((n+1)); done; echo \"\$a\"" \
+      --bind "up:transform:[ -z '{q}' ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); a=up; while case \" $seps \" in *\" \$p \"*) true;; *) false;; esac; do [ \$p -le 1 ] && { echo ignore; exit 0; }; a=\"\$a+up\"; p=\$((p-1)); done; echo \"\$a\"" \
       --bind "focus:transform:case \"{1}\" in sep) echo down;; *) echo ignore;; esac" \
       --bind "enter:transform:case \"{1}\" in sep) echo down;; *) echo accept;; esac" \
       --bind "left-click:transform:case \"{1}\" in sep) echo down;; *) echo ignore;; esac" \
@@ -404,23 +415,23 @@ _pc_pick_native() {
     local fzf_rc=$?
     rm -f "$listen_sock"
     rows="$(cat "$rows_cache" 2>/dev/null || printf '%s\n' "$rows")"
-    [ "$fzf_rc" -ne 0 ] && { rm -f "$refresh_script" "$rows_cache" "$pos_flag"; return 0; }
+    [ "$fzf_rc" -ne 0 ] && { rm -f "$refresh_script" "$filter_script" "$rows_cache" "$pos_flag"; return 0; }
     key=$(printf '%s\n' "$out" | sed -n '1p')
     choice=$(printf '%s\n' "$out" | sed -n '2p')
     if [ "$key" = "ctrl-n" ]; then
       printf 'Session name: ' >&2
       IFS= read -r name
       [ -n "$name" ] && _pc_open_native_session "$name" new
-      rm -f "$refresh_script" "$rows_cache" "$pos_flag"
+      rm -f "$refresh_script" "$filter_script" "$rows_cache" "$pos_flag"
       return $?
     fi
-    [ -n "$choice" ] || { rm -f "$refresh_script" "$rows_cache" "$pos_flag"; return 0; }
+    [ -n "$choice" ] || { rm -f "$refresh_script" "$filter_script" "$rows_cache" "$pos_flag"; return 0; }
     kind=$(printf '%s' "$choice" | cut -f1)
     name=$(printf '%s' "$choice" | cut -f2)
     [ "$kind" = "sep" ] && continue
     case "$kind" in
-      active|project|vault) _pc_open_native_session "$name" "$kind"; local open_rc=$?; rm -f "$refresh_script" "$rows_cache" "$pos_flag"; return "$open_rc" ;;
-      *) echo "sessionizer: choix inconnu: $kind" >&2; rm -f "$refresh_script" "$rows_cache" "$pos_flag"; return 1 ;;
+      active|project|vault) _pc_open_native_session "$name" "$kind"; local open_rc=$?; rm -f "$refresh_script" "$filter_script" "$rows_cache" "$pos_flag"; return "$open_rc" ;;
+      *) echo "sessionizer: choix inconnu: $kind" >&2; rm -f "$refresh_script" "$filter_script" "$rows_cache" "$pos_flag"; return 1 ;;
     esac
   done
 }
