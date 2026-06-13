@@ -387,7 +387,7 @@ _pc_pick_native() {
     out=$(printf '%s\n' "$rows" | fzf \
       --ansi --delimiter=$'\t' --with-nth=3 --layout=reverse --no-multi \
       --track --id-nth=2 \
-      --border=rounded --border-label=' ◆ Sessionizer ' --border-label-pos=3 \
+      --border=rounded --border-label=' 🖥️ Sessionizer ' --border-label-pos=3 \
       --padding=0,1 --info=hidden --ellipsis='…' \
       --color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,label:117,gutter:-1 \
       --prompt="$prompt" --header='Enter open · Ctrl+N new · Ctrl+R refresh · Esc cancel' \

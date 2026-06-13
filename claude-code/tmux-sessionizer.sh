@@ -245,9 +245,9 @@ else
   out="$(build_menu | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
-      --border=rounded \
+      --border=rounded --border-label=' 🖥️ Sessionizer ' --border-label-pos=3 \
       --padding=0,1 --info=hidden --ellipsis='…' \
-      --color=pointer:117 \
+      --color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,label:117,gutter:-1 \
       --prompt='🔍 Search ❯ ' \
       --header="$hdr_min" \
       --expect=ctrl-n,ctrl-x,ctrl-r \
