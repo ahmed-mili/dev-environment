@@ -312,6 +312,10 @@ $e = [char]27
 $G = "$e[32m"; $D = "$e[90m"; $R = "$e[0m"; $M = "$e[38;5;141m"   # M = violet (vaults)
 $Y = "$e[33m"                                                     # Y = jaune (tel/web)
 $T = [char]9
+$BulletOn  = [char]0x25CF
+$BulletOff = [char]0x25CB
+$Diamond   = [char]0x25C6
+$Rule      = ([string][char]0x2500) * 6
 
 # Ligne menu d'une session active : verte si joignable d'ici, jaune + suffixe
 # "(tel/web)" si elle vit dans une autre logon session (attach impossible).
@@ -320,36 +324,36 @@ function Get-ActiveLine {
     param([string]$Name)
     $disp = ConvertTo-ArabicDisplay $Name
     if ($JoinableSessions.Contains($Name)) {
-        return "active$T$Name$T$G●$R $disp  $G(active)$R"
+        return "active$T$Name$T$G$BulletOn$R $disp  $G(active)$R"
     }
-    return "active$T$Name$T$Y●$R $disp  $Y(active - tel/web)$R"
+    return "active$T$Name$T$Y$BulletOn$R $disp  $Y(active - tel/web)$R"
 }
 
 function Build-Menu {
     $lines = [System.Collections.Generic.List[string]]::new()
     if ($orphans.Count) {
-        $lines.Add("sep$T$T$D──────  $R◆ Sessions$D  ──────$R")
+        $lines.Add("sep$T$T$D$Rule  $R$Diamond Sessions$D  $Rule$R")
         foreach ($s in $orphans) {
             $lines.Add((Get-ActiveLine $s))
         }
     }
     if ($projects.Count) {
-        $lines.Add("sep$T$T$D──────  $R◆ Projects$D  ──────$R")
+        $lines.Add("sep$T$T$D$Rule  $R$Diamond Projects$D  $Rule$R")
         foreach ($p in $projects) {
             if ($activesCanon -contains $p) {
                 $lines.Add((Get-ActiveLine (Get-ActualName $p)))
             } else {
-                $lines.Add("project$T$p$T$D○$R $(ConvertTo-ArabicDisplay $p)")
+                $lines.Add("project$T$p$T$D$BulletOff$R $(ConvertTo-ArabicDisplay $p)")
             }
         }
     }
     if ($vaults.Count) {
-        $lines.Add("sep$T$T$D──────  $M◆ Obsidian Vaults$D  ──────$R")
+        $lines.Add("sep$T$T$D$Rule  $M$Diamond Obsidian Vaults$D  $Rule$R")
         foreach ($v in $vaults) {
             if ($activesCanon -contains $v) {
                 $lines.Add((Get-ActiveLine (Get-ActualName $v)))
             } else {
-                $lines.Add("vault$T$v$T$M○$R $(ConvertTo-ArabicDisplay $v)")
+                $lines.Add("vault$T$v$T$M$BulletOff$R $(ConvertTo-ArabicDisplay $v)")
             }
         }
     }
@@ -480,7 +484,7 @@ if ($Pick) {
         return $expr
     }
 
-    # Garde « filtre tape » : {q} est substitue PAR FZF avec quotes (query vide -> "").
+    # Garde "filtre tape" : {q} est substitue PAR FZF avec quotes (query vide -> "").
     # Une fois filtree, les positions absolues ne veulent plus rien dire -> action de base.
     $downBatch  = "if {q}==`"`" ($(New-PosBind -Positions @($seps | ForEach-Object { $_ - 1 }) -Action 'down+down' -Default 'down')) else (echo down)"
     $upPositions = @($seps | ForEach-Object { $_ + 1 })
@@ -504,29 +508,32 @@ if ($Pick) {
     }
 
     # Aide toggleable Ctrl+G. ASCII PUR : ces echo passent par cmd (codepage OEM),
-    # tout glyphe Unicode y devient du mojibake (piege n°3). L'etat min/full est
+    # tout glyphe Unicode y devient du mojibake (piege no 3). L'etat min/full est
     # porte par l'existence d'un fichier temoin.
     $hstate = Join-Path $env:TEMP 'pc-sessionizer-hdr-full'
     Remove-Item $hstate -Force -ErrorAction SilentlyContinue
     $ctrlGBatch = "if exist `"$hstate`" (del `"$hstate`" & echo $hdrMin) else (type nul > `"$hstate`" & echo $hdrFull)"
 
-    # Prompt : loupe + "Search" + chevron. Les glyphes sont construits par code
-    # Unicode pour garder le fichier .ps1 ASCII-only (regle projet).
-    $SearchIcon = [System.Text.Encoding]::UTF8.GetString([byte[]]@(0xF0, 0x9F, 0x94, 0x8D))
+    # Input : petite loupe + ghost text "Search..." dans une vraie bordure fzf.
+    # Les glyphes sont construits par code Unicode pour garder le fichier .ps1
+    # ASCII-only (regle projet).
+    $SearchIcon = [char]0x2315
     $WindowIcon = [System.Text.Encoding]::UTF8.GetString([byte[]]@(0xF0, 0x9F, 0x96, 0xA5))
-    $Chevron    = [char]0x276F
-    $fzfPrompt  = "$SearchIcon Search $Chevron "
+    $fzfPrompt  = "$SearchIcon "
     $fzfLabel   = " $WindowIcon Sessionizer "
+    $fzfGhost   = 'Search...'
+    $Ellipsis   = [char]0x2026
 
     # Habillage : bordure arrondie + label, compteur masque (bruit), couleurs
-    # accordees au theme (bleu 117 = chrome/prompt, violet 141 reserve aux
+    # accordees au theme (bleu 117 = chrome/input, violet 141 reserve aux
     # vaults Obsidian dans les labels de lignes). gutter:-1 = pas de colonne fantome.
     $fzfArgs = @(
         '--ansi', '--delimiter', "`t", '--with-nth=3',
         '--layout=reverse', '--no-multi',
-        '--border=rounded', '--border-label', $fzfLabel, '--border-label-pos=3,
-        '--padding=0,1', '--info=hidden', '--ellipsis=…',
-        '--color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,label:117,gutter:-1',
+        '--border=rounded', '--border-label', $fzfLabel, '--border-label-pos=3',
+        '--input-border=rounded', '--ghost', $fzfGhost,
+        '--padding=0,1', '--info=hidden', '--ellipsis', $Ellipsis,
+        '--color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:245,query:255,ghost:245,border:240,input-border:117,label:117,gutter:-1',
         '--prompt', $fzfPrompt,
         '--header', $hdrMin,
         '--expect=ctrl-n,ctrl-x,ctrl-r',
@@ -548,7 +555,7 @@ if ($Pick) {
 }
 
 # --- Meta-actions (--expect) sur une session ACTIVE : ^X kill, ^R rename ----------
-# Parite .sh : kill != delete (une session projet/vault killee reste listee ○ ;
+# Parite .sh : kill != delete (une session projet/vault killee reste listee o ;
 # une session jetable disparait). Rename d'une session detachee : impossible en
 # CLI zellij -> no-op documente. Apres l'action on REOUVRE le menu (recursion).
 function Restart-Menu {

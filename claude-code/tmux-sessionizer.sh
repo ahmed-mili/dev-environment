@@ -246,9 +246,10 @@ else
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
       --border=rounded --border-label=' 🖥️ Sessionizer ' --border-label-pos=3 \
+      --input-border=rounded --ghost='Search...' \
       --padding=0,1 --info=hidden --ellipsis='…' \
-      --color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,label:117,gutter:-1 \
-      --prompt='🔍 Search ❯ ' \
+      --color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:245,query:255,ghost:245,border:240,input-border:117,label:117,gutter:-1 \
+      --prompt='⌕ ' \
       --header="$hdr_min" \
       --expect=ctrl-n,ctrl-x,ctrl-r \
       "${nav[@]}" \
