@@ -316,6 +316,8 @@ $BulletOn  = [char]0x25CF
 $BulletOff = [char]0x25CB
 $Diamond   = [char]0x25C6
 $Rule      = ([string][char]0x2500) * 6
+$TreeLine  = [char]0x258C
+$ItemPrefix = "  $TreeLine "
 
 # Ligne menu d'une session active : verte si joignable d'ici, jaune + suffixe
 # "(tel/web)" si elle vit dans une autre logon session (attach impossible).
@@ -324,36 +326,36 @@ function Get-ActiveLine {
     param([string]$Name)
     $disp = ConvertTo-ArabicDisplay $Name
     if ($JoinableSessions.Contains($Name)) {
-        return "active$T$Name$T$G$BulletOn$R $disp  $G(active)$R"
+        return "active$T$Name$T$ItemPrefix$G$BulletOn$R $disp  $G(active)$R"
     }
-    return "active$T$Name$T$Y$BulletOn$R $disp  $Y(active - tel/web)$R"
+    return "active$T$Name$T$ItemPrefix$Y$BulletOn$R $disp  $Y(active - tel/web)$R"
 }
 
 function Build-Menu {
     $lines = [System.Collections.Generic.List[string]]::new()
     if ($orphans.Count) {
-        $lines.Add("sep$T$T$D$Rule  $R$Diamond Sessions$D  $Rule$R")
+        $lines.Add("sep${T}__sep_sessions$T$D$Rule  $R$Diamond Sessions$D  $Rule$R")
         foreach ($s in $orphans) {
             $lines.Add((Get-ActiveLine $s))
         }
     }
     if ($projects.Count) {
-        $lines.Add("sep$T$T$D$Rule  $R$Diamond Projects$D  $Rule$R")
+        $lines.Add("sep${T}__sep_projects$T$D$Rule  $R$Diamond Projects$D  $Rule$R")
         foreach ($p in $projects) {
             if ($activesCanon -contains $p) {
                 $lines.Add((Get-ActiveLine (Get-ActualName $p)))
             } else {
-                $lines.Add("project$T$p$T$D$BulletOff$R $(ConvertTo-ArabicDisplay $p)")
+                $lines.Add("project$T$p$T$ItemPrefix$D$BulletOff$R $(ConvertTo-ArabicDisplay $p)")
             }
         }
     }
     if ($vaults.Count) {
-        $lines.Add("sep$T$T$D$Rule  $M$Diamond Obsidian Vaults$D  $Rule$R")
+        $lines.Add("sep${T}__sep_vaults$T$D$Rule  $M$Diamond Obsidian Vaults$D  $Rule$R")
         foreach ($v in $vaults) {
             if ($activesCanon -contains $v) {
                 $lines.Add((Get-ActiveLine (Get-ActualName $v)))
             } else {
-                $lines.Add("vault$T$v$T$M$BulletOff$R $(ConvertTo-ArabicDisplay $v)")
+                $lines.Add("vault$T$v$T$ItemPrefix$M$BulletOff$R $(ConvertTo-ArabicDisplay $v)")
             }
         }
     }
@@ -494,8 +496,12 @@ if ($Pick) {
         $upInner = "if `"%FZF_POS%`"==`"2`" (echo ignore) else ($upInner)"
     }
     $upBatch    = "if {q}==`"`" ($upInner) else (echo up)"
-    $clickBatch = "if not {q}==`"`" (echo ignore) else ($(New-PosBind -Positions $seps -Action 'down' -Default 'ignore'))"
-    $dblBatch   = "if not {q}==`"`" (echo accept) else ($(New-PosBind -Positions $seps -Action 'down' -Default 'accept'))"
+    # Les titres restent visibles pendant le filtre, donc on les ejecte aussi via
+    # le type TSV courant ({1}) quand les positions absolues ne sont plus fiables.
+    $focusBatch = 'if "{1}"=="sep" (echo down) else (echo ignore)'
+    $enterBatch = 'if "{1}"=="sep" (echo down) else (echo accept)'
+    $clickBatch = 'if "{1}"=="sep" (echo down) else (echo ignore)'
+    $dblBatch   = $enterBatch
 
     # Tab toggle projets <-> vaults (uniquement si les DEUX sections existent).
     # IMPORTANT : calcule AVANT $ctrlGBatch, qui fige $hdrFull dans sa chaine batch.
@@ -518,28 +524,29 @@ if ($Pick) {
     # Les glyphes sont construits par code Unicode pour garder le fichier .ps1
     # ASCII-only (regle projet).
     $SearchIcon = [char]0x2315
-    $WindowIcon = [System.Text.Encoding]::UTF8.GetString([byte[]]@(0xF0, 0x9F, 0x96, 0xA5))
     $fzfPrompt  = "$SearchIcon "
-    $fzfLabel   = " $WindowIcon Sessionizer "
     $fzfGhost   = 'Search...'
     $Ellipsis   = [char]0x2026
 
     # Habillage : bordure arrondie + label, compteur masque (bruit), couleurs
-    # accordees au theme (bleu #78aaff = chrome/input, violet 141 reserve aux
+    # accordees au theme (bleu #89b4fa = chrome/input, violet 141 reserve aux
     # vaults Obsidian dans les labels de lignes). gutter:-1 = pas de colonne fantome.
     $fzfArgs = @(
         '--ansi', '--delimiter', "`t", '--with-nth=3',
         '--layout=reverse', '--no-multi',
-        '--border=rounded', '--border-label', $fzfLabel, '--border-label-pos=3',
+        '--border=rounded',
         '--input-border=rounded', '--ghost', $fzfGhost,
-        '--padding=0,1', '--info=hidden', '--ellipsis', $Ellipsis,
-        '--color=pointer:#78aaff,bg+:237,fg+:255,hl:#78aaff,hl+:#78aaff,header:245,prompt:245,query:255,ghost:245,border:240,input-border:#78aaff,label:#78aaff,gutter:-1',
+        '--padding=0,1', '--info=hidden', '--no-scrollbar', '--scrollbar', '',
+        '--pointer', '', '--marker', '', '--ellipsis', $Ellipsis,
+        '--color=bg:-1,bg+:-1,current-bg:-1,selected-bg:-1,fg:#cdd6f4,fg+:#cdd6f4,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1',
         '--prompt', $fzfPrompt,
         '--header', $hdrMin,
         '--expect=ctrl-n,ctrl-x,ctrl-r',
         '--bind', "load:pos($cursor0)",
         '--bind', "down:transform:$downBatch",
         '--bind', "up:transform:$upBatch",
+        '--bind', "focus:transform:$focusBatch",
+        '--bind', "enter:transform:$enterBatch",
         '--bind', "left-click:transform:$clickBatch",
         '--bind', "double-click:transform:$dblBatch",
         '--bind', "ctrl-g:transform-header:$ctrlGBatch"

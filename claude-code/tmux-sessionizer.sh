@@ -101,6 +101,7 @@ esac
 
 # ANSI colors (interpreted by fzf --ansi)
 G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[38;5;141m'   # M = violet (vaults)
+ITEM_PREFIX='  ▌ '
 
 # Each project/vault stays in ITS place within its section; if it has an active
 # session of the same name we mark it ● (active) instead of moving it to the top.
@@ -125,31 +126,31 @@ build_menu() {
   # reopens the menu (dispatch 'sep') -> not selectable.
   # 1) off-category sessions (neither ~/dev project nor vault) under a « ◆ Sessions » title.
   if (( n_orphan )); then
-    printf 'sep\t\t%s──────  %s◆ Sessions%s  ──────%s\n' "$D" "$R" "$D" "$R"
+    printf 'sep\t__sep_sessions\t%s──────  %s◆ Sessions%s  ──────%s\n' "$D" "$R" "$D" "$R"
     for s in "${orphans[@]}"; do
-      printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$s" "$G" "$R" "$s" "$G" "$R"
+      printf 'active\t%s\t%s%s●%s %s  %s(active)%s\n' "$s" "$ITEM_PREFIX" "$G" "$R" "$s" "$G" "$R"
     done
   fi
   # 2) ~/dev projects under « ◆ Projects » (light text on grey dashes); each in ITS
   #    place; active -> ● (active), otherwise ○ grey.
   if (( n_proj )); then
-    printf 'sep\t\t%s──────  %s◆ Projects%s  ──────%s\n' "$D" "$R" "$D" "$R"
+    printf 'sep\t__sep_projects\t%s──────  %s◆ Projects%s  ──────%s\n' "$D" "$R" "$D" "$R"
     for p in "${projects[@]}"; do
       if is_active "$p"; then
-        printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$p" "$G" "$R" "$p" "$G" "$R"
+        printf 'active\t%s\t%s%s●%s %s  %s(active)%s\n' "$p" "$ITEM_PREFIX" "$G" "$R" "$p" "$G" "$R"
       else
-        printf 'project\t%s\t%s○%s %s\n' "$p" "$D" "$R" "$p"
+        printf 'project\t%s\t%s%s○%s %s\n' "$p" "$ITEM_PREFIX" "$D" "$R" "$p"
       fi
     done
   fi
   # 3) Obsidian vaults under « ◆ Obsidian Vaults » (violet); same active rule.
   if (( n_vault )); then
-    printf 'sep\t\t%s──────  %s◆ Obsidian Vaults%s  ──────%s\n' "$D" "$M" "$D" "$R"
+    printf 'sep\t__sep_vaults\t%s──────  %s◆ Obsidian Vaults%s  ──────%s\n' "$D" "$M" "$D" "$R"
     for v in "${vaults[@]}"; do
       if is_active "$v"; then
-        printf 'active\t%s\t%s●%s %s  %s(active)%s\n' "$v" "$G" "$R" "$v" "$G" "$R"
+        printf 'active\t%s\t%s%s●%s %s  %s(active)%s\n' "$v" "$ITEM_PREFIX" "$G" "$R" "$v" "$G" "$R"
       else
-        printf 'vault\t%s\t%s○%s %s\n' "$v" "$M" "$R" "$v"
+        printf 'vault\t%s\t%s%s○%s %s\n' "$v" "$ITEM_PREFIX" "$M" "$R" "$v"
       fi
     done
   fi
@@ -214,9 +215,12 @@ else
       #    never opens: so NO mouse action ever leaves the cursor on a title (the 2nd
       #    click re-vsets onto the title, the down re-ejects it).
       # Binding left-click does NOT break the double-click: distinct paths (7833 vs 7842).
-      # Filter typed ({q} non-empty): titles filtered out of the list → no position test.
-      --bind "left-click:transform:[ -n '{q}' ] && echo ignore || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo ignore;; esac; }"
-      --bind "double-click:transform:[ -n '{q}' ] && echo accept || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo accept;; esac; }"
+      # Filter typed ({q} non-empty): positions are no longer stable, so we use
+      # the displayed row's TSV type ({1}) to keep titles non-selectable.
+      --bind "focus:transform:case \"{1}\" in sep) echo down;; *) echo ignore;; esac"
+      --bind "enter:transform:case \"{1}\" in sep) echo down;; *) echo accept;; esac"
+      --bind "left-click:transform:case \"{1}\" in sep) echo down;; *) echo ignore;; esac"
+      --bind "double-click:transform:case \"{1}\" in sep) echo down;; *) echo accept;; esac"
     )
     if (( n_proj && n_vault )); then
       nav+=( --bind "tab:transform:[ -n '{q}' ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
@@ -245,10 +249,10 @@ else
   out="$(build_menu | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
-      --border=rounded --border-label=' 🖥️ Sessionizer ' --border-label-pos=3 \
+      --border=rounded \
       --input-border=rounded --ghost='Search...' \
-      --padding=0,1 --info=hidden --ellipsis='…' \
-      --color=pointer:#78aaff,bg+:237,fg+:255,hl:#78aaff,hl+:#78aaff,header:245,prompt:245,query:255,ghost:245,border:240,input-border:#78aaff,label:#78aaff,gutter:-1 \
+      --padding=0,1 --info=hidden --no-scrollbar --scrollbar='' --pointer='' --marker='' --ellipsis='…' \
+      --color=bg:-1,bg+:-1,current-bg:-1,selected-bg:-1,fg:#cdd6f4,fg+:#cdd6f4,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1 \
       --prompt='⌕ ' \
       --header="$hdr_min" \
       --expect=ctrl-n,ctrl-x,ctrl-r \

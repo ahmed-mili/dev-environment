@@ -387,18 +387,20 @@ _pc_pick_native() {
     out=$(printf '%s\n' "$rows" | fzf \
       --ansi --delimiter=$'\t' --with-nth=3 --layout=reverse --no-multi \
       --track --id-nth=2 \
-      --border=rounded --border-label=' 🖥️ Sessionizer ' --border-label-pos=3 \
+      --border=rounded \
       --input-border=rounded --ghost='Search...' \
-      --padding=0,1 --info=hidden --ellipsis='…' \
-      --color=pointer:#78aaff,bg+:237,fg+:255,hl:#78aaff,hl+:#78aaff,header:245,prompt:245,query:255,ghost:245,border:240,input-border:#78aaff,label:#78aaff,gutter:-1 \
+      --padding=0,1 --info=hidden --no-scrollbar --scrollbar='' --pointer='' --marker='' --ellipsis='…' \
+      --color=bg:-1,bg+:-1,current-bg:-1,selected-bg:-1,fg:#cdd6f4,fg+:#cdd6f4,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1 \
       --prompt="$prompt" --header='Enter open · Ctrl+N new · Ctrl+R refresh · Esc cancel' \
       --expect=ctrl-n \
       --bind "load:transform:[ -e '$pos_flag' ] || { touch '$pos_flag'; echo 'pos($cursor0)'; }" \
       --bind "ctrl-r:reload($refresh_script)" \
       --bind "down:transform:[ -z '{q}' ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac" \
       --bind "up:transform:[ -z '{q}' ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac" \
-      --bind "left-click:transform:[ -n '{q}' ] && echo ignore || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo ignore;; esac; }" \
-      --bind "double-click:transform:[ -n '{q}' ] && echo accept || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo accept;; esac; }")
+      --bind "focus:transform:case \"{1}\" in sep) echo down;; *) echo ignore;; esac" \
+      --bind "enter:transform:case \"{1}\" in sep) echo down;; *) echo accept;; esac" \
+      --bind "left-click:transform:case \"{1}\" in sep) echo down;; *) echo ignore;; esac" \
+      --bind "double-click:transform:case \"{1}\" in sep) echo down;; *) echo accept;; esac")
     local fzf_rc=$?
     rm -f "$listen_sock"
     rows="$(cat "$rows_cache" 2>/dev/null || printf '%s\n' "$rows")"
