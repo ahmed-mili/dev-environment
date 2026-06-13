@@ -362,7 +362,36 @@ if (Test-Path $watcherSrc) {
 }
 
 # ---------------------------------------------------------------------------
-# 2c) Zellij web server -- sessions telephone natives bureau
+# 2c) Sessionizer natif (F2) + module de pre-shaping arabe
+# ---------------------------------------------------------------------------
+# Le menu fzf F2 (sessions zellij / projets / vaults) et son module de shaping
+# arabe (formes de presentation U+FExx pour les terminaux sans BiDi : WT,
+# Termux, Zellij). arabic-shaping.ps1 est aussi dot-source par le profil PS7
+# (prompt + hook zellij). Source dans claude-code/ (machinerie Claude), pas dans
+# windows/files/ -- deploye depuis un clone local ; en mode one-liner (irm) on
+# skip avec une note (le keybind F2 et le profil degradent : F2 introuvable,
+# arabe affiche brut via le fallback pass-through du profil).
+
+Write-Step 'Sessionizer + module arabic-shaping (~/.local/bin)'
+$sessionizerDir = Join-Path $PSScriptRoot '..\claude-code\windows-sessionizer'
+$sessionizerSrc = Join-Path $sessionizerDir 'sessionizer.ps1'
+$arabicSrc      = Join-Path $sessionizerDir 'arabic-shaping.ps1'
+if ((Test-Path $sessionizerSrc) -and (Test-Path $arabicSrc)) {
+    foreach ($name in @('sessionizer.ps1', 'arabic-shaping.ps1')) {
+        $src  = Join-Path $sessionizerDir $name
+        $dest = Join-Path $env:USERPROFILE ".local\bin\$name"
+        # BOM : ces scripts tournent sous pwsh 7 (UTF-8) ; le sessionizer porte des
+        # glyphes non-ASCII (puces du menu), le BOM est une defense gratuite.
+        Write-Utf8File -Path $dest -Content (Read-Utf8File $src) -WithBom $true
+        Unblock-File $dest
+        Write-Ok (Short-Path $dest)
+    }
+} else {
+    Write-Note 'source absente (install one-liner sans clone) -- deployer depuis un clone : claude-code/windows-sessionizer/{sessionizer,arabic-shaping}.ps1 -> ~/.local/bin/'
+}
+
+# ---------------------------------------------------------------------------
+# 2d) Zellij web server -- sessions telephone natives bureau
 # ---------------------------------------------------------------------------
 # La tache tourne AU LOGON dans la session interactive : les sessions zellij
 # creees via le web server (port 8082) naissent donc dans cette logon session
