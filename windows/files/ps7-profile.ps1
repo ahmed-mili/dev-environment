@@ -15,6 +15,27 @@ function isadmin {
 
 function dev { Set-Location C:\dev }
 
+# Pre-shaping arabe (terminaux sans BiDi : WT/Zellij). Source canonique partagee
+# avec le sessionizer : ~/.local/bin/arabic-shaping.ps1. Expose
+# ConvertTo-ArabicDisplay (idempotent, identite sur l'ASCII). Fallback
+# pass-through si le module n'est pas (encore) deploye : l'arabe s'affiche brut,
+# jamais d'erreur.
+$script:ArabicShaping = "$env:USERPROFILE\.local\bin\arabic-shaping.ps1"
+if (Test-Path -LiteralPath $script:ArabicShaping) {
+    . $script:ArabicShaping
+} elseif (-not (Get-Command ConvertTo-ArabicDisplay -ErrorAction SilentlyContinue)) {
+    function ConvertTo-ArabicDisplay { param([string]$Text) $Text }
+}
+
+# Prompt : pre-shape les runs arabes du chemin AFFICHE (WT sans BiDi -> un dossier
+# arabe sortirait inverse/deconnecte). Le repertoire courant REEL garde son nom
+# brut (git, Tab-completion, outils intacts) ; seul l'affichage est transforme.
+# Format = prompt pwsh par defaut.
+function prompt {
+    $loc = $executionContext.SessionState.Path.CurrentLocation.Path
+    "PS $(ConvertTo-ArabicDisplay $loc)$('>' * ($nestedPromptLevel + 1)) "
+}
+
 # Zellij web/direct sessions are created by session name. If the session name
 # matches a known Windows project/vault, land in that folder automatically.
 # Machine-specific roots can override PC_DEV_DIR / PC_VAULTS_WIN locally.
@@ -22,12 +43,43 @@ if ($env:ZELLIJ_SESSION_NAME) {
     try {
         $devRoot = if ($env:PC_DEV_DIR) { $env:PC_DEV_DIR } else { 'C:\dev' }
         $vaultRoot = if ($env:PC_VAULTS_WIN) { $env:PC_VAULTS_WIN } else { 'C:\obsidian-vaults' }
+        $landed = $false
         foreach ($root in @($devRoot, $vaultRoot)) {
             $candidate = Join-Path $root $env:ZELLIJ_SESSION_NAME
             if (Test-Path -LiteralPath $candidate) {
                 Set-Location -LiteralPath $candidate
+                $landed = $true
                 break
             }
+        }
+        # Session de vault arabe : le nom de session est PRE-SHAPE (U+FExx) et ne
+        # correspond pas au nom de dossier brut. On retrouve le dossier dont la
+        # forme pre-shapee egale le nom de session (comparaison en avant, jamais
+        # de deshaping). Le garde U+FE70-FEFF evite le scan disque pour l'ASCII.
+        if (-not $landed -and [bool]($env:ZELLIJ_SESSION_NAME.ToCharArray() | Where-Object { [int]$_ -ge 0xFE70 -and [int]$_ -le 0xFEFF })) {
+            foreach ($root in @($devRoot, $vaultRoot)) {
+                $hit = Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+                       Where-Object { (ConvertTo-ArabicDisplay $_.Name) -eq $env:ZELLIJ_SESSION_NAME } |
+                       Select-Object -First 1
+                if ($hit) { Set-Location -LiteralPath $hit.FullName; break }
+            }
+        }
+    } catch {}
+
+    # WT et Zellij n'appliquent pas le BiDi/shaping arabe : un nom de session
+    # arabe brut sort inverse et deconnecte dans le label "Zellij (nom)" de la
+    # tab-bar, le nom de tab, le titre d'onglet WT et `zellij ls`. On pre-shape
+    # tout ca avec le module partage (idempotent : si pas d'arabe, $disp == nom).
+    try {
+        $zellijName = $env:ZELLIJ_SESSION_NAME
+        $disp = ConvertTo-ArabicDisplay $zellijName
+        if ($disp -and ($disp -ne $zellijName)) {
+            # Renomme la SESSION (corrige le label "Zellij (nom)" et `zellij ls`),
+            # migre les sessions legacy creees en nom brut vers le pre-shape.
+            $null = & zellij action rename-session $disp 2>$null
+            # Nom de l'onglet zellij (fleche) + titre d'onglet WT (OSC 0).
+            $null = & zellij action rename-tab $disp 2>$null
+            [Console]::Write("$([char]27)]0;$disp$([char]7)")
         }
     } catch {}
 }

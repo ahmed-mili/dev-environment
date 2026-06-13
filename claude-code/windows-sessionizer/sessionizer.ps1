@@ -11,13 +11,18 @@
 #   -View all|dev|vaults : perimetre (defaut all)
 #   -Shape "texte"  : imprime le pre-shaping arabe du texte puis sort
 #                     (teste par test-arabic-display.ps1)
+#   -FakeActives "a;b" : hook de TEST -- court-circuite la detection live de
+#                     zellij (Get-ActiveSessions) avec une liste forcee de noms
+#                     de session joignables. Permet de tester la reconciliation
+#                     pre-shape <-> brut sans session zellij reelle.
 param(
     [switch]$List,
     [string]$Pick = '',
     [string]$Key = '',
     [switch]$DryRun,
     [ValidateSet('all','dev','vaults')][string]$View = 'all',
-    [string]$Shape = ''
+    [string]$Shape = '',
+    [string]$FakeActives = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -215,6 +220,12 @@ function Get-ZellijPipeSessions {
 }
 
 function Get-ActiveSessions {
+    # Hook de test : liste forcee, toutes joignables, sans appeler zellij.
+    if ($FakeActives) {
+        $forced = @($FakeActives -split ';' | Where-Object { $_ })
+        foreach ($n in $forced) { [void]$JoinableSessions.Add($n) }
+        return $forced
+    }
     foreach ($l in (& zellij ls -ns 2>$null)) {
         if ($l -and $l.Trim()) { [void]$JoinableSessions.Add($l.Trim()) }
     }
@@ -250,14 +261,49 @@ function Get-Vaults {
 
 $projects = Get-Projects
 $vaults   = Get-Vaults
+
+# --- Reconciliation nom-de-session zellij <-> nom de dossier --------------------
+# Les sessions de vaults arabes sont nommees en forme PRE-SHAPEE (U+FExx) pour
+# que zellij les affiche correctement partout sans BiDi : label "Zellij (nom)"
+# de la tab-bar, nom de tab, titre d'onglet WT, et sortie de `zellij ls`. Le
+# dossier sur disque, lui, garde son nom arabe BRUT (cle technique, auto-cd).
+# ConvertTo-ArabicDisplay est l'IDENTITE sur l'ASCII : projets et vaults latins
+# ne sont pas affectes. On ne deshape JAMAIS (transform inverse fragile) : on
+# compare toujours en avant via cette map pre-shape -> brut.
+$ShapedToRaw = @{}
+foreach ($n in (@($projects) + @($vaults))) { $ShapedToRaw[(ConvertTo-ArabicDisplay $n)] = $n }
+
+# Nom de dossier brut (cle de matching / dir) pour un nom de session zellij reel.
+function Get-CanonicalName([string]$Actual) {
+    if ($ShapedToRaw.ContainsKey($Actual)) { return $ShapedToRaw[$Actual] }
+    return $Actual
+}
+
 switch ($View) {
-    'dev'    { $vaults = @();   $actives = @(Get-ActiveSessions | Where-Object { $projects -contains $_ }) }
-    'vaults' { $projects = @(); $actives = @(Get-ActiveSessions | Where-Object { $vaults -contains $_ }) }
-    default  {                  $actives = Get-ActiveSessions }
+    'dev'    { $vaults = @();   $actives = @(Get-ActiveSessions | Where-Object { $projects -contains (Get-CanonicalName $_) }) }
+    'vaults' { $projects = @(); $actives = @(Get-ActiveSessions | Where-Object { $vaults   -contains (Get-CanonicalName $_) }) }
+    default  {                  $actives = @(Get-ActiveSessions) }
+}
+
+# Vue canonique (noms de dossier bruts) pour les tests d'appartenance ; $actives
+# garde les noms REELS de session zellij (pour attach/kill et l'affichage des
+# orphelins).
+$activesCanon = @($actives | ForEach-Object { Get-CanonicalName $_ })
+
+# Nom de session zellij REEL pour un dossier $Raw : la forme pre-shapee si une
+# telle session tourne deja, sinon le nom brut (session legacy brute, ASCII, ou
+# session a CREER -- celles-ci sont creees pre-shapees par les actions plus bas).
+# Evite de creer un DOUBLON quand une session legacy brute existe encore.
+function Get-ActualName([string]$Raw) {
+    $shaped = ConvertTo-ArabicDisplay $Raw
+    if ($actives -contains $shaped) { return $shaped }
+    return $Raw
 }
 
 # Orphelins = sessions actives qui ne sont NI un projet NI un vault (creees via Ctrl-N).
-$orphans = @($actives | Where-Object { ($projects -notcontains $_) -and ($vaults -notcontains $_) })
+# Comparaison sur le nom CANONIQUE : une session de vault arabe pre-shapee se
+# resout vers son dossier brut connu -> ce n'est donc PAS un orphelin.
+$orphans = @($actives | Where-Object { ($projects -notcontains (Get-CanonicalName $_)) -and ($vaults -notcontains (Get-CanonicalName $_)) })
 
 # --- Menu (TSV: type <TAB> name <TAB> label affiche) ----------------------------
 # type 'sep' = titre decoratif : les fleches le sautent (binds Task 4), un clic
@@ -290,8 +336,8 @@ function Build-Menu {
     if ($projects.Count) {
         $lines.Add("sep$T$T$D──────  $R◆ Projects$D  ──────$R")
         foreach ($p in $projects) {
-            if ($actives -contains $p) {
-                $lines.Add((Get-ActiveLine $p))
+            if ($activesCanon -contains $p) {
+                $lines.Add((Get-ActiveLine (Get-ActualName $p)))
             } else {
                 $lines.Add("project$T$p$T$D○$R $(ConvertTo-ArabicDisplay $p)")
             }
@@ -300,8 +346,8 @@ function Build-Menu {
     if ($vaults.Count) {
         $lines.Add("sep$T$T$D──────  $M◆ Obsidian Vaults$D  ──────$R")
         foreach ($v in $vaults) {
-            if ($actives -contains $v) {
-                $lines.Add((Get-ActiveLine $v))
+            if ($activesCanon -contains $v) {
+                $lines.Add((Get-ActiveLine (Get-ActualName $v)))
             } else {
                 $lines.Add("vault$T$v$T$M○$R $(ConvertTo-ArabicDisplay $v)")
             }
@@ -345,7 +391,9 @@ function Invoke-Run {    # commande FINALE (equivalent run()/exec du .sh)
     exit $LASTEXITCODE
 }
 
-# Attache (ou cree) la session $Name avec $Dir pour cwd.
+# Attache (ou cree) la session $Name avec $Dir pour cwd. $Name est le nom zellij
+# FINAL : forme pre-shapee pour un vault arabe a creer, ou nom REEL d'une session
+# active (Get-ActualName). $Dir reste le chemin BRUT du dossier sur disque.
 function Open-Session {
     param([string]$Name, [string]$Dir)
     if ($InZellij) {
@@ -375,8 +423,11 @@ function Join-ActiveSession {
         [Console]::Error.WriteLine()
         Restart-Menu
     }
-    $dir = if ($vaults -contains $Name) { Join-Path $VaultsDir $Name }
-           elseif ($projects -contains $Name) { Join-Path $DevDir $Name }
+    # $Name est le nom REEL de session (pre-shape pour un vault arabe) : on le
+    # ramene au nom de dossier brut pour resoudre le cwd.
+    $canon = Get-CanonicalName $Name
+    $dir = if ($vaults -contains $canon) { Join-Path $VaultsDir $canon }
+           elseif ($projects -contains $canon) { Join-Path $DevDir $canon }
            else { $null }
     Open-Session -Name $Name -Dir $dir
 }
@@ -505,7 +556,7 @@ if ($key -eq 'ctrl-x') {
             $name = $f[1]
             if (-not $JoinableSessions.Contains($name)) {
                 [Console]::Error.Write("Kill '$name'? Session tel/web (autre logon session) - le kill peut echouer d'ici. [y/N] ")
-            } elseif (($projects -contains $name) -or ($vaults -contains $name)) {
+            } elseif (($projects -contains (Get-CanonicalName $name)) -or ($vaults -contains (Get-CanonicalName $name))) {
                 [Console]::Error.Write("Kill '$name'? Stays listed as o inactive. [y/N] ")
             } else {
                 [Console]::Error.Write("Kill '$name'? Disposable - disappears from the list. [y/N] ")
@@ -542,8 +593,8 @@ else {
 switch ($type) {
     'sep'     { if ($DryRun -or $Pick) { exit 0 }; & $PSCommandPath -View $View; exit $LASTEXITCODE }
     'active'  { Join-ActiveSession -Name $name }
-    'project' { Open-Session -Name $name -Dir (Join-Path $DevDir $name) }
-    'vault'   { Open-Session -Name $name -Dir (Join-Path $VaultsDir $name) }
+    'project' { Open-Session -Name (ConvertTo-ArabicDisplay $name) -Dir (Join-Path $DevDir $name) }
+    'vault'   { Open-Session -Name (ConvertTo-ArabicDisplay $name) -Dir (Join-Path $VaultsDir $name) }
     'new'     {
         if (-not $name) {
             [Console]::Error.Write('Session name: ')
@@ -552,7 +603,9 @@ switch ($type) {
         }
         $start = Join-Path $DevDir $name
         if (-not (Test-Path $start)) { $start = $HOME }
-        Open-Session -Name $name -Dir $start
+        # Nom tape par l'utilisateur : pre-shape si arabe (cree la session avec le
+        # nom affichable correct). $start garde le nom brut pour le dossier.
+        Open-Session -Name (ConvertTo-ArabicDisplay $name) -Dir $start
     }
     default   { Write-Error "unknown choice: $type"; exit 1 }
 }

@@ -96,6 +96,29 @@ Assert-Shape 'idempotence (deja shape)' `
     @(0xFEE1,0xFEFC,0xFEB3,0xFEF9,0xFE8D) `
     @(0xFEE1,0xFEFC,0xFEB3,0xFEF9,0xFE8D)
 
+# --- Module partage arabic-shaping.ps1 (dot-source, in-process) ----------------
+# Garde anti-desync : le module est EXTRAIT du sessionizer (meme algorithme). On
+# verifie qu'une fois dot-source il expose ConvertTo-ArabicDisplay et produit le
+# meme shaping. Valide aussi que le dot-source / scope marche (le profil pwsh en
+# depend pour le prompt et l'auto-cd).
+Write-Host 'module arabic-shaping.ps1 (in-process) :'
+. (Join-Path $PSScriptRoot 'arabic-shaping.ps1')
+function Assert-Mod([string]$Name, [int[]]$InCps, [int[]]$WantCps) {
+    $script:total++
+    $in   = -join ($InCps   | ForEach-Object { [char]$_ })
+    $want = -join ($WantCps | ForEach-Object { [char]$_ })
+    $got  = ConvertTo-ArabicDisplay $in
+    if ($got -ceq $want) { Write-Host "  ok   $Name" }
+    else {
+        $script:fails++; Write-Host "  FAIL $Name"
+        Write-Host "       want: $(Convert-ToHex $want)"
+        Write-Host "       got:  $(Convert-ToHex $got)"
+    }
+}
+Assert-Mod 'module al-islam'     @(0x0627,0x0644,0x0625,0x0633,0x0644,0x0627,0x0645) @(0xFEE1,0xFEFC,0xFEB3,0xFEF9,0xFE8D)
+Assert-Mod 'module marhaban'     @(0x0645,0x0631,0x062D,0x0628,0x0627)               @(0xFE8E,0xFE92,0xFEA3,0xFEAE,0xFEE3)
+Assert-Mod 'module idempotence'  @(0xFEE1,0xFEFC,0xFEB3,0xFEF9,0xFE8D)               @(0xFEE1,0xFEFC,0xFEB3,0xFEF9,0xFE8D)
+
 # --- Integration : -List ------------------------------------------------------
 # Le champ 2 (nom technique) reste BRUT, le champ 3 (label) est shape.
 Write-Host 'integration (-List) :'
@@ -115,6 +138,48 @@ if (-not $vaultRow) {
         $script:fails++
         Write-Host '  FAIL -List : label non shape ou nom brut fuite dans le label'
         Write-Host "       label: $(Convert-ToHex $label)"
+    }
+}
+
+# --- Integration : creation d'une session de vault arabe ----------------------
+# L'attach doit utiliser le nom PRE-SHAPE (zellij l'affiche correctement), le
+# repertoire de depart -d doit rester le nom BRUT (dossier reel sur disque).
+# Portable : -Pick bypasse le menu, pas besoin que le vault existe.
+Write-Host 'integration (creation -> attach pre-shape) :'
+$script:total++
+$dryCreate = & pwsh -NoProfile -ExecutionPolicy Bypass -File $sess -DryRun -Pick "vault`t$alislam`tx" -View vaults | Out-String
+$attachShaped = $dryCreate.Contains("attach -c $alislamShaped options")
+$attachRaw    = $dryCreate.Contains("attach -c $alislam options")
+$dirRaw       = $dryCreate.Contains("-d C:\obsidian-vaults\$alislam ") -or $dryCreate.Contains("-d $alislam")
+if ($attachShaped -and -not $attachRaw) {
+    Write-Host '  ok   creation : attach -c pre-shape, dossier brut conserve en -d'
+} else {
+    $script:fails++
+    Write-Host '  FAIL creation : le nom de session attach n''est pas pre-shape'
+    Write-Host "       cmd: $($dryCreate.Trim())"
+}
+
+# --- Integration : detection d'une session PRE-SHAPEE comme vault actif --------
+# Via -FakeActives (hook de test) : une session nommee en pre-shape doit etre
+# reconnue comme SON vault (ligne 'active', champ 2 = nom reel pre-shape) et
+# surtout PAS classee en orphelin (section "Sessions").
+Write-Host 'integration (-FakeActives : reconciliation pre-shape) :'
+$script:total++
+$vaultsRoot = if ($env:PC_VAULTS_WIN) { $env:PC_VAULTS_WIN } else { 'C:\obsidian-vaults' }
+if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $vaultsRoot $alislam) '.obsidian'))) {
+    Write-Host '  SKIP -FakeActives : vault arabe absent de cette machine'
+    $script:total--
+} else {
+    $rows2     = & pwsh -NoProfile -ExecutionPolicy Bypass -File $sess -List -View vaults -FakeActives $alislamShaped
+    $stripped2 = @($rows2 | ForEach-Object { $_ -replace "$([char]27)\[[0-9;]*m", '' })
+    $activeRow = $rows2 | Where-Object { $g = ($_ -split "`t"); $g[0] -eq 'active' -and $g[1] -eq $alislamShaped } | Select-Object -First 1
+    $hasOrphanSection = [bool]($stripped2 | Where-Object { $_ -match '\bSessions\b' })
+    if ($activeRow -and -not $hasOrphanSection) {
+        Write-Host '  ok   -FakeActives : session pre-shapee reconnue comme vault actif (pas orphelin)'
+    } else {
+        $script:fails++
+        Write-Host '  FAIL -FakeActives : session pre-shapee mal classee'
+        Write-Host "       rows: $($stripped2 -join ' || ')"
     }
 }
 
