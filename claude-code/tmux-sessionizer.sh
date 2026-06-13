@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 #
-# tmux-sessionizer.sh — tmux session menu for the phone (thin client).
+# tmux-sessionizer.sh — session menu historique (Linux/Termux).
 #
-# Invoked by the `wsl` / `wslm` / `pwsh` / `pwshm` functions in the Termux bashrc:
-#   wsl  -> ssh  -t desktop  "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"
-#   wslm -> mosh   desktop -- bash -lc "~/dev/.../tmux-sessionizer.sh"
+# *(Conservé pour compatibilité tierce ; le desktop actuel utilise
+#  windows-sessionizer/sessionizer.ps1 en PowerShell natif.)*
+#
+# Invoked by the `pwsh` / `pwshm` functions in the Termux bashrc :
+#   pwsh  -> ssh  -t desktop  "~/dev/dev-environment/claude-code/tmux-sessionizer.sh"
+#   pwshm -> mosh   desktop -- bash -lc "~/dev/.../tmux-sessionizer.sh"
 #
 # Shows an fzf menu that merges, in a single list:
 #   ● tmux sessions ALREADY active -> attach to it
@@ -19,10 +22,10 @@
 # if it sees $TMUX; cf. ~/.tmux.conf + memory claude-truecolor-tmux).
 #
 # SPECIAL CASE — Obsidian vaults: they live on C: (NTFS), where native Windows I/O
-# is ~7.5x faster than via /mnt/c from WSL (cf. memory
+# is ~7.5x faster than via /mnt/c from Linux (cf. memory
 # feedback_claude-side-matches-filesystem) -> we open native PowerShell, not bash:
 #   - desktop (F2)  : new Windows Terminal tab (`wt.exe -w 0 nt`, native pwsh)
-#   - phone (ssh)   : this menu CANNOT open it (WSL→Windows hop broken by a WSL
+#   - phone (ssh)   : this menu CANNOT open it (Linux→Windows hop broken by a
 #                     mirrored-networking bug) -> it delegates to the `vault` command
 #                     (ssh straight from the phone to the Windows sshd). See plan
 #                     vault-native-pwsh-ssh.
@@ -43,16 +46,16 @@ FZF="$HOME/.fzf/bin/fzf"
 [[ -x "$FZF" ]] || FZF="$(command -v fzf 2>/dev/null || true)"
 
 # --- collect -------------------------------------------------------------
-# Zellij binary (WSL projects) + helpers to list active sessions per world.
-# WSL sessions: `zellij ls`. Windows (vault) sessions: read Zellij's Windows
-# IPC/cache dirs via /mnt/c — the WSL binary can't talk to the Windows server
+# Zellij binary + helpers to list active sessions per world.
+# Linux/Termux sessions: `zellij ls`. Windows (vault) sessions: read Zellij's Windows
+# IPC/cache dirs via /mnt/c — the Linux binary can't talk to the Windows server
 # (different OS), and there's no interop over ssh. The `%TEMP%\zellij` socket
 # dir only lists sessions visible from the current Windows logon/window station;
 # phone-opened native pwsh sessions can be missing there but still appear under
 # `AppData/Local/Zellij/cache/.../session_info`. Glob contract_version_* for
 # cross-version safety, and /mnt/c/Users/* so nothing personal is hard-coded.
 ZJ="$(command -v zellij 2>/dev/null || echo "$HOME/.local/bin/zellij")"
-zj_actives_wsl() { "$ZJ" ls -ns 2>/dev/null | sort || true; }
+zj_actives_linux() { "$ZJ" ls -ns 2>/dev/null | sort || true; }
 zj_actives_win() {
   local base d
   {
@@ -85,15 +88,15 @@ mapfile -t vaults < <(find "$VAULTS_DIR" -mindepth 1 -maxdepth 1 -type d -exec t
 # VIEW (PC_VIEW) — same menu, different perimeter, set by the phone functions.
 # We partition by WORLD (which side of the filesystem / where it runs best), not by type:
 #   all (default, F2 desktop) : everything — sessions + projects + vaults
-#   wsl (`wsl`, ex-`pc`)      : Linux/ext4 world — tmux sessions + ~/dev projects, NO vaults
+#   linux                       : Linux/ext4 world — tmux sessions + ~/dev projects, NO vaults
 #   ps  (`pwsh`, ex-`obs`)    : Windows/C: world in native pwsh — Obsidian vaults (extensible
 #                               to any C: folder better in PowerShell). None is a tmux session.
 # We prune the arrays HERE, upstream of the position/section computation → everything
 # else (fzf navigation, build_menu, dispatch) works with no other change.
 case "${PC_VIEW:-all}" in
-  wsl) vaults=();   mapfile -t actives < <(zj_actives_wsl) ;;   # WSL world: projects + their Zellij sessions
-  ps)  projects=(); mapfile -t actives < <(zj_actives_win) ;;   # C: world: vaults + their (Windows) Zellij sessions
-  *)   mapfile -t actives < <( { zj_actives_wsl; zj_actives_win; } | sort -u ) ;;   # all (F2 desktop)
+  linux) vaults=();   mapfile -t actives < <(zj_actives_linux) ;;   # Linux world: projects + their Zellij sessions
+  ps)    projects=(); mapfile -t actives < <(zj_actives_win) ;;       # C: world: vaults + their (Windows) Zellij sessions
+  *)     mapfile -t actives < <( { zj_actives_linux; zj_actives_win; } | sort -u ) ;;   # all (F2 desktop)
 esac
 
 # ANSI colors (interpreted by fzf --ansi)
@@ -289,7 +292,7 @@ read_or_cancel() {
 }
 
 # Join an active session. A vault name is a Zellij session on the WINDOWS server,
-# unreachable from WSL → delegate (open_vault). Otherwise it's a WSL session → attach.
+# unreachable from Linux → delegate (open_vault). Otherwise it's a Linux session → attach.
 attach_session() {  # $1 = session name
   if in_list "$1" "${vaults[@]}"; then open_vault "$1"
   else                                 run "$ZJ" attach "$1" options --on-force-close detach; fi
@@ -307,7 +310,7 @@ create_session() {  # $1 = name   $2 = folder
   run "$ZJ" attach -c "$1" options --on-force-close detach
 }
 
-# is_remote: am I launched from the phone (via `wsl`/`pwsh` = `ssh -t desktop …`)
+# is_remote: am I launched from the phone (via `pwsh` = `ssh -t desktop …`)
 # rather than from the physical desktop (F2 / ble.sh)? ssh exports SSH_CONNECTION;
 # F2 doesn't. Used to pick how an Obsidian vault renders: native Windows Terminal
 # tab (desktop, GUI visible) vs delegating to `vault` (phone, only reachable display).
@@ -315,23 +318,33 @@ is_remote() { [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]]; }
 
 # open_wt_zellij: desktop (F2) — open a NEW Windows Terminal tab (PowerShell
 # profile, `-p`, for the title/icon), `-d` set to the vault folder (Windows path
-# via wslpath), running `zellij attach -c <vault> options --on-force-close detach`
+# via wslpath/cygpath fallback), running `zellij attach -c <vault> options --on-force-close detach`
 # so the session lives natively on Windows (native I/O on C:, cf. memory
 # feedback_claude-side-matches-filesystem) and a forced terminal close detaches.
+_linux_to_win_path() {
+  if command -v wslpath >/dev/null 2>&1; then
+    wslpath -w "$1"
+  elif command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    # Fallback: naive Linux path (e.g. /mnt/c/foo) -> C:\foo
+    printf '%s' "$1" | sed 's|^/mnt/c/|C:/|; s|^/mnt/|\\|; s|/|\\|g'
+  fi
+}
 open_wt_zellij() {  # $1 = vault name
   # Important for phone 5G reconnects: a detached Zellij session is still the
   # live Claude session. Do not run `delete-session` here; just attach-or-create.
-  run wt.exe -w 0 nt -p "PowerShell" -d "$(wslpath -w "$VAULTS_DIR/$1")" \
+  run wt.exe -w 0 nt -p "PowerShell" -d "$(_linux_to_win_path "$VAULTS_DIR/$1")" \
       pwsh -NoProfile -NoExit -Command "zellij attach -c $1 options --on-force-close detach"
 }
 
 # open_vault: route a vault choice by where the menu runs.
-#   phone (ssh)  : the menu runs in WSL and WSL→Windows is broken (mirrored bug),
-#                  so we DELEGATE — record the name, exit 42; wsl()/pwsh() phone-side
-#                  catch 42, open an SSH tunnel to the Windows Zellij web server,
-#                  then run the local Termux Zellij client against that tunnel.
-#   desktop (F2) : new WT tab (open_wt_zellij). Cf. memories reference_ssh-wsl-no-interop
-#                  / reference_wsl-mirrored-loopback-broken.
+#   phone (ssh)  : the menu runs in Linux/Termux and Linux→Windows is broken (mirrored bug),
+#                  so we DELEGATE — record the name, exit 42; `pwsh` phone-side
+#                  catches 42, opens an SSH tunnel to the Windows Zellij web server,
+#                  then runs the local Termux Zellij client against that tunnel.
+#   desktop (F2) : new WT tab (open_wt_zellij). Cf. memories reference_ssh-linux-no-interop
+#                  / reference_linux-mirrored-loopback-broken.
 open_vault() {  # $1 = vault name
   if is_remote; then
     local req="${PC_VAULT_REQ:-$HOME/.cache/pc-vault-request}"

@@ -4,36 +4,12 @@
 #
 # Pourquoi ce detour : sur Termux -> mosh -> tmux -> Claude, le presse-papier du
 # tel ne traverse pas mosh (OSC 52 avale), donc un "vrai" Alt+V cote tel est
-# impossible. Solution : scp l'image au desktop, la STAGER dans le presse-papier
-# Wayland du desktop. L'user appuie Alt+V quand il veut envoyer (controle manuel,
-# decision retiree d'img2clip 2026-05-27 : auto-paste = trop intrusif pour
-# les photos perso, on rend la main a l'user).
-#
-# Quel presse-papier ? Deux lecteurs, deux mecanismes :
-#
-# 1. Claude WSL — lit l'image avec cette chaine (cli.js, branche WSL), DANS CET ORDRE :
-#        wl-paste --type image/png || wl-paste --type image/bmp || powershell Get-Clipboard
-#    Subtilite WSLg : si on ne met l'image QUE dans le presse-papier Windows
-#    (PowerShell SetImage), le bridge WSLg l'expose cote Wayland UNIQUEMENT en
-#    image/bmp -> un BMP 32-bit BI_BITFIELDS que le sharp/libvips de Claude NE SAIT
-#    PAS decoder -> "No image found in clipboard". Et comme wl-paste image/bmp
-#    reussit (exit 0), Claude n'atteint jamais le fallback PowerShell.
-#    => On pose donc l'image en image/png dans le presse-papier WAYLAND via wl-copy :
-#       Claude la prend au 1er maillon (wl-paste --type image/png), avec des octets
-#       propres (le JPEG est re-sniffe par sharp, peu importe l'etiquette png).
-#
-# 2. Claude pwsh NATIF (Windows) — son clipboard N'EST PAS atteignable d'ici, par
-#    construction : le presse-papiers Windows est PAR WINDOW STATION, et chaque
-#    connexion ssh :2222 recoit une window station ephemere (Service-0x0-<LUID>$)
-#    detruite a la deconnexion. Un `ssh -p 2222 ... powershell SetImage` lance
-#    d'ici renvoie exit 0 mais ecrit dans ce clipboard fantome — le Claude pwsh
-#    (logon session du serveur zellij) ne le voit JAMAIS. Prouve le 2026-06-10
-#    (SetText MARKER via ssh -> invisible depuis la session zellij). L'ancien
-#    "maillon Windows natif" (ssh :2222 SetImage) etait donc un FAUX POSITIF
-#    permanent ; il a ete retire. Le clipboard natif est alimente COTE PC par
-#    `img-clip-watcher.ps1` (lance par le wrapper claude() du profil pwsh, DANS
-#    la logon session du lecteur), qui surveille ~/.claude-images : notre seul
-#    travail ici est donc d'y deposer le fichier — deja fait par le rsync/scp.
+# impossible. Solution : streamer l'image par SSH vers le desktop, dans
+# ~/.claude-images ; le watcher cote PC (img-clip-watcher.ps1, lance par le
+# wrapper claude() du profil pwsh, DANS la logon session du lecteur) detecte
+# l'arrivee et pousse l'image dans le presse-papiers Windows natif. L'user
+# appuie Alt+V quand il veut envoyer (controle manuel, decision retiree
+# d'img2clip 2026-05-27 : auto-paste = trop intrusif pour les photos perso).
 #
 # Pourquoi pas juste `tmux send-keys -l <path>` : un path brut tape dans le
 # prompt n'est PAS auto-attache par Claude Code (verifie 2026-05-27, v2.1.152).
@@ -52,31 +28,30 @@
 set -euo pipefail
 
 # Tout appel reseau est borne par `timeout` : sans ca, un cote desktop qui ne
-# rend jamais la main (cf. l'ancien `wl-copy` qui forkait un serveur clipboard
-# persistant tenant le canal SSH ouvert) gele indefiniment le screenshot-watcher
-# qui nous appelle en boucle synchrone. BatchMode evite tout prompt interactif.
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+# rend jamais la main gele indefiniment le screenshot-watcher qui nous appelle
+# en boucle synchrone. BatchMode evite tout prompt interactif.
+SSH_OPTS=(-o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
 NET_TIMEOUT=30
 
 # Host SSH du desktop (alias ~/.ssh/config du telephone, surchargeable via $DESK).
-DESK="${DESK:-desktop}"
-WIN_DESK="${WIN_DESK:-$DESK}"
+WIN_DESK="${WIN_DESK:-desktop}"
 WIN_SSH_PORT="${WIN_SSH_PORT:-2222}"
-img2clip_TARGET="${img2clip_TARGET:-auto}"   # auto | windows | wsl
 
-use_windows_native=0
-case "$img2clip_TARGET" in
-  windows) use_windows_native=1 ;;
-  wsl)     use_windows_native=0 ;;
-  auto)    [ -n "${WIN_USER:-}" ] && use_windows_native=1 ;;
-  *) echo "img2clip_TARGET invalide: $img2clip_TARGET (auto/windows/wsl)" >&2; exit 1 ;;
-esac
+# Termux:Boot lance le watcher avec un environnement minimal (HOME/PATH
+# seulement). Charger les variables locales ici rend img2clip autonome, meme
+# quand il n'est pas appele depuis un shell interactif.
+if [ -f "$HOME/.bashrc.local" ]; then
+  set +u
+  # shellcheck disable=SC1090
+  . "$HOME/.bashrc.local" >/dev/null 2>&1 || true
+  set -u
+fi
 
-# NB : l'ancien bloc WIN_USER/WSL_DISTRO (maillon ssh :2222 -> SetImage) a ete
-# retire le 2026-06-10 : il ecrivait dans le clipboard d'une window station
-# ephemere (cf. en-tete, point 2) — faux positif permanent, jamais visible par
-# le Claude pwsh. Le clipboard natif est desormais le travail du watcher cote
-# PC (img-clip-watcher.ps1), pas du telephone.
+# Le pipeline legacy vers WSL a ete retire le 2026-06-13. Seul le depot natif
+# Windows subsiste. On n'utilise pas SFTP : certaines
+# installs OpenSSH Windows acceptent le shell SSH sur :2222 mais ferment le
+# sous-systeme sftp ("subsystem request failed"). Le flux binaire stdin -> pwsh
+# ci-dessous ne depend que du shell SSH, deja requis par pwsh/sessionizer.
 
 # Un fichier image DOIT etre passe en argument (par screenshot-watcher ou par le
 # hook termux-file-editor). Plus de mode "sans argument" (scan de la + recente) :
@@ -115,9 +90,9 @@ open_action="$AM_BIN start -a android.intent.action.VIEW -d file://$(printf '%q'
 
 ext="${newest##*.}"
 # dest DETERMINISTE (hash du chemin source) : le watcher re-appelle avec la meme
-# source sur echec -> meme dest -> rsync --partial REPREND le partiel au lieu de
-# repartir de zero (cf plan rsync). Avant : un timestamp neuf a chaque appel cassait
-# la reprise. Effet de bord mineur : ~/.claude-images contient img-<hash>.ext.
+# source sur echec -> meme dest. Avant : un timestamp neuf a chaque appel
+# creait un nouveau fichier a chaque retry. Effet de bord mineur :
+# ~/.claude-images contient img-<hash>.ext.
 dest="img-$(printf '%s' "$newest" | md5sum | cut -c1-12).${ext}"
 total_bytes=$(stat -c '%s' "$newest" 2>/dev/null || printf '0')
 
@@ -125,11 +100,10 @@ echo "-> $newest"
 
 # --- Notifications Android (meme id, remplacees en place) ----------------------
 # Termux:API ne propose pas encore de vraie barre native setProgress() pour
-# termux-notification. On affiche donc une barre textuelle calculee depuis le %
-# rsync reel, puis l'etat final : image deposee + clipboard Wayland arme (le
-# clipboard pwsh natif est rempli cote PC par img-clip-watcher.ps1 en <= 1 s,
-# non observable d'ici — on ne pretend donc plus le "confirmer").
-have_notif=0; img_channel=(); staged=0
+# termux-notification. On affiche donc l'etat final : image deposee sur le PC (le clipboard pwsh
+# natif est rempli cote PC par img-clip-watcher.ps1 en <= 1 s, non observable
+# d'ici — on ne pretend donc plus le "confirmer").
+have_notif=0; img_channel=(); staged=0; failure_notified=0
 IMG_GROUP="watcher-images"
 
 format_mb() {
@@ -182,138 +156,56 @@ if command -v termux-notification >/dev/null 2>&1; then
   # re-emet $? (exit $rc) pour NE PAS masquer le code d'echec : le watcher gate
   # l'avancement du curseur sur le code retour d'img2clip (`if bash img2clip; then
   # avance-curseur`). Masquer un echec = curseur avance = image RATEE crue envoyee.
-  trap 'rc=$?; [ "$staged" = 1 ] || { command -v termux-notification-remove >/dev/null 2>&1 && termux-notification-remove img2clip >/dev/null 2>&1; }; exit $rc' EXIT
+  trap 'rc=$?; [ "$staged" = 1 ] || [ "$failure_notified" = 1 ] || { command -v termux-notification-remove >/dev/null 2>&1 && termux-notification-remove img2clip >/dev/null 2>&1; }; exit $rc' EXIT
 fi
 
-if [ "$use_windows_native" = 1 ]; then
-  [ -n "${WIN_USER:-}" ] || { echo "WIN_USER requis pour img2clip_TARGET=windows" >&2; exit 1; }
+if [ -n "${WIN_REMOTE:-}" ]; then
+  :
+elif [ -n "${WIN_USER:-}" ]; then
   WIN_REMOTE="${WIN_USER}@${WIN_DESK}"
-
-  notify_img --ongoing --alert-once --icon sync --title "Sending image to PC" \
-    --content "Transferring to the PC..."
-
-  sftp_batch="$(mktemp)"
-  local_path_escaped=$(printf '%s' "$newest" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  {
-    printf '%s\n' '-mkdir .claude-images'
-    printf 'put "%s" ".claude-images/%s"\n' "$local_path_escaped" "$dest"
-  } > "$sftp_batch"
-  rc=0
-  timeout "$NET_TIMEOUT" sftp -q -P "$WIN_SSH_PORT" "${SSH_OPTS[@]}" -b "$sftp_batch" "$WIN_REMOTE" || rc=$?
-  rm -f "$sftp_batch"
-  [ "$rc" = 0 ] || exit "$rc"
-
-  # No SetImage over SSH here: the Windows watcher, launched beside Claude,
-  # observes %USERPROFILE%\.claude-images in the reader's window station.
-  staged=1
-  echo "OK. Image staged on the PC (native Windows watcher takes over)."
-  if [ "$have_notif" = 1 ]; then
-    # Bouton "Open image" : ouvre l'image envoyee dans la visionneuse par defaut
-    # (cf. open_action en tete : am + file://, JAMAIS termux-open -> galerie MIUI
-    # voit 0 octet). Bouton explicite plutot que tap-sur-notif : plus intuitif.
-    notify_img --icon check_circle --title "Image ready on your PC" \
-      --content "Copied to the Windows clipboard - ready to paste" --priority high --vibrate 200 \
-      --led-color 00c853 --led-on 250 --led-off 1000 \
-      --button1 "Open image" --button1-action "$open_action"
-  else
-    printf '\a' >&2
-  fi
-  exit 0
-fi
-
-# Home distant determine dynamiquement (une seule fois, mis en cache) pour le
-# mode WSL historique uniquement.
-DESK_HOME_CACHE="$HOME/.cache/img2clip-desk-home"
-if [ ! -f "$DESK_HOME_CACHE" ]; then
-  mkdir -p "$(dirname "$DESK_HOME_CACHE")"
-  ssh -o LogLevel=ERROR -o ConnectTimeout=5 -o BatchMode=yes "$DESK" 'echo "$HOME"' > "$DESK_HOME_CACHE" 2>/dev/null || true
-fi
-DESK_HOME="$(cat "$DESK_HOME_CACHE" 2>/dev/null || echo "/home/unknown")"
-DEST_DIR="$DESK_HOME/.claude-images"
-
-# --- Transfert vers le desktop : rsync (% live + reprise) si dispo, sinon scp -----
-# rsync present -> % live (--info=progress2) + REPRISE apres coupure (--partial). rsync
-# ABSENT -> repli sur le scp d'avant, INCHANGE (zero regression ; le % "s'active" le
-# jour d'un `pkg install rsync`). rsync present mais transfert qui ECHOUE -> on NE
-# bascule PAS sur scp : on laisse echouer (set -e) -> le watcher re-essaie -> rsync
-# REPREND (sinon --partial ne servirait a rien). cf spec rsync 2026-05-29.
-if command -v rsync >/dev/null 2>&1; then
-  SSH_E="ssh ${SSH_OPTS[*]}"   # reutilise les memes options ssh, en chaine pour rsync -e
-  pf=$(mktemp)
-  transfer_started_at=$(date +%s)
-  # --partial : garde le partiel pour reprendre. --append-verify : reprend en
-  # re-checksummant le prefixe deja transfere (sur pour une image immuable re-envoyee,
-  # cf dest deterministe). --timeout=30 : timeout d'INACTIVITE (survit a la lenteur
-  # d'un tunnel, ne tue que le vrai blocage). --info=progress2 : % global.
-  rsync -e "$SSH_E" --partial --append-verify --timeout=30 --info=progress2 \
-        "$newest" "$DESK:$DEST_DIR/$dest" >"$pf" 2>&1 &
-  rpid=$!
-  while kill -0 "$rpid" 2>/dev/null; do
-    # `|| true` OBLIGATOIRE : tant qu'aucun % n'est sorti grep exit 1 -> sous
-    # set -e+pipefail l'affectation tuerait le script en plein transfert.
-    progress_line=$(tr '\r' '\n' < "$pf" | grep -E '[0-9]+%' | tail -1 || true)
-    pct=$(printf '%s' "$progress_line" | grep -oE '[0-9]+%' | tail -1 || true)
-    sent_bytes=$(printf '%s' "$progress_line" | awk '{gsub(/,/, "", $1); if ($1 ~ /^[0-9]+$/) print $1}' || true)
-    # MAJ silencieuse (--alert-once) : sinon chaque % re-buzzerait. Le buzz "depart"
-    # vient du ⏳ initial (deja poste) et le buzz "prete" du ✅ final (sans --alert-once).
-    [ -n "$pct" ] && [ "$have_notif" = 1 ] && \
-      notify_img --ongoing --alert-once \
-        --icon sync --title "Sending image to PC" --content "$(progress_content "$pct" "$sent_bytes")"
-    sleep 1
-  done
-  # `rc=0; wait || rc=$?` OBLIGATOIRE : sous set -e un wait non-zero sortirait AVANT
-  # la capture de rc. Le trap nettoiera de toute facon ; on veut l'exit explicite.
-  rc=0; wait "$rpid" || rc=$?
-  rm -f "$pf"
-  [ "$rc" = 0 ] || exit "$rc"   # echec -> trap retire ⏳ + curseur watcher NON avance -> reprise
 else
-  notify_img --ongoing --alert-once --icon sync --title "Sending image to PC" \
-    --content "Transferring to the PC (install rsync for live %)"
-  timeout "$NET_TIMEOUT" scp "${SSH_OPTS[@]}" -q "$newest" "$DESK:$DEST_DIR/$dest"
+  # Fallback shareable : si ~/.ssh/config contient `Host desktop` + `User`,
+  # OpenSSH le resout. Sinon l'erreur SSH dira clairement que l'utilisateur est
+  # mauvais, sans imposer une valeur personnelle versionnee.
+  WIN_REMOTE="$WIN_DESK"
 fi
 
-# Cote desktop, en une connexion :
-#   1. purge auto (ne garde que les 30 plus recentes)
-#   2. wl-copy --type image/png pose l'image dans le clipboard WAYLAND : c'est CE
-#      maillon que Claude WSL lit en premier (wl-paste --type image/png), avant le
-#      image/bmp casse du bridge WSLg.
-# Le clipboard du Claude pwsh NATIF n'est PAS traite ici : impossible par
-# construction depuis une connexion ssh (clipboard par window station, cf.
-# en-tete point 2). C'est img-clip-watcher.ps1, cote PC, qui le remplit en
-# voyant arriver le fichier dans ~/.claude-images (deja depose ci-dessus).
-# L'image est juste STAGEE : pas d'envoi auto, l'user tape Alt+V quand il decide
-# (cf. comment d'entete pour le pourquoi).
-timeout "$NET_TIMEOUT" ssh "${SSH_OPTS[@]}" "$DESK" bash <<REMOTE
-set -e
-cd '$DEST_DIR'
-ls -t | tail -n +31 | xargs -r rm -f --
-# Presse-papier WAYLAND en image/png : LE maillon que Claude WSL lit en premier
-# (wl-paste --type image/png), AVANT le image/bmp casse du bridge WSLg.
-# Detache ( ... & ) + fds rediriges : le serveur persistant de wl-copy ne doit
-# pas garder le canal ssh ouvert, sinon ssh ne rend jamais la main et gele le
-# watcher (hang observe le 2026-05-27).
-( wl-copy --type image/png < '$DEST_DIR/$dest' >/dev/null 2>&1 & )
-# Attendre que l'offre image/png soit prete : l'user va taper Alt+V juste apres,
-# autant garantir que le presse-papier est arme avant de rendre la main.
-ok=0; for i in 1 2 3 4 5 6 7 8 9 10; do
-  if wl-paste -l 2>/dev/null | grep -qx 'image/png'; then ok=1; break; fi
-  sleep 0.2
-done
-[ "\$ok" = 1 ] || { echo "wl-copy image/png pas pret" >&2; exit 1; }
-REMOTE
+notify_img --ongoing --alert-once --icon sync --title "Sending image to PC" \
+  --content "Transferring to the PC..."
 
-# Staging desktop reussi : on marque le succes AVANT le post ✅. Si on est arrive
-# ici, le rsync/scp ET le bloc REMOTE ont reussi (set -e : un echec n'atteint
-# jamais cette ligne, le trap retire le ⏳) -> fichier depose + Wayland arme.
-# Le watcher pwsh cote PC prend le relais pour le clipboard natif (<= 1 s).
+remote_cmd="pwsh -NoProfile -NoLogo -Command \"\
+\$ErrorActionPreference = 'Stop'; \
+\$dir = Join-Path \$env:USERPROFILE '.claude-images'; \
+[void][System.IO.Directory]::CreateDirectory(\$dir); \
+\$dest = Join-Path \$dir '$dest'; \
+\$inputStream = [Console]::OpenStandardInput(); \
+\$outputStream = [System.IO.File]::Open(\$dest, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read); \
+try { \$inputStream.CopyTo(\$outputStream) } finally { \$outputStream.Dispose() }\""
+
+rc=0
+timeout "$NET_TIMEOUT" ssh "${SSH_OPTS[@]}" -p "$WIN_SSH_PORT" "$WIN_REMOTE" "$remote_cmd" < "$newest" || rc=$?
+if [ "$rc" != 0 ]; then
+  failure_notified=1
+  if [ "$have_notif" = 1 ]; then
+    case "$rc" in
+      124) fail_msg="PC unreachable or transfer timed out - reconnect Tailscale, then retry" ;;
+      255) fail_msg="SSH to PC failed - reconnect Tailscale or restart sshd" ;;
+      *)   fail_msg="Transfer failed (rc=$rc) - screenshot will retry" ;;
+    esac
+    notify_img --icon error --title "Image not sent" \
+      --content "$fail_msg" --priority high --vibrate 200
+  fi
+  exit "$rc"
+fi
+
+# No SetImage over SSH here: the Windows watcher, launched beside Claude,
+# observes %USERPROFILE%\.claude-images in the reader's window station.
 staged=1
-echo "OK. Image staged on the PC (Wayland armed, native watcher takes over)."
-
-# Signal "pret a coller" (etat 2/2) : RE-poste sur le MEME id img2clip -> remplace
-# le ⏳ par le ✅ EN PLACE. Le channel + la garde notif sont calcules tout en haut
-# (etat 1/2), on les REUTILISE ici. --vibrate 200 = buzz "prete". Repli cloche si absent.
+echo "OK. Image staged on the PC (native Windows watcher takes over)."
 if [ "$have_notif" = 1 ]; then
-  # Bouton "Open image" : meme mecanisme que la branche native (cf. open_action).
+  # Bouton "Open image" : ouvre l'image envoyee dans la visionneuse par defaut
+  # (cf. open_action en tete : am + file://, JAMAIS termux-open -> galerie MIUI
+  # voit 0 octet). Bouton explicite plutot que tap-sur-notif : plus intuitif.
   notify_img --icon check_circle --title "Image ready on your PC" \
     --content "Copied to the Windows clipboard - ready to paste" --priority high --vibrate 200 \
     --led-color 00c853 --led-on 250 --led-off 1000 \

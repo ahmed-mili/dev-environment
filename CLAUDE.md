@@ -60,8 +60,7 @@ dev-environment/
 │   └── setup-ssh-client.sh
 ├── claude-code/    # Config Claude Code (statusline, settings, hooks, skills)
 │   ├── termux/img2clip      # push image téléphone → desktop
-│   ├── wsl-clipboard/         # clip-watcher systemd (WSL)
-│   ├── deploy.ps1 / deploy.sh # sync repo ↔ ~/.claude/
+│   ├── deploy.ps1             # sync repo ↔ ~/.claude/ (Windows)
 │   └── skills/
 ├── bootstrap.ps1   # one-liner Windows (idempotent, 8 étapes)
 ├── bootstrap.sh    # one-liner Android (auto-detect legacy → migrate)
@@ -80,10 +79,9 @@ Bidirectionnel (repo ↔ `~/.claude/`). Whitelist explicite des fichiers tracké
 
 Pipeline téléphone → desktop :
 1. **Dépôt fichier** (`rsync`/`scp`) dans `~/.claude-images`
-2. **Wayland** (`wl-copy`) : pour Claude Code WSL (wl-paste lit `image/png`)
-3. **Windows natif** (`img-clip-watcher.ps1`) : pour Claude Code pwsh natif
+2. **Windows natif** (`img-clip-watcher.ps1`) : pour Claude Code pwsh natif
 
-Le presse-papiers Windows **ne doit plus** être alimenté par `ssh -p 2222 ... SetImage` depuis `img2clip` : ce SetImage écrit dans la window station éphémère de la connexion SSH et renvoie un faux succès. Le bon design est local au lecteur : le wrapper `claude()` du profil pwsh lance `img-clip-watcher.ps1` dans la même window station que Claude, et ce watcher lit `\\wsl.localhost\<distro>\home\...\.claude-images`.
+Le presse-papiers Windows **ne doit plus** être alimenté par `ssh -p 2222 ... SetImage` depuis `img2clip` : ce SetImage écrit dans la window station éphémère de la connexion SSH et renvoie un faux succès. Le bon design est local au lecteur : le wrapper `claude()` du profil pwsh lance `img-clip-watcher.ps1` dans la même window station que Claude, et ce watcher lit `%USERPROFILE%\.claude-images`.
 
 ---
 

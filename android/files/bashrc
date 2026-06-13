@@ -183,8 +183,8 @@ export PATH="$HOME/.local/bin:$PREFIX/lib/node_modules/.bin:$PATH"
 #                commands run.
 #
 # Retire previous desktop helpers even in already-open shells that source this file.
-unalias wsl wslm dev devm 2>/dev/null || true
-unset -f wsl wslm dev devm 2>/dev/null || true
+unalias pwsh dev devm 2>/dev/null || true
+unset -f pwsh dev devm 2>/dev/null || true
 
 # pwsh/pwshm use the Windows sessionizer over sshd :2222.
 # Functions (not aliases) avoid clashing with remote pwsh.

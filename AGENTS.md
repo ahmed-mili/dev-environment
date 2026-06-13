@@ -60,8 +60,7 @@ dev-environment/
 │   └── setup-ssh-client.sh
 ├── Codex/    # Config Codex (statusline, settings, hooks, skills)
 │   ├── termux/img2clip      # push image téléphone → desktop
-│   ├── wsl-clipboard/         # clip-watcher systemd (WSL)
-│   ├── deploy.ps1 / deploy.sh # sync repo ↔ ~/.Codex/
+│   ├── deploy.ps1             # sync repo ↔ ~/.Codex/ (Windows)
 │   └── skills/
 ├── bootstrap.ps1   # one-liner Windows (idempotent, 8 étapes)
 ├── bootstrap.sh    # one-liner Android (auto-detect legacy → migrate)
@@ -80,8 +79,7 @@ Bidirectionnel (repo ↔ `~/.Codex/`). Whitelist explicite des fichiers trackés
 
 Pipeline téléphone → desktop :
 1. **Dépôt fichier** (`rsync`/`scp`) dans `~/.claude-images`
-2. **Wayland** (`wl-copy`) : pour Codex WSL
-3. **Windows natif** (`img-clip-watcher.ps1`) : pour Codex pwsh natif
+2. **Windows natif** (`img-clip-watcher.ps1`) : pour Codex pwsh natif
 
 Ne pas réintroduire `ssh -p 2222 ... powershell.exe SetImage` dans `img2clip` : ce SetImage écrit dans la window station éphémère de la connexion SSH et renvoie un faux succès. Le presse-papiers Windows natif doit être alimenté côté PC par `img-clip-watcher.ps1`, lancé par le wrapper `claude()` dans la même window station que le Claude pwsh lecteur.
 

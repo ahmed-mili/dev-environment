@@ -33,23 +33,24 @@ The script installs the packages listed below, deploys the Catppuccin configs, g
 
 ## What this bundle is NOT (any more)
 
-This installer no longer puts Claude Code, Node.js or git-sync hooks on the phone. Claude Code now runs on the **PC** and is reached from Termux with `dev` for native Windows `C:\dev` projects, or `pwsh` for native Windows/C: vaults through the Windows Zellij web tunnel.
+This installer no longer puts Claude Code, Node.js or git-sync hooks on the phone. Claude Code now runs on the **PC** and is reached from Termux with `pwsh`, which opens the same unified sessionizer scope as F2 on the PC: active Zellij sessions, native Windows `C:\dev` projects, and Obsidian vaults through the Windows Zellij web tunnel.
 
 If you were on either of the two previous setups (**Ollama + proot-distro Ubuntu**, or **native Claude Code on Termux** with auto-pull/push hooks), run `migrate-legacy.sh` — it detects and cleans up both generations (`~/.npm-global`, the SessionStart/SessionEnd hooks in `~/.claude/settings.json`, the autostart blocks in `~/.bashrc.local`, the empty `/storage/emulated/0/dev` tree if it still hangs around), then re-runs `setup-ssh-client.sh` for you. The top-level `bootstrap.sh` invokes it automatically when it detects either generation.
 
 ## Daily workflow
 
 ```bash
-dev                            # native Windows/C:\dev projects on the PC
-pwsh                           # native Windows/C: vaults on the PC
+pwsh                           # same unified sessionizer as F2 on the PC
 # Pick an existing Zellij session, or pick a project/vault to create one.
 # Work in Claude Code, vim, whatever.
-# If 5G drops, run dev/pwsh again and pick the same entry: Zellij reattaches.
+# If 5G drops, run pwsh again and pick the same entry: Zellij reattaches.
 # later:
-dev                            # or pwsh: pick up exactly where you left off
+pwsh                           # pick up exactly where you left off
 ```
 
 The wake-lock is acquired automatically by `~/.bashrc.local` on every shell start (release with `termux-wake-unlock` or delete the line).
+
+When `pwsh` cannot reach the PC, it now prints a targeted hint: Tailscale reconnect/restart for route timeouts, `Restart-Service sshd` for a reachable PC with port 2222 refusing, SSH key/user guidance for auth failures, or a Zellij web message when the desktop session is not ready.
 
 ## Clipboard: "press c to copy" is silently dropped over mosh
 

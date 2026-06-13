@@ -56,13 +56,17 @@ try {
 } catch {}
 $watcher = Join-Path $env:USERPROFILE ".local\bin\img-clip-watcher.ps1"
 if (-not (Test-Path $watcher)) { return }
-$cmd = "powershell.exe -Sta -NoProfile -ExecutionPolicy Bypass -File `"$watcher`" -CallerPid $anchor"
+$cmd = "powershell.exe -Sta -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$watcher`" -CallerPid $anchor"
 try {
-    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Out-Null
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = $cmd
+        ProcessStartupInformation = $startup
+    } | Out-Null
 } catch {
     try {
         Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @(
-            "-Sta", "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-Sta", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
             "-File", $watcher, "-CallerPid", $anchor
         ) | Out-Null
     } catch {}

@@ -21,7 +21,7 @@ if [[ ! -f "$SETTINGS" ]]; then
 fi
 
 # Parse enabledPlugins keys (format: name@marketplace)
-# Requires python3 (available on every modern Linux/WSL/Termux)
+# Requires python3 (available on every modern Linux/Termux)
 mapfile -t WANTED < <(python3 -c "
 import json, sys
 try:
