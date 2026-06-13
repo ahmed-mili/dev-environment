@@ -543,8 +543,14 @@ if ($Pick) {
     $upBatch    = "if {q}==`"`" ($upInner) else (echo up)"
     # Les titres restent visibles pendant le filtre, donc on les ejecte aussi via
     # le type TSV courant ({1}) quand les positions absolues ne sont plus fiables.
-    $enterBatch = 'if "{1}"=="sep" (echo down) else (echo accept)'
-    $clickBatch = 'if "{1}"=="sep" (echo down) else (echo ignore)'
+    # PIEGE (vecu 2026-06-13) : fzf quote DEJA les placeholders de champ -> {1}
+    # devient "sep" (avec guillemets). Les entourer a la main ("{1}") produit
+    # ""sep"" qui, sous le wrapper `cmd /s/c "..."` de fzf, casse le if et ne
+    # renvoie RIEN -> transform sans action -> Enter/clic morts. Les binds {q}
+    # (down/up) marchent justement parce qu'ils n'ajoutent pas de guillemets.
+    # Donc {1} NU, jamais "{1}".
+    $enterBatch = 'if {1}=="sep" (echo down) else (echo accept)'
+    $clickBatch = 'if {1}=="sep" (echo down) else (echo ignore)'
     $dblBatch   = $enterBatch
 
     # Tab toggle projets <-> vaults (uniquement si les DEUX sections existent).
@@ -627,7 +633,7 @@ $matches | Sort-Object Score, Index | ForEach-Object { $_.Line }
     $fzfPrompt  = "$SearchIcon "
     $fzfGhost   = 'Search...'
     $Ellipsis   = [char]0x2026
-    $focusBatch = 'if "{1}"=="sep" (echo down) else (echo ignore)'
+    $focusBatch = 'if {1}=="sep" (echo down) else (echo ignore)'
 
     # Habillage : bordure arrondie + label, compteur masque (bruit), couleurs
     # accordees au theme (bleu #89b4fa = chrome/input, violet 141 reserve aux
