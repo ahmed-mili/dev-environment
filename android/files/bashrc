@@ -394,6 +394,16 @@ _pc_pick_native() {
     cursor0=$(printf '%s\n' "$rows" | awk -F '\t' '$1 != "sep" { print NR; exit } END { if (NR == 0) print 1 }')
     [ -n "$cursor0" ] || cursor0=1
     seps=$(printf '%s\n' "$rows" | awk -F '\t' '$1 == "sep" { printf " %d", NR }')
+    # Tab bascule projets <-> vaults : position (1-based, = NR) du 1er item reel
+    # de chaque section. Bind ajoute seulement si les DEUX sections existent.
+    local pfirst vfirst
+    local -a tab_args
+    pfirst=$(printf '%s\n' "$rows" | awk -F '\t' '$2 == "__sep_projects" { f=1; next } f && $1 != "sep" { print NR; exit }')
+    vfirst=$(printf '%s\n' "$rows" | awk -F '\t' '$2 == "__sep_vaults"   { f=1; next } f && $1 != "sep" { print NR; exit }')
+    tab_args=()
+    if [ -n "$pfirst" ] && [ -n "$vfirst" ]; then
+      tab_args=(--bind "tab:transform:[ -n '{q}' ] && { echo ignore; exit 0; }; if [ \"\$FZF_POS\" -lt $vfirst ]; then echo 'pos($vfirst)'; else echo 'pos($pfirst)'; fi")
+    fi
     out=$(printf '%s\n' "$rows" | fzf \
       --ansi --delimiter=$'\t' --with-nth=3 --layout=reverse --no-multi \
       --disabled --track --id-nth=2 \
@@ -401,8 +411,8 @@ _pc_pick_native() {
       --input-border=rounded --ghost='Search...' \
       --padding=0,1 --info=hidden --no-scrollbar --scrollbar='' --pointer='' --marker='' --ellipsis='…' \
       --color=bg:-1,bg+:#202942,current-bg:#202942,selected-bg:#202942,fg:#bac2de,fg+:#89b4fa,current-fg:#89b4fa,selected-fg:#89b4fa,hl:#89b4fa,hl+:#89b4fa,header:#a6adc8,prompt:#a6adc8,query:#cdd6f4,ghost:#a6adc8,border:#6c7086,input-border:#89b4fa,label:#89b4fa,pointer:#89b4fa,gutter:-1 \
-      --prompt="$prompt" --header='Enter open · Ctrl+N new · Ctrl+R refresh · Esc cancel' \
-      --expect=ctrl-n \
+      --prompt="$prompt" --header='Enter open · Tab switch · Ctrl+N new · Ctrl+X kill · Ctrl+R refresh · Esc cancel' \
+      --expect=ctrl-n,ctrl-x \
       --bind "load:transform:[ -e '$pos_flag' ] || { touch '$pos_flag'; echo 'pos($cursor0)'; }" \
       --bind "ctrl-r:reload($refresh_script >/dev/null; $filter_script {q})" \
       --bind "change:reload($filter_script {q})" \
@@ -411,7 +421,8 @@ _pc_pick_native() {
       --bind "focus:transform:case \"{1}\" in sep) echo down;; *) echo ignore;; esac" \
       --bind "enter:transform:case \"{1}\" in sep) echo down;; *) echo accept;; esac" \
       --bind "left-click:transform:case \"{1}\" in sep) echo down;; *) echo ignore;; esac" \
-      --bind "double-click:transform:case \"{1}\" in sep) echo down;; *) echo accept;; esac")
+      --bind "double-click:transform:case \"{1}\" in sep) echo down;; *) echo accept;; esac" \
+      "${tab_args[@]}")
     local fzf_rc=$?
     rm -f "$listen_sock"
     rows="$(cat "$rows_cache" 2>/dev/null || printf '%s\n' "$rows")"
@@ -424,6 +435,24 @@ _pc_pick_native() {
       [ -n "$name" ] && _pc_open_native_session "$name" new
       rm -f "$refresh_script" "$filter_script" "$rows_cache" "$pos_flag"
       return $?
+    fi
+    if [ "$key" = "ctrl-x" ]; then
+      local ans
+      kind=$(printf '%s' "$choice" | cut -f1)
+      name=$(printf '%s' "$choice" | cut -f2)
+      if [ "$kind" = "active" ] && [ -n "$name" ]; then
+        printf "Kill '%s' ? [y/N] " "$name" >&2
+        IFS= read -r ans
+        case "$ans" in
+          [yY]*)
+            # best-effort : les sessions vivent dans la Session 1 du bureau ; le
+            # kill via sshd peut echouer cross-logon (cf. zellij-windows-pieges).
+            _pc_ssh_win "tuer la session $name" "pwsh -NoProfile -NoLogo -Command \"zellij kill-session '$name'\"" ;;
+        esac
+        bash "$refresh_script" >/dev/null 2>&1
+        rows="$(cat "$rows_cache" 2>/dev/null || printf '%s\n' "$rows")"
+      fi
+      continue
     fi
     [ -n "$choice" ] || { rm -f "$refresh_script" "$filter_script" "$rows_cache" "$pos_flag"; return 0; }
     kind=$(printf '%s' "$choice" | cut -f1)
