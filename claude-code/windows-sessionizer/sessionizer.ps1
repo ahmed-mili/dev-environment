@@ -496,11 +496,11 @@ if ($Pick) {
     # Tab toggle projets <-> vaults (uniquement si les DEUX sections existent).
     # IMPORTANT : calcule AVANT $ctrlGBatch, qui fige $hdrFull dans sa chaine batch.
     $tabBatch = $null
-    $hdrMin  = 'Ctrl+G  help'
-    $hdrFull = 'Up/Down move - Enter open - Ctrl+N new - Ctrl+R rename - Ctrl+X kill - Ctrl+G hide'
+    $hdrMin  = 'Sessionizer'
+    $hdrFull = 'Sessionizer - Up/Down move - Enter open - Ctrl+N new - Ctrl+R rename - Ctrl+X kill - Ctrl+G hide'
     if ($projects.Count -and $vaults.Count) {
         $tabBatch = "if not {q}==`"`" (echo ignore) else (if %FZF_POS% LSS $vfirst (echo pos^($vfirst^)) else (echo pos^($pfirst^)))"
-        $hdrFull  = 'Up/Down move - Tab switch category - Enter open - Ctrl+N new - Ctrl+R rename - Ctrl+X kill - Ctrl+G hide'
+        $hdrFull  = 'Sessionizer - Up/Down move - Tab switch category - Enter open - Ctrl+N new - Ctrl+R rename - Ctrl+X kill - Ctrl+G hide'
     }
 
     # Aide toggleable Ctrl+G. ASCII PUR : ces echo passent par cmd (codepage OEM),
@@ -516,15 +516,16 @@ if ($Pick) {
     $Chevron    = [char]0x276F
     $fzfPrompt  = "$SearchIcon Search $Chevron "
 
-    # Habillage : bordure arrondie + label, compteur masque (bruit), couleurs
-    # accordees au theme (bleu 117 = chrome/prompt, violet 141 reserve aux
-    # vaults Obsidian dans les labels de lignes). gutter:-1 = pas de colonne fantome.
+    # Habillage : bordure basse + header-first pour un look "barre de recherche",
+    # compteur masque (bruit), couleurs accordees au theme (bleu 117 = chrome/
+    # prompt, violet 141 reserve aux vaults Obsidian dans les labels de lignes).
+    # gutter:-1 = pas de colonne fantome.
     $fzfArgs = @(
         '--ansi', '--delimiter', "`t", '--with-nth=3',
         '--layout=reverse', '--no-multi',
-        '--border=rounded', '--border-label', ' ◆ Sessionizer ', '--border-label-pos=3',
+        '--border=bottom', '--header-first',
         '--padding=0,1', '--info=hidden', '--ellipsis=…',
-        '--color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,label:117,gutter:-1',
+        '--color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,gutter:-1',
         '--prompt', $fzfPrompt,
         '--header', $hdrMin,
         '--expect=ctrl-n,ctrl-x,ctrl-r',
