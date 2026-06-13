@@ -510,16 +510,22 @@ if ($Pick) {
     Remove-Item $hstate -Force -ErrorAction SilentlyContinue
     $ctrlGBatch = "if exist `"$hstate`" (del `"$hstate`" & echo $hdrMin) else (type nul > `"$hstate`" & echo $hdrFull)"
 
+    # Prompt : loupe + "Search" + chevron. Les glyphes sont construits par code
+    # Unicode pour garder le fichier .ps1 ASCII-only (regle projet).
+    $SearchIcon = [System.Text.Encoding]::UTF8.GetString([byte[]]@(0xF0, 0x9F, 0x94, 0x8D))
+    $Chevron    = [char]0x276F
+    $fzfPrompt  = "$SearchIcon Search $Chevron "
+
     # Habillage : bordure arrondie + label, compteur masque (bruit), couleurs
-    # accordees au theme (violet 141 = vaults/accents, vert 108 = sessions
-    # actives, gris 240/245 = chrome). gutter:-1 = pas de colonne fantome.
+    # accordees au theme (bleu 117 = chrome/prompt, violet 141 reserve aux
+    # vaults Obsidian dans les labels de lignes). gutter:-1 = pas de colonne fantome.
     $fzfArgs = @(
         '--ansi', '--delimiter', "`t", '--with-nth=3',
         '--layout=reverse', '--no-multi',
         '--border=rounded', '--border-label', ' ◆ Sessionizer ', '--border-label-pos=3',
         '--padding=0,1', '--info=hidden', '--ellipsis=…',
-        '--color=pointer:141,bg+:237,fg+:255,hl:141,hl+:141,header:245,prompt:108,border:240,label:141,gutter:-1',
-        '--prompt', 'pc ❯ ',
+        '--color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,label:117,gutter:-1',
+        '--prompt', $fzfPrompt,
         '--header', $hdrMin,
         '--expect=ctrl-n,ctrl-x,ctrl-r',
         '--bind', "load:pos($cursor0)",

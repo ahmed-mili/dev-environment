@@ -348,7 +348,7 @@ _pc_pick_native() {
   _pc_require_win_user || return 1
   command -v fzf >/dev/null 2>&1 || { echo "install fzf first: pkg install fzf" >&2; return 1; }
   local sessionizer_win="${PC_SESSIONIZER_WIN:-C:\\dev\\dev-environment\\claude-code\\windows-sessionizer\\sessionizer.ps1}"
-  local rows out key choice kind name cursor0 seps refresh_script rows_cache listen_sock refresh_pid refresh_sec pos_flag
+  local rows out key choice kind name cursor0 seps refresh_script rows_cache listen_sock pos_flag
   rows=$(_pc_ssh_win "lister le sessionizer du PC" \
     "pwsh -NoProfile -NoLogo -ExecutionPolicy Bypass -File \"$sessionizer_win\" -List -View \"$view\"") || return $?
   [ -n "$rows" ] || { echo "sessionizer PC vide: aucun projet, vault ou session active trouve" >&2; return 1; }
@@ -376,45 +376,30 @@ _pc_pick_native() {
   pos_flag="${TMPDIR:-/tmp}/pc-sessionizer-pos.$$"
   while true; do
     # fzf starts on the first real item, not on decorative section titles.
-    # The pos() must fire on the FIRST load only: fzf re-emits `load` after every
-    # periodic reload(), and an unconditional load:pos() would snap the cursor
-    # back to the first item every PC_SESSIONIZER_REFRESH_SEC seconds while the
-    # user navigates. --track keeps the cursor on its item across reloads.
+    # The pos() must fire on the FIRST load only: fzf re-emits `load` after a
+    # manual reload(), and an unconditional load:pos() would snap the cursor
+    # back to the first item on every refresh. --track keeps the cursor on its
+    # item across reloads.
     rm -f "$pos_flag"
     cursor0=$(printf '%s\n' "$rows" | awk -F '\t' '$1 != "sep" { print NR; exit } END { if (NR == 0) print 1 }')
     [ -n "$cursor0" ] || cursor0=1
     seps=$(printf '%s\n' "$rows" | awk -F '\t' '$1 == "sep" { printf " %d", NR }')
-    refresh_pid=''
-    if command -v curl >/dev/null 2>&1; then
-      refresh_sec="${PC_SESSIONIZER_REFRESH_SEC:-2}"
-      (
-        while [ ! -S "$listen_sock" ]; do sleep 0.1; done
-        while [ -S "$listen_sock" ]; do
-          sleep "$refresh_sec"
-          [ -S "$listen_sock" ] || break
-          curl --silent --show-error --max-time 2 --unix-socket "$listen_sock" \
-            -XPOST http://localhost -d "reload($refresh_script)" >/dev/null 2>&1 || true
-        done
-      ) &
-      refresh_pid=$!
-    fi
     out=$(printf '%s\n' "$rows" | fzf \
       --ansi --delimiter=$'\t' --with-nth=3 --layout=reverse --no-multi \
       --track --id-nth=2 \
       --border=rounded --border-label=' ◆ Sessionizer ' --border-label-pos=3 \
       --padding=0,1 --info=hidden --ellipsis='…' \
-      --color=pointer:141,bg+:237,fg+:255,hl:141,hl+:141,header:245,prompt:108,border:240,label:141,gutter:-1 \
-      --prompt="$prompt" --header='F2 scope - auto-refresh - Enter open - Ctrl+N new - Esc cancel' \
+      --color=pointer:117,bg+:237,fg+:255,hl:117,hl+:117,header:245,prompt:117,border:240,label:117,gutter:-1 \
+      --prompt="$prompt" --header='Enter open · Ctrl+N new · Ctrl+R refresh · Esc cancel' \
       --expect=ctrl-n \
       --listen="$listen_sock" \
       --bind "load:transform:[ -e '$pos_flag' ] || { touch '$pos_flag'; echo 'pos($cursor0)'; }" \
-      --bind "down:transform:[ -z {q} ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac" \
-      --bind "up:transform:[ -z {q} ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac" \
-      --bind "left-click:transform:[ -n {q} ] && echo ignore || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo ignore;; esac; }" \
-      --bind "double-click:transform:[ -n {q} ] && echo accept || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo accept;; esac; }")
+      --bind "ctrl-r:reload($refresh_script)" \
+      --bind "down:transform:[ -z '{q}' ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac" \
+      --bind "up:transform:[ -z '{q}' ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac" \
+      --bind "left-click:transform:[ -n '{q}' ] && echo ignore || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo ignore;; esac; }" \
+      --bind "double-click:transform:[ -n '{q}' ] && echo accept || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo accept;; esac; }")
     local fzf_rc=$?
-    [ -n "$refresh_pid" ] && kill "$refresh_pid" >/dev/null 2>&1 || true
-    wait "$refresh_pid" 2>/dev/null || true
     rm -f "$listen_sock"
     rows="$(cat "$rows_cache" 2>/dev/null || printf '%s\n' "$rows")"
     [ "$fzf_rc" -ne 0 ] && { rm -f "$refresh_script" "$rows_cache" "$pos_flag"; return 0; }
@@ -439,7 +424,7 @@ _pc_pick_native() {
 }
 # LogLevel=ERROR: silences « Connection to desktop closed. » + the post-quantum WARNING
 # (INFO-level ssh messages) — without hiding real errors (auth, unreachable host).
-pwsh()  { _pc_pick_native all 'pc ❯ '; }
+pwsh()  { _pc_pick_native all '🔍 Search ❯ '; }
 pwshm() { pwsh "$@"; }
 # Power control of the desktop, through the WINDOWS sshd (port 2222) so native commands run.
 # Needs $WIN_USER (~/.bashrc.local), like vaults.

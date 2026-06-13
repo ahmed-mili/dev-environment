@@ -196,8 +196,8 @@ else
   if (( ssep || psep || vsep )); then
     nav+=(
       --bind "load:pos($cursor0)"
-      --bind "down:transform:[ -z {q} ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac"
-      --bind "up:transform:[ -z {q} ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac"
+      --bind "down:transform:[ -z '{q}' ] || { echo down; exit 0; }; n=\$((FZF_POS+1)); case \" $seps \" in *\" \$n \"*) echo down+down;; *) echo down;; esac"
+      --bind "up:transform:[ -z '{q}' ] || { echo up; exit 0; }; p=\$((FZF_POS-1)); case \" $seps \" in *\" \$p \"*) [ \$p -eq 1 ] && echo ignore || echo up+up;; *) echo up;; esac"
       # Mouse: OPEN on DOUBLE-click; the SINGLE click acts as a « hover » (true hover
       # is impossible in fzf — no « all-motion » 1003 tracking): it moves the ▌ cursor
       # onto the line WITHOUT opening, you confirm with the 2nd click.
@@ -215,11 +215,11 @@ else
       #    click re-vsets onto the title, the down re-ejects it).
       # Binding left-click does NOT break the double-click: distinct paths (7833 vs 7842).
       # Filter typed ({q} non-empty): titles filtered out of the list → no position test.
-      --bind "left-click:transform:[ -n {q} ] && echo ignore || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo ignore;; esac; }"
-      --bind "double-click:transform:[ -n {q} ] && echo accept || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo accept;; esac; }"
+      --bind "left-click:transform:[ -n '{q}' ] && echo ignore || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo ignore;; esac; }"
+      --bind "double-click:transform:[ -n '{q}' ] && echo accept || { case \" $seps \" in *\" \$FZF_POS \"*) echo down;; *) echo accept;; esac; }"
     )
     if (( n_proj && n_vault )); then
-      nav+=( --bind "tab:transform:[ -n {q} ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
+      nav+=( --bind "tab:transform:[ -n '{q}' ] && echo ignore || ( [ \$FZF_POS -lt $vfirst ] && echo 'pos($vfirst)' || echo 'pos($pfirst)' )" )
       # ↹ = U+21B9, the TWO-arrow « Tab key » symbol. Missing from JetBrainsMono
       # Nerd Font but rendered by the fallback font (Unicode Arrows block, like ⇄).
       hdr_full='↑↓ navigate · ↹ switch category · ⏎ open · Ctrl+N new · Ctrl+R rename · Ctrl+X kill · Ctrl+G hide'
@@ -245,8 +245,8 @@ else
   out="$(build_menu | "$FZF" \
       --ansi --delimiter=$'\t' --with-nth=3 \
       --layout=reverse --no-multi \
-      --color=pointer:8 \
-      --prompt='pc ❯ ' \
+      --color=pointer:117 \
+      --prompt='🔍 Search ❯ ' \
       --header="$hdr_min" \
       --expect=ctrl-n,ctrl-x,ctrl-r \
       "${nav[@]}" \
