@@ -80,10 +80,14 @@ if ($env:ZELLIJ_SESSION_NAME) {
         # titre d'onglet WT montrait le chemin de pwsh.exe.
         $isArabic = [bool]($zellijName.ToCharArray() | Where-Object { ([int]$_ -ge 0x0600 -and [int]$_ -le 0x06FF) -or ([int]$_ -ge 0xFE70 -and [int]$_ -le 0xFEFF) })
         if ($isArabic) {
-            # Migration legacy : nom de session brut -> pre-shape (no-op si deja fait).
+            # Migration legacy : nom de session brut -> pre-shape (no-op si deja
+            # fait). C'est lui qui corrige le label "Zellij (nom)" de la tab-bar.
             if ($disp -ne $zellijName) { $null = & zellij action rename-session $disp 2>$null }
-            # Toujours : nom de tab zellij (fleche) + titre d'onglet WT (OSC 0).
-            $null = & zellij action rename-tab $disp 2>$null
+            # On NE renomme PAS la tab : la fleche garde son nom zellij naturel
+            # ("Tab #1"). Le nom du vault est deja visible dans "Zellij (nom)"
+            # juste a cote -- renommer la tab serait redondant.
+            # Titre d'onglet WT (OSC 0) en pre-shape : utile pour un shell pur ;
+            # Claude Code impose son propre titre de session quand il tourne.
             [Console]::Write("$([char]27)]0;$disp$([char]7)")
         }
     } catch {}
