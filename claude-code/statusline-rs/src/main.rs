@@ -626,6 +626,169 @@ fn read_usage(
     }
 }
 
+// =================== PRE-SHAPING ARABE (terminaux sans BiDi) ===================
+// Windows Terminal n'applique ni l'algorithme bidirectionnel Unicode ni le
+// shaping contextuel (microsoft/terminal#538) : un chemin contenant de l'arabe
+// (ex. C:\obsidian-vaults\<vault arabe>) sort inverse et deconnecte dans le
+// banner. Meme parade que le sessionizer (ConvertTo-ArabicDisplay dans
+// claude-code/windows-sessionizer/sessionizer.ps1, tests et justification
+// la-bas) : convertir les runs arabes en formes de presentation U+FExx posees
+// en ordre visuel. Applique au chemin AFFICHE uniquement -- compute_git()
+// recoit toujours le chemin brut.
+
+/// (isolated, final, initial, medial) ; 0 = forme absente (right-joining :
+/// pas d'initial/medial ; hamza : isolated seule ; tatweel : inchange).
+fn ar_forms(cp: u32) -> Option<[u32; 4]> {
+    Some(match cp {
+        0x0621 => [0xFE80, 0, 0, 0],
+        0x0622 => [0xFE81, 0xFE82, 0, 0],
+        0x0623 => [0xFE83, 0xFE84, 0, 0],
+        0x0624 => [0xFE85, 0xFE86, 0, 0],
+        0x0625 => [0xFE87, 0xFE88, 0, 0],
+        0x0626 => [0xFE89, 0xFE8A, 0xFE8B, 0xFE8C],
+        0x0627 => [0xFE8D, 0xFE8E, 0, 0],
+        0x0628 => [0xFE8F, 0xFE90, 0xFE91, 0xFE92],
+        0x0629 => [0xFE93, 0xFE94, 0, 0],
+        0x062A => [0xFE95, 0xFE96, 0xFE97, 0xFE98],
+        0x062B => [0xFE99, 0xFE9A, 0xFE9B, 0xFE9C],
+        0x062C => [0xFE9D, 0xFE9E, 0xFE9F, 0xFEA0],
+        0x062D => [0xFEA1, 0xFEA2, 0xFEA3, 0xFEA4],
+        0x062E => [0xFEA5, 0xFEA6, 0xFEA7, 0xFEA8],
+        0x062F => [0xFEA9, 0xFEAA, 0, 0],
+        0x0630 => [0xFEAB, 0xFEAC, 0, 0],
+        0x0631 => [0xFEAD, 0xFEAE, 0, 0],
+        0x0632 => [0xFEAF, 0xFEB0, 0, 0],
+        0x0633 => [0xFEB1, 0xFEB2, 0xFEB3, 0xFEB4],
+        0x0634 => [0xFEB5, 0xFEB6, 0xFEB7, 0xFEB8],
+        0x0635 => [0xFEB9, 0xFEBA, 0xFEBB, 0xFEBC],
+        0x0636 => [0xFEBD, 0xFEBE, 0xFEBF, 0xFEC0],
+        0x0637 => [0xFEC1, 0xFEC2, 0xFEC3, 0xFEC4],
+        0x0638 => [0xFEC5, 0xFEC6, 0xFEC7, 0xFEC8],
+        0x0639 => [0xFEC9, 0xFECA, 0xFECB, 0xFECC],
+        0x063A => [0xFECD, 0xFECE, 0xFECF, 0xFED0],
+        0x0640 => [0x0640, 0x0640, 0x0640, 0x0640],
+        0x0641 => [0xFED1, 0xFED2, 0xFED3, 0xFED4],
+        0x0642 => [0xFED5, 0xFED6, 0xFED7, 0xFED8],
+        0x0643 => [0xFED9, 0xFEDA, 0xFEDB, 0xFEDC],
+        0x0644 => [0xFEDD, 0xFEDE, 0xFEDF, 0xFEE0],
+        0x0645 => [0xFEE1, 0xFEE2, 0xFEE3, 0xFEE4],
+        0x0646 => [0xFEE5, 0xFEE6, 0xFEE7, 0xFEE8],
+        0x0647 => [0xFEE9, 0xFEEA, 0xFEEB, 0xFEEC],
+        0x0648 => [0xFEED, 0xFEEE, 0, 0],
+        0x0649 => [0xFEEF, 0xFEF0, 0, 0],
+        0x064A => [0xFEF1, 0xFEF2, 0xFEF3, 0xFEF4],
+        _ => return None,
+    })
+}
+
+/// Diacritique combinant : transparent pour la liaison, reste avec sa base.
+fn ar_is_mark(cp: u32) -> bool {
+    (0x064B..=0x065F).contains(&cp) || cp == 0x0670
+}
+
+/// Ligature lam-alef obligatoire : forme isolee (finale = isolee + 1).
+fn ar_lam_alef(cp: u32) -> Option<u32> {
+    Some(match cp {
+        0x0622 => 0xFEF5,
+        0x0623 => 0xFEF7,
+        0x0625 => 0xFEF9,
+        0x0627 => 0xFEFB,
+        _ => return None,
+    })
+}
+
+fn arabic_display(text: &str) -> String {
+    // Fast path : rien a shaper (et idempotence, les U+FExx ne rematchent pas).
+    if !text.chars().any(|c| (0x0621..=0x064A).contains(&(c as u32))) {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let cp = chars[i] as u32;
+        if ar_forms(cp).is_none() && !ar_is_mark(cp) {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        // Run arabe -> clusters (base, marks). Base 0 = diacritique orphelin.
+        let mut clusters: Vec<(u32, Vec<u32>)> = Vec::new();
+        while i < chars.len() {
+            let cp = chars[i] as u32;
+            if ar_forms(cp).is_some() {
+                clusters.push((cp, Vec::new()));
+            } else if ar_is_mark(cp) {
+                match clusters.last_mut() {
+                    Some(last) => last.1.push(cp),
+                    None => clusters.push((0, vec![cp])),
+                }
+            } else {
+                break;
+            }
+            i += 1;
+        }
+        // pair(P, L) = P a une forme initiale (dual) ET L une forme finale.
+        let links_prev: Vec<bool> = (0..clusters.len())
+            .map(|k| {
+                k > 0
+                    && clusters[k - 1].0 != 0
+                    && clusters[k].0 != 0
+                    && ar_forms(clusters[k - 1].0).is_some_and(|f| f[2] != 0)
+                    && ar_forms(clusters[k].0).is_some_and(|f| f[1] != 0)
+            })
+            .collect();
+        // Formes contextuelles + ligatures en ordre logique, puis inversion.
+        let mut visual: Vec<String> = Vec::new();
+        let mut k = 0;
+        while k < clusters.len() {
+            let b = clusters[k].0;
+            let mut piece = String::new();
+            let lam_alef = b == 0x0644
+                && k + 1 < clusters.len()
+                && ar_lam_alef(clusters[k + 1].0).is_some();
+            if lam_alef {
+                let mut lig = ar_lam_alef(clusters[k + 1].0).unwrap();
+                if links_prev[k] {
+                    lig += 1;
+                }
+                piece.push(char::from_u32(lig).unwrap());
+                for &m in clusters[k].1.iter().chain(clusters[k + 1].1.iter()) {
+                    piece.push(char::from_u32(m).unwrap());
+                }
+                k += 2;
+            } else if b != 0 {
+                let f = ar_forms(b).unwrap();
+                let link_n = k + 1 < clusters.len()
+                    && f[2] != 0
+                    && clusters[k + 1].0 != 0
+                    && ar_forms(clusters[k + 1].0).is_some_and(|nf| nf[1] != 0);
+                let form = match (links_prev[k], link_n) {
+                    (true, true) => f[3],
+                    (true, false) => f[1],
+                    (false, true) => f[2],
+                    (false, false) => f[0],
+                };
+                piece.push(char::from_u32(form).unwrap());
+                for &m in &clusters[k].1 {
+                    piece.push(char::from_u32(m).unwrap());
+                }
+                k += 1;
+            } else {
+                for &m in &clusters[k].1 {
+                    piece.push(char::from_u32(m).unwrap());
+                }
+                k += 1;
+            }
+            visual.push(piece);
+        }
+        for piece in visual.iter().rev() {
+            out.push_str(piece);
+        }
+    }
+    out
+}
+
 // =================== BUILD LINE 1 (banner) ===================
 
 struct GradStop(u8, u8, u8);
@@ -878,7 +1041,7 @@ fn detect_ollama_env() -> bool {
 // du stdin reste l'alias "claude-opus-4-8" (pas ":cloud"). MAIS l'environ PROPRE du
 // process claude (et de ses ancetres) garde ANTHROPIC_BASE_URL=http://127.0.0.1:1143x
 // et ANTHROPIC_DEFAULT_*_MODEL=...:cloud. On remonte donc la chaine des ppid en lisant
-// /proc/<pid>/environ jusqu'a trouver le signal (Linux/WSL uniquement). Cousin de la
+// /proc/<pid>/environ jusqu'a trouver le signal (Linux uniquement). Cousin de la
 // technique borrow_win_env. Valide : meme avec `env -i`, l'enfant lit l'env du parent.
 #[cfg(target_os = "linux")]
 fn parent_pid(pid: i32) -> Option<i32> {
@@ -1164,8 +1327,12 @@ fn main() {
     };
     let usage_ms = t_usage.elapsed().as_millis();
 
+    // Chemin pour l'AFFICHAGE seulement : pre-shaping arabe (terminal sans
+    // BiDi). compute_git() ci-dessus a recu le chemin brut.
+    let dir_display = arabic_display(&dir);
+
     let line1 = build_line1(
-        &dir,
+        &dir_display,
         &git,
         mode.as_deref(),
         model.as_deref(),
@@ -1217,4 +1384,46 @@ fn main() {
         f.write_all(line.as_bytes())?;
         Ok(())
     })();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::arabic_display;
+
+    fn s(cps: &[u32]) -> String {
+        cps.iter().map(|&c| char::from_u32(c).unwrap()).collect()
+    }
+
+    #[test]
+    fn ascii_inchange() {
+        assert_eq!(arabic_display(r"C:\dev\dev-environment"), r"C:\dev\dev-environment");
+    }
+
+    // al-islam (nom du vault) : memes vecteurs que test-arabic-display.ps1.
+    #[test]
+    fn al_islam_deux_ligatures() {
+        let input = s(&[0x0627, 0x0644, 0x0625, 0x0633, 0x0644, 0x0627, 0x0645]);
+        let want = s(&[0xFEE1, 0xFEFC, 0xFEB3, 0xFEF9, 0xFE8D]);
+        assert_eq!(arabic_display(&input), want);
+    }
+
+    #[test]
+    fn chemin_mixte_vault() {
+        let input = format!(r"C:\obsidian-vaults\{}", s(&[0x0627, 0x0644, 0x0625, 0x0633, 0x0644, 0x0627, 0x0645]));
+        let want = format!(r"C:\obsidian-vaults\{}", s(&[0xFEE1, 0xFEFC, 0xFEB3, 0xFEF9, 0xFE8D]));
+        assert_eq!(arabic_display(&input), want);
+    }
+
+    #[test]
+    fn marhaban_right_joiners() {
+        let input = s(&[0x0645, 0x0631, 0x062D, 0x0628, 0x0627]);
+        let want = s(&[0xFE8E, 0xFE92, 0xFEA3, 0xFEAE, 0xFEE3]);
+        assert_eq!(arabic_display(&input), want);
+    }
+
+    #[test]
+    fn idempotence() {
+        let shaped = s(&[0xFEE1, 0xFEFC, 0xFEB3, 0xFEF9, 0xFE8D]);
+        assert_eq!(arabic_display(&shaped), shaped);
+    }
 }
