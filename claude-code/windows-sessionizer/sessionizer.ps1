@@ -404,15 +404,21 @@ function Invoke-Run {    # commande FINALE (equivalent run()/exec du .sh)
 # active (Get-ActualName). $Dir reste le chemin BRUT du dossier sur disque.
 function Open-Session {
     param([string]$Name, [string]$Dir)
+    # --web-sharing on : OBLIGATOIRE pour que le telephone puisse attacher cette
+    # session via le web server zellij. Defaut zellij = "off" -> une session creee
+    # par F2 sans ce flag n'est PAS partagee au web server, et un attach web depuis
+    # le tel sort aussitot ("Bye from Zellij") -- vecu 2026-06-14. Les sessions
+    # creees DEPUIS le tel naissent deja partagees (via le web server), d'ou
+    # l'asymetrie. Le web server reste local (127.0.0.1 + token) : pas d'exposition.
     if ($InZellij) {
         # -w 0 : fenetre WT existante ; nt : new tab ; -p : profil (titre/icone) ;
         # -d : repertoire de depart. La session zellij vit dans l'onglet.
         Invoke-Run @('wt.exe', '-w', '0', 'nt', '-p', 'PowerShell', '-d', $Dir,
                      'pwsh', '-NoProfile', '-NoExit', '-Command',
-                     "zellij attach -c $Name options --on-force-close detach")
+                     "zellij attach -c $Name options --on-force-close detach --web-sharing on")
     } else {
         if ($Dir -and (Test-Path $Dir)) { Invoke-Step @('Set-Location', $Dir) }
-        Invoke-Run @('zellij', 'attach', '-c', $Name, 'options', '--on-force-close', 'detach')
+        Invoke-Run @('zellij', 'attach', '-c', $Name, 'options', '--on-force-close', 'detach', '--web-sharing', 'on')
     }
 }
 
