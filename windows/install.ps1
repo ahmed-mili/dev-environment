@@ -421,6 +421,26 @@ if (Test-Path $zellijExe) {
 }
 
 # ---------------------------------------------------------------------------
+# 2e) Zellij config Windows -- deploye SEULEMENT si absent (non-destructif)
+# ---------------------------------------------------------------------------
+# config-windows.kdl = overrides Windows (theme night-owl, keybinds F2/Ctrl+Y,
+# web_sharing "on" pour l'attach telephone). NON-DESTRUCTIF : une config deja
+# presente est souvent personnalisee a la main -> on ne l'ecrase JAMAIS, on
+# signale. Pour forcer un redeploiement : supprimer la cible puis relancer.
+Write-Step 'Zellij config (Windows)'
+$zjCfgSrc = Join-Path $PSScriptRoot '..\claude-code\zellij\config-windows.kdl'
+$zjCfgDst = Join-Path $env:APPDATA 'Zellij\config\config.kdl'
+if (-not (Test-Path $zjCfgSrc)) {
+    Write-Note 'config-windows.kdl source absente (install one-liner sans clone)'
+} elseif (Test-Path $zjCfgDst) {
+    Write-Note "config zellij deja presente -- laissee intacte ($(Short-Path $zjCfgDst)). Supprimer + relancer pour redeployer."
+} else {
+    New-Item -ItemType Directory -Force (Split-Path -Parent $zjCfgDst) | Out-Null
+    Write-Utf8File -Path $zjCfgDst -Content (Read-Utf8File $zjCfgSrc) -WithBom $false
+    Write-Ok (Short-Path $zjCfgDst)
+}
+
+# ---------------------------------------------------------------------------
 # 3) Windows PowerShell 5 profile
 # ---------------------------------------------------------------------------
 

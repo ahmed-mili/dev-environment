@@ -9,6 +9,18 @@ pane_frames false
 session_serialization false
 on_force_close "detach"
 
+// Sessions demarrees dans le terminal (F2) partageables via le web server local
+// -> attach depuis le telephone. Defaut zellij = "off" : sans ca, une session creee
+// par F2 n'est PAS servie par le web server et l'attach web du tel sort aussitot
+// ("Bye from Zellij", vecu 2026-06-14). Web server local 127.0.0.1 + token.
+web_sharing "on"
+
+// Police du client web (telephone) + pas de bandeau d'astuces a l'ouverture.
+web_client {
+    font "monospace"
+}
+show_startup_tips false
+
 // Truecolor pour Claude Code (il lit COLORTERM).
 env {
     COLORTERM "truecolor"
@@ -33,7 +45,7 @@ keybinds {
         bind "F2" {
             Run "pwsh" "-NoProfile" "-ExecutionPolicy" "Bypass" "-Command" "try { & ($env:USERPROFILE + '/.local/bin/sessionizer.ps1') } catch { $_ | Out-String | Write-Host; [void][Console]::ReadKey($true) }" {
                 floating true
-                close_on_exit true
+                hold_on_close false
             }
         }
         bind "Ctrl y" { Run "pwsh" "-NoLogo" "-NoExit" "-Command" "ollama launch claude --dangerously-skip-permissions --verbose --debug"; }
