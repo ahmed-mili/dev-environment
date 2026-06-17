@@ -14,6 +14,10 @@ Claude Code config shared between Windows and Android. Single source of truth.
 | `deploy.ps1` | Manual bidirectional sync between this folder and the **Windows** `~/.claude/` |
 | `keybindings.json` | Custom Claude Code keybindings (`Alt+V` image paste — see the Obsidian guide) |
 | `tmux.conf` | tmux forward 24-bit color so Claude Code renders truecolor over `mosh`+`tmux` (see the SSH Android guide) |
+| `scripts/kimi-vision.ps1` | Vision delegation for no-vision backends (e.g. `glm-5.2:cloud`, 1M context but no image support): base64-encodes an image, POSTs it to the local Ollama API (`kimi-k2.7-code:cloud`, MoonViT) and prints the textual description on stdout. Called by the assistant **instead of** `Read` on any image, so the conversation doesn't crash with `API Error: 400 this model does not support image input`. See the dedicated section below. |
+| `scripts/screenshot-shortcut.ahk` | AutoHotkey v2 hotkey `Alt+V`: finds the most recent screenshot in `%USERPROFILE%\Pictures\Screenshots` (+ OneDrive/`Videos\Captures` fallbacks), puts its absolute path on the clipboard and simulates `Ctrl+V` so it lands in the Claude Code prompt. Self-contained, `#SingleInstance Force`, UTF-8 BOM. The assistant then feeds that path to `kimi-vision.ps1`. |
+| `scripts/latest-screenshot.ps1` | Install-free fallback for the same shortcut (no AutoHotkey): finds the most recent screenshot, copies its path to the clipboard, and with `-Paste` simulates `Ctrl+V`. Bind it to a `.lnk` Shortcut key (e.g. `Ctrl+Alt+V`) if you want the shortcut without installing AHK. |
+| `scripts/install-screenshot-shortcut.ps1` | Idempotent bootstrap for the `Alt+V` shortcut: ensures AutoHotkey v2 is installed (`winget --scope user`, no UAC), creates the Startup `.lnk` so AHK relaunches at boot, and launches the `.ahk` immediately. `-Uninstall` removes the `.lnk` and kills the AHK process (leaves AHK and the `.ahk` in place). Run after `deploy.ps1 -Pull` on a new machine. |
 | `termux/img2clip` | Termux (Android) script: stages a phone photo/screenshot on the desktop by streaming the image over SSH to `%USERPROFILE%\.claude-images`. This avoids relying on the Windows OpenSSH SFTP subsystem, which can be disabled even when shell SSH works. The Windows watcher `img-clip-watcher.ps1` (launched beside `claude()` / `ollama()`) detects the file and fills the clipboard in the reader's window station. It deliberately never runs `ssh -p 2222 ... SetImage`: that writes to an ephemeral SSH window station and returns a false success. **Always called with a file-path argument** — by `screenshot-watcher` (auto) and by the `termux-file-editor` share hook. Notifications reuse the `img2clip` id and finish with `Ready to paste`; failures preserve a non-zero exit code so the watcher retries and never counts a failed upload as sent. |
 | `termux/termux-file-editor` | Termux built-in hook (deployed to `~/bin/`): triggered by **Share → Termux → EDIT** on any image, delegates to `img2clip`. Requires the Android permission *Display over other apps* on Termux. Lives on the phone, not synced by `deploy.sh` — installed via the express block in the SSH Android guide. |
 | `termux/screenshot-watcher` | Polling watcher (every 0.5s while enabled) on the phone's image dirs. As soon as a new screenshot/photo is detected, it posts `Image detected` on the same `img2clip` notification id, then waits until the file size is stable before handing it to `img2clip`; the notification is later replaced in place by transfer progress and final clipboard state. Two streams, both **ON by default** (flags created by `install.sh`, persistent in `$HOME`): `~/.screenshot-watcher.on` = `dcim/Screenshots`, `~/.screenshot-watcher.photos` = `dcim/Camera`. Only the **most recent** new image per stream is staged (not a FIFO replay): the clipboard holds one image, so converging to the newest avoids stale uploads on slow links. The cursor only advances on success, so a failed upload is retried, never silently dropped. Polling vs inotify because FUSE on `/sdcard` doesn't deliver inotify events from other apps. Toggle without killing: `touch`/`rm` the flag (aliases `photos-on`/`photos-off`). Deployed to `~/bin/screenshot-watcher`. |
@@ -210,6 +214,41 @@ ssh phone 'termux-reload-settings'
 ```
 
 Rollback: `ssh phone 'cp ~/.termux/font.ttf.bak ~/.termux/font.ttf && termux-reload-settings'`. Re-run the patch if a Termux font update overwrites it.
+
+## Vision delegation (no-vision backends) + Alt+V screenshot shortcut
+
+`glm-5.2:cloud` gives Claude Code a 1M-token context window (~4x kimi) but **no image support**: calling `Read` on a `.png/.jpg/...` crashes the conversation with `API Error: 400 this model does not support image input`. The chain below lets a no-vision backend still "see" images by delegating them to `kimi-k2.7-code:cloud` (MoonViT vision) through the local Ollama API.
+
+### How it fits together
+
+1. **`kimi-vision.ps1`** — the delegator. Base64-encodes the image, POSTs `{model:"kimi-k2.7-code:cloud", stream:false, messages:[{role:"user", content:<prompt>, images:[<b64>]}]}` to `http://localhost:11434/api/chat`, and prints `resp.message.content` on stdout. The assistant calls it **instead of** `Read` whenever an image must be analyzed, then uses kimi's textual answer to respond. Transparent, no conversation crash.
+2. **`screenshot-shortcut.ahk`** (AutoHotkey v2) — `Alt+V` finds the most recent screenshot and pastes its **path** into the active window (Claude Code prompt). The assistant then feeds that path to `kimi-vision.ps1`. Sending a path (text) instead of pasting the image is what avoids the 400 crash.
+
+### Install (one-time, idempotent)
+
+```powershell
+# After deploy.ps1 -Pull has placed the scripts in ~/.claude/scripts/
+& ~/.claude/scripts/install-screenshot-shortcut.ps1
+```
+
+That script ensures AutoHotkey v2 is installed (`winget install AutoHotkey.AutoHotkey --scope user`, no UAC), creates the Startup `.lnk` so AHK relaunches at every boot, and launches the `.ahk` immediately so `Alt+V` is active without a reboot. Re-run it safely anytime (`#SingleInstance Force` in the `.ahk` prevents duplicates). `-Uninstall` removes the `.lnk` and stops AHK.
+
+### Install-free fallback (no AutoHotkey)
+
+If you don't want to install AutoHotkey, `latest-screenshot.ps1` does the same search with no dependency. Create a `.lnk` (Shortcut key `Ctrl+Alt+V` — Windows shortcuts require a modifier) targeting:
+
+```
+pwsh -NoProfile -File %USERPROFILE%\.claude\scripts\latest-screenshot.ps1 -Paste
+```
+
+`Ctrl+Alt+V` then copies the latest screenshot's path to the clipboard and pastes it. `Alt+V` (single modifier, no Ctrl) is only achievable with AutoHotkey — that's the reason for the install above.
+
+### Important caveats
+
+- **Bypass permissions + no system guardrail**: in `bypassPermissions` mode, Claude Code skips `PreToolUse` hooks by design (issues #6305/#41151/#53589), so there is **no hook that blocks `Read` on an image**. The delegation relies entirely on the assistant following its persistent memory (auto-memory file `image-vision-delegation-glm`) — no system-level safety net. A `PreToolUse` model-aware blocker (`block-image-reads.ps1`) was tried and removed for this reason; do not re-add one while running in bypass.
+- **`Alt+V` always grabs the most recent screenshot.** For an older image, paste the path manually. Supported extensions in the `.ahk`: `png/jpg/jpeg/webp/bmp`. Other formats (`gif/svg/tiff/heic/avif/ico`) → paste the path manually; `kimi-vision.ps1` still handles them.
+- **If the `Ctrl+V`-simulated paste is swallowed by the terminal**, the path is still on the clipboard: press `Ctrl+V` yourself.
+- Ollama must be running (cloud sign-in OK) for `kimi-vision.ps1` to reach `kimi-k2.7-code:cloud`.
 
 ## Sessionizer (`pwsh` / F2)
 
