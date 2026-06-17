@@ -1192,21 +1192,154 @@ fn get_ollama_model() -> Option<String> {
     None
 }
 
-// Context window (en tokens) des modeles Ollama Cloud courants.
-// Source : docs Ollama Cloud / fiches modeles (DeepWiki, Collabnix, etc.).
+// Seed statique : fenetres connues, renvoyees sans aucun spawn (chemin chaud
+// zero-latence) et utilisees en fallback si `ollama` n'est pas joignable. Ce
+// n'est PLUS la source de verite -- resolve_ollama_context() interroge
+// `ollama show` puis met en cache tout modele absent d'ici. Inutile donc
+// d'ajouter chaque nouveau modele cloud a la main : le seed sert juste a eviter
+// le flash 200k au tout premier tick pour les modeles les plus courants.
 fn ollama_context_window(model: &str) -> Option<i64> {
     match model {
         "deepseek-v4-pro:cloud" | "deepseek-v4-flash:cloud" => Some(1_000_000),
         "kimi-k2.6:cloud" | "kimi-k2.5:cloud" | "kimi-k2:1t:cloud" | "qwen3.5:cloud" => Some(262_144),
+        "glm-5.2:cloud" => Some(1_000_000), // verifie via `ollama show glm-5.2:cloud` : context length 1000000
         "glm-5.1:cloud" => Some(131_072),
         "minimax-m3:cloud" | "minimax-m2:cloud" => Some(1_000_000),
         _ => None,
     }
 }
 
+// =================== CONTEXT WINDOW DYNAMIQUE (cache disque) ===================
+
+// Cache persistant model -> context length (tokens), rempli a la demande par un
+// `ollama show <model>` lance en arriere-plan. But : ne plus maintenir a la main
+// la table ollama_context_window() a chaque nouveau modele cloud. Une fois un
+// modele resolu, sa fenetre est ecrite ici et relue instantanement aux ticks
+// suivants (zero spawn). Format : {"glm-5.2:cloud": 1000000, ...}.
+fn ollama_context_cache_path(claude_dir: &Path) -> PathBuf {
+    claude_dir.join("ollama-context-cache.json")
+}
+
+fn read_cached_context(claude_dir: &Path, model: &str) -> Option<i64> {
+    let raw = fs::read_to_string(ollama_context_cache_path(claude_dir)).ok()?;
+    let v: Value = serde_json::from_str(&raw).ok()?;
+    v.get(model).and_then(|x| x.as_i64())
+}
+
+// Parse la sortie de `ollama show <model>` pour extraire "context length".
+// Exemple de ligne (espaces variables) : "    context length      1000000".
+fn parse_ollama_context_length(output: &str) -> Option<i64> {
+    for line in output.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("context length") {
+            let digits: String = rest.chars().filter(|c| c.is_ascii_digit()).collect();
+            if !digits.is_empty() {
+                return digits.parse().ok();
+            }
+        }
+    }
+    None
+}
+
+// Nom de fichier sur : un model contient ':' '/' '.' interdits/genants.
+fn sanitize_model(model: &str) -> String {
+    model
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+// Spawn detache d'une re-invocation de soi-meme (`statusline.exe --resolve-ctx
+// <model>`) qui fera le `ollama show` + ecrira le cache. Cooldown par modele
+// pour ne pas spammer pendant que la 1ere resolution est en vol (le cache etant
+// permanent une fois ecrit, un cooldown court suffit). Meme pattern detache que
+// le git fetch / read_ollama_usage : zero blocage du chemin chaud.
+fn spawn_context_resolver(claude_dir: &Path, model: &str) {
+    let marker = claude_dir.join(format!("ollama-ctx-fetch-{}", sanitize_model(model)));
+    let needs = file_age_secs(&marker).map(|a| a >= 30.0).unwrap_or(true);
+    if !needs {
+        return;
+    }
+    touch(&marker);
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let mut cmd = Command::new(exe);
+    cmd.arg("--resolve-ctx").arg(model);
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW | 0x00000008 /* DETACHED_PROCESS */);
+    let _ = cmd.spawn();
+}
+
+// Resolution : seed statique (instantane) -> cache disque -> sinon declenche un
+// resolver en arriere-plan et rend None ce tick (le prochain tick lira la valeur
+// fraiche du cache). Aucun appel bloquant sur le chemin chaud.
+fn resolve_ollama_context(claude_dir: &Path, model: &str) -> Option<i64> {
+    if let Some(sz) = ollama_context_window(model) {
+        return Some(sz);
+    }
+    if let Some(sz) = read_cached_context(claude_dir, model) {
+        return Some(sz);
+    }
+    spawn_context_resolver(claude_dir, model);
+    None
+}
+
+// Mode resolver (process detache, lance par spawn_context_resolver) : execute
+// `ollama show <model>`, parse, merge dans le cache JSON. N'imprime PAS de
+// statusline. Best-effort : echoue silencieusement si ollama absent / modele
+// inconnu / parse rate.
+fn run_context_resolver(claude_dir: &Path, model: &str) {
+    let mut cmd = Command::new("ollama");
+    cmd.arg("show").arg(model);
+    cmd.stdin(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let Ok(out) = cmd.output() else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    let Ok(text) = String::from_utf8(out.stdout) else {
+        return;
+    };
+    let Some(ctx) = parse_ollama_context_length(&text) else {
+        return;
+    };
+
+    // Read-modify-write du cache (temp + rename atomique sur le meme volume).
+    let path = ollama_context_cache_path(claude_dir);
+    let mut map = fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    map.insert(model.to_string(), Value::from(ctx));
+    if let Ok(body) = serde_json::to_string(&Value::Object(map)) {
+        let tmp = path.with_extension("json.tmp");
+        if fs::write(&tmp, body.as_bytes()).is_ok() {
+            let _ = fs::rename(&tmp, &path);
+        }
+    }
+}
+
 // =================== MAIN ===================
 
 fn main() {
+    // Mode resolver detache (cf. spawn_context_resolver) : resout la fenetre de
+    // contexte d'un modele Ollama via `ollama show`, l'ecrit dans le cache, et
+    // sort sans rien imprimer. Branche avant toute lecture de stdin.
+    let argv: Vec<String> = std::env::args().collect();
+    if argv.len() >= 3 && argv[1] == "--resolve-ctx" {
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        let claude_dir = PathBuf::from(&home).join(".claude");
+        run_context_resolver(&claude_dir, &argv[2]);
+        return;
+    }
+
     // INSTRUMENTATION (2026-05-20) : freeze ~3s constant signalé par user.
     // On mesure : durée totale, durée git, durée usage (avec breakdown source / api_ms).
     // Log append-only dans `~/.claude/statusline-tick-log.txt`. À retirer après
@@ -1300,10 +1433,22 @@ fn main() {
     // Correction du contexte affiche : Claude Code envoie ctx_size=200k (sa valeur
     // par defaut interne) meme quand le modele Ollama sous-jacent supporte 1M.
     // On remplace par la vraie taille, et on affiche le vrai nom du modele.
+    //
+    // Source du nom de modele cloud, par ordre de fiabilite :
+    //   1. get_ollama_model() -> /proc des ancetres (Linux : claude scrube
+    //      ANTHROPIC_* ET reduit model.id du stdin a l'alias "claude-opus-4-8").
+    //   2. model.id / display_name du stdin -> sous Windows /proc n'existe pas,
+    //      mais `ollama launch` laisse passer le vrai nom ":cloud" dans le stdin
+    //      (ex. "glm-5.2:cloud"), donc le fallback suffit. Sans ce fallback,
+    //      get_ollama_model() renvoyait toujours None sous Windows et ctx_size
+    //      restait coince a 200k.
     if ollama {
-        if let Some(om) = get_ollama_model() {
+        let cloud_model = get_ollama_model()
+            .or_else(|| model_id.clone())
+            .or_else(|| model.clone());
+        if let Some(om) = cloud_model {
             model = Some(om.clone());
-            if let Some(sz) = ollama_context_window(&om) {
+            if let Some(sz) = resolve_ollama_context(&claude_dir, &om) {
                 ctx_size = Some(sz);
             }
         }
@@ -1388,7 +1533,33 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::arabic_display;
+    use super::{arabic_display, ollama_context_window, parse_ollama_context_length};
+
+    // Regression : glm-5.2:cloud doit renvoyer 1M (verifie via `ollama show`).
+    // Le bug d'origine : la table connaissait glm-5.1 (131072) mais pas la 5.2,
+    // donc ctx_size restait a la valeur par defaut 200k de Claude Code.
+    #[test]
+    fn glm_5_2_context_window() {
+        assert_eq!(ollama_context_window("glm-5.2:cloud"), Some(1_000_000));
+    }
+
+    #[test]
+    fn unknown_model_no_window() {
+        assert_eq!(ollama_context_window("modele-inexistant:cloud"), None);
+    }
+
+    // Parse de la vraie sortie `ollama show glm-5.2:cloud`.
+    #[test]
+    fn parse_context_length_reel() {
+        let out = "  Model\n    architecture        glm5.2          \n    parameters          756162687872    \n    context length      1000000         \n    embedding length    0               \n    quantization                        \n\n  Capabilities\n    thinking      \n    completion    \n    tools         \n";
+        assert_eq!(parse_ollama_context_length(out), Some(1_000_000));
+    }
+
+    #[test]
+    fn parse_context_length_absent() {
+        let out = "  Model\n    architecture        foo\n    parameters          123\n";
+        assert_eq!(parse_ollama_context_length(out), None);
+    }
 
     fn s(cps: &[u32]) -> String {
         cps.iter().map(|&c| char::from_u32(c).unwrap()).collect()
