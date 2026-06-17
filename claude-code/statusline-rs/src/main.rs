@@ -1192,24 +1192,12 @@ fn get_ollama_model() -> Option<String> {
     None
 }
 
-// Seed statique : fenetres connues, renvoyees sans aucun spawn (chemin chaud
-// zero-latence) et utilisees en fallback si `ollama` n'est pas joignable. Ce
-// n'est PLUS la source de verite -- resolve_ollama_context() interroge
-// `ollama show` puis met en cache tout modele absent d'ici. Inutile donc
-// d'ajouter chaque nouveau modele cloud a la main : le seed sert juste a eviter
-// le flash 200k au tout premier tick pour les modeles les plus courants.
-fn ollama_context_window(model: &str) -> Option<i64> {
-    match model {
-        "deepseek-v4-pro:cloud" | "deepseek-v4-flash:cloud" => Some(1_000_000),
-        "kimi-k2.6:cloud" | "kimi-k2.5:cloud" | "kimi-k2:1t:cloud" | "qwen3.5:cloud" => Some(262_144),
-        "glm-5.2:cloud" => Some(1_000_000), // verifie via `ollama show glm-5.2:cloud` : context length 1000000
-        "glm-5.1:cloud" => Some(131_072),
-        "minimax-m3:cloud" | "minimax-m2:cloud" => Some(1_000_000),
-        _ => None,
-    }
-}
-
-// =================== CONTEXT WINDOW DYNAMIQUE (cache disque) ===================
+// =================== CONTEXT WINDOW (dynamique, via `ollama show` + cache) ===================
+//
+// Pas de table de fenetres codees en dur : elles etaient peu fiables (ex. la
+// table annoncait minimax-m3 a 1M alors que `ollama show` donne 524288, et il
+// fallait l'editer + rebuild a chaque nouveau modele). `ollama show` est la
+// SEULE source de verite, le resultat est mis en cache disque par modele.
 
 // Cache persistant model -> context length (tokens), rempli a la demande par un
 // `ollama show <model>` lance en arriere-plan. But : ne plus maintenir a la main
@@ -1271,13 +1259,12 @@ fn spawn_context_resolver(claude_dir: &Path, model: &str) {
     let _ = cmd.spawn();
 }
 
-// Resolution : seed statique (instantane) -> cache disque -> sinon declenche un
-// resolver en arriere-plan et rend None ce tick (le prochain tick lira la valeur
-// fraiche du cache). Aucun appel bloquant sur le chemin chaud.
+// Resolution : le cache (rempli par `ollama show`, SEULE source de verite). Si
+// le modele n'y est pas encore, on declenche un resolver en arriere-plan et on
+// rend None ce tick -- Claude Code affiche alors sa valeur par defaut (~200k) le
+// temps d'un tick, puis la vraie fenetre des que le cache est ecrit. Aucune
+// valeur codee en dur => jamais de fenetre fausse, et zero maintenance par modele.
 fn resolve_ollama_context(claude_dir: &Path, model: &str) -> Option<i64> {
-    if let Some(sz) = ollama_context_window(model) {
-        return Some(sz);
-    }
     if let Some(sz) = read_cached_context(claude_dir, model) {
         return Some(sz);
     }
@@ -1533,20 +1520,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{arabic_display, ollama_context_window, parse_ollama_context_length};
-
-    // Regression : glm-5.2:cloud doit renvoyer 1M (verifie via `ollama show`).
-    // Le bug d'origine : la table connaissait glm-5.1 (131072) mais pas la 5.2,
-    // donc ctx_size restait a la valeur par defaut 200k de Claude Code.
-    #[test]
-    fn glm_5_2_context_window() {
-        assert_eq!(ollama_context_window("glm-5.2:cloud"), Some(1_000_000));
-    }
-
-    #[test]
-    fn unknown_model_no_window() {
-        assert_eq!(ollama_context_window("modele-inexistant:cloud"), None);
-    }
+    use super::{arabic_display, parse_ollama_context_length};
 
     // Parse de la vraie sortie `ollama show glm-5.2:cloud`.
     #[test]
