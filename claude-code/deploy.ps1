@@ -35,8 +35,8 @@ $HomeClaude = "$env:USERPROFILE\.claude"
 # Custom skills tracked in the repo (explicit whitelist)
 $CustomSkills = @(
     'claude-file-recovery', 'copy-edit', 'css-layout-check', 'deploy-safety',
-    'edit-block', 'lucide-icons', 'release', 'root-cause-fix', 'smart-edit',
-    'sticky-column-bleed-fix', 'webapp-deploy'
+    'edit-block', 'humanizer', 'lucide-icons', 'release', 'root-cause-fix',
+    'smart-edit', 'sticky-column-bleed-fix', 'webapp-deploy'
 )
 
 # Local-only hooks : present in ~/.claude/hooks/ but never pushed to the
