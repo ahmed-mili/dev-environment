@@ -457,6 +457,16 @@ function Read-OrCancel {
     return "$($first.KeyChar)$rest"
 }
 
+# Confirmation a une touche : Enter -> $true (confirme). Tout le reste (Esc
+# compris) -> $false (annule). Remplace l'ancien "[y/N]" + ligne complete :
+# une seule touche suffit, marche pareil sur pwsh natif et sur pwsh via SSH
+# depuis Termux (meme lecteur [Console]::ReadKey).
+function Read-KillConfirm {
+    try { $key = [Console]::ReadKey($true) } catch { return $false }
+    [Console]::Error.WriteLine()
+    return $key.Key -eq 'Enter'
+}
+
 # --- Selection -------------------------------------------------------------------
 if ($Pick) {
     $key = $Key
@@ -695,14 +705,13 @@ if ($key -eq 'ctrl-x') {
         if ($f[0] -eq 'active') {
             $name = $f[1]
             if (-not $JoinableSessions.Contains($name)) {
-                [Console]::Error.Write("Kill '$name'? Session tel/web (autre logon session) - le kill peut echouer d'ici. [y/N] ")
+                [Console]::Error.Write("Kill '$name'? Session tel/web (autre logon session) - le kill peut echouer d'ici. [Enter=kill / Esc=cancel] ")
             } elseif (($projects -contains (Get-CanonicalName $name)) -or ($vaults -contains (Get-CanonicalName $name))) {
-                [Console]::Error.Write("Kill '$name'? Stays listed as o inactive. [y/N] ")
+                [Console]::Error.Write("Kill '$name'? Stays listed as inactive. [Enter=kill / Esc=cancel] ")
             } else {
-                [Console]::Error.Write("Kill '$name'? Disposable - disappears from the list. [y/N] ")
+                [Console]::Error.Write("Kill '$name'? Disposable - disappears from the list. [Enter=kill / Esc=cancel] ")
             }
-            $ans = Read-OrCancel
-            if ($ans -match '^[yY]') {
+            if (Read-KillConfirm) {
                 Invoke-Step @('zellij', 'kill-session', $name)
             }
         }

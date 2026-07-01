@@ -63,6 +63,10 @@ with ANSI escapes and Nerd Font glyphs.
 | `Ctrl+R` | Fuzzy history search (fzf) |
 | `Ctrl+T` | Fuzzy file picker (fzf) |
 | `Ctrl+Alt+T` | Open elevated Terminal (desktop shortcut) |
+| `Alt+L` | Claude Code `/login` (auto-confirms the default method) |
+| `Alt+R` | Claude Code `/resume` |
+
+`Alt+L`/`Alt+R` are Windows Terminal actions (`sendInput`), deployed with `wt-settings.json` above. Same two shortcuts also exist for VS Code's integrated terminal — not auto-deployed (a real `keybindings.json` usually already holds personal bindings): merge `files/vscode-keybindings.json` into `%APPDATA%\Code\User\keybindings.json` by hand. Details in [`claude-code/README.md`](../claude-code/README.md#login--resume-shortcuts-altl--altr).
 
 ## License
 

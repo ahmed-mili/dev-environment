@@ -5,7 +5,9 @@
     {
       "context": "Chat",
       "bindings": {
-        "meta+v": "chat:imagePaste"
+        "meta+v": "chat:imagePaste",
+        "ctrl+l": "command:clear",
+        "alt+l": "command:login"
       }
     }
   ]

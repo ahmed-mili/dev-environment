@@ -52,6 +52,19 @@ The wake-lock is acquired automatically by `~/.bashrc.local` on every shell star
 
 When `pwsh` cannot reach the PC, it now prints a targeted hint: Tailscale reconnect/restart for route timeouts, `Restart-Service sshd` for a reachable PC with port 2222 refusing, SSH key/user guidance for auth failures, or a Zellij web message when the desktop session is not ready.
 
+### Extra keys row
+
+`files/termux.properties` adds 4 macro keys to the two default rows (arrows shifted right so `HOME`/`END` stay put):
+
+| Key | Macro |
+| --- | --- |
+| `login` | `/login` + Enter + Enter (accepts the default login method) |
+| `res` | `/resume` + Enter |
+| `pwsh` | types `pwsh` + Enter — same unified sessionizer as F2 on the PC (see above) |
+| `DET` | `Ctrl+O` then `d` — detach, the inverse of `pwsh` |
+
+`login`/`res` only make sense once you're inside a Claude Code session (`pwsh` → pick a session first); they don't SSH anywhere on their own. See [`claude-code/README.md`](../claude-code/README.md#login--resume-shortcuts-altl--altr) for the Windows Terminal/VS Code side of the same shortcuts.
+
 ## Clipboard: "press c to copy" is silently dropped over mosh
 
 Anything that copies to the clipboard via the **OSC 52** terminal escape — including Claude Code's `/login` "press `c` to copy" — *looks* like it works (the app prints "copied") but nothing lands in the Android clipboard. The copy is lost in transit, not at either end:

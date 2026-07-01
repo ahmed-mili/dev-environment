@@ -1,0 +1,18 @@
+[
+    {
+        "key": "alt+l",
+        "command": "workbench.action.terminal.sendSequence",
+        "args": {
+            "text": "/login\r\r"
+        },
+        "when": "terminalFocus"
+    },
+    {
+        "key": "alt+r",
+        "command": "workbench.action.terminal.sendSequence",
+        "args": {
+            "text": "/resume\r"
+        },
+        "when": "terminalFocus"
+    }
+]

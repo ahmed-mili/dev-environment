@@ -12,7 +12,7 @@ Claude Code config shared between Windows and Android. Single source of truth.
 | `hooks/` | `auto-pull.ps1`, `auto-push.ps1`, `resolve-sync-conflicts.ps1` — reserved for manual/future use, no longer called from SessionStart/End |
 | `skills/` | Custom skills: claude-file-recovery, copy-edit, css-layout-check, deploy-safety, edit-block, lucide-icons, release, root-cause-fix, smart-edit, sticky-column-bleed-fix, webapp-deploy |
 | `deploy.ps1` | Manual bidirectional sync between this folder and the **Windows** `~/.claude/` |
-| `keybindings.json` | Custom Claude Code keybindings (`Alt+V` image paste — see the Obsidian guide) |
+| `keybindings.json` | Custom Claude Code keybindings: `Alt+V` image paste (see the Obsidian guide), `Alt+L` → `/login` fallback (see Login / Resume shortcuts below) |
 | `tmux.conf` | tmux forward 24-bit color so Claude Code renders truecolor over `mosh`+`tmux` (see the SSH Android guide) |
 | `scripts/kimi-vision.ps1` | Vision delegation for no-vision backends (e.g. `glm-5.2:cloud`, 1M context but no image support): base64-encodes an image, POSTs it to the local Ollama API (`kimi-k2.7-code:cloud`, MoonViT) and prints the textual description on stdout. Called by the assistant **instead of** `Read` on any image, so the conversation doesn't crash with `API Error: 400 this model does not support image input`. See the dedicated section below. |
 | `scripts/screenshot-shortcut.ahk` | AutoHotkey v2 hotkey `Alt+V`: finds the most recent screenshot in `%USERPROFILE%\Pictures\Screenshots` (+ OneDrive/`Videos\Captures` fallbacks), puts its absolute path on the clipboard and simulates `Ctrl+V` so it lands in the Claude Code prompt. Self-contained, `#SingleInstance Force`, UTF-8 BOM. The assistant then feeds that path to `kimi-vision.ps1`. |
@@ -250,6 +250,22 @@ pwsh -NoProfile -File %USERPROFILE%\.claude\scripts\latest-screenshot.ps1 -Paste
 - **If the `Ctrl+V`-simulated paste is swallowed by the terminal**, the path is still on the clipboard: press `Ctrl+V` yourself.
 - Ollama must be running (cloud sign-in OK) for `kimi-vision.ps1` to reach `kimi-k2.7-code:cloud`.
 
+## Login / Resume shortcuts (Alt+L / Alt+R)
+
+Useful when you juggle multiple Claude Pro accounts and switch often: `/login` (with the default login method auto-confirmed) and `/resume` get a dedicated shortcut wired into every place you might be typing — native Windows Terminal, VS Code's integrated terminal, and Termux on the phone (SSH into the desktop).
+
+| Where | `Alt+L` (login) | `Alt+R` (resume) |
+| --- | --- | --- |
+| Windows Terminal | `sendInput` action, `/login\r\r` — the 2nd `\r` accepts the default login method | `sendInput`, `/resume\r` |
+| VS Code integrated terminal | `sendSequence`, same two escape sequences, `when: terminalFocus` | same |
+| Claude Code itself (`keybindings.json`) | `alt+l` → `command:login` — fallback for terminals `sendInput`/`sendSequence` can't reach | no `command:resume` equivalent — use a terminal-level shortcut instead |
+
+`sendInput` acts client-side, so the Windows Terminal shortcut also fires inside an SSH session opened from WT (e.g. attached from the phone through the Zellij web tunnel).
+
+- **Windows Terminal**: deployed automatically by `windows/install.ps1` (part of `wt-settings.json`).
+- **VS Code**: not auto-deployed — `keybindings.json` on a real machine usually already holds unrelated personal bindings, so a blind overwrite would be destructive. Merge `windows/files/vscode-keybindings.json` into `%APPDATA%\Code\User\keybindings.json` by hand.
+- **Termux**: two extra-keys macros (`login`, `res`) on the phone's keyboard row — see [`android/README.md`](../android/README.md#extra-keys-row).
+
 ## Sessionizer (`pwsh` / F2)
 
 `windows-sessionizer/sessionizer.ps1` est le menu fzf natif Windows qui fusionne, en une liste : `●` **sessions** Zellij actives (attach), `○` **projets** sous `C:\dev` sans session (créer dans le dossier), `○` **vaults Obsidian** en violet (PowerShell natif), et **nouvelles** sessions ad-hoc (Ctrl+N). Depuis Termux, `pwsh` demande cette même vue `all` que F2 au PC, puis ouvre le choix via le tunnel Zellij web pour que la session reste joignable depuis le bureau.
@@ -290,7 +306,9 @@ On Termux, the `pwsh` menu auto-refreshes while it is open, keeping the last goo
 | 🟣 **Obsidian vault** | ✅ stays, flips to `○` **inactive** | same — the vault folder still exists |
 | ⚪ **disposable** (free name, no folder) | ❌ **disappears entirely** | a `○` row means "folder exists, no session"; a disposable session has no folder, so nothing is left to list |
 
-A "real" session is therefore **never lost** from the list — `Ctrl+X` just deactivates it (`●` → `○`), and you re-enter it later (`claude --resume` recovers the transcript). Only a truly disposable session vanishes, which is the whole point of "disposable". The confirm prompt states which case applies before you commit (`Kill 'x'? Stays listed as ○ inactive.` vs `… Disposable — disappears from the list.`).
+A "real" session is therefore **never lost** from the list — `Ctrl+X` just deactivates it (`●` → `○`), and you re-enter it later (`claude --resume` recovers the transcript). Only a truly disposable session vanishes, which is the whole point of "disposable". The confirm prompt states which case applies before you commit (`Kill 'x'? Stays listed as inactive.` vs `… Disposable — disappears from the list.`).
+
+Confirming is a **single keypress**, not a typed `y`/`n` + Enter: press **Enter** to confirm the kill, **Esc** (or any other key) to cancel. Same one-key reader on both entry points — `[Console]::ReadKey` in `sessionizer.ps1` (F2, desktop) and a raw `stty -icanon` read in `_pc_read_confirm` (`pwsh` from Termux) — so the gesture feels identical whether you're on the desktop or SSH'd in from the phone.
 
 ## Statusline — technical details
 

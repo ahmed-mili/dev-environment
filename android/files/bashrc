@@ -342,6 +342,19 @@ _pc_open_native_session() {
   [ "$had_monitor" -eq 1 ] && set -m
   return "$rc"
 }
+# Confirmation a une touche : Enter -> succes (confirme). Tout le reste (Esc
+# compris) -> echec (annule). Bascule le tty en mode brut le temps de lire
+# 1 octet (sinon Termux tamponne la ligne et Escape n'arrive qu'apres Enter),
+# puis restaure les reglages avant de rendre la main.
+_pc_read_confirm() {
+  local old_stty keypress
+  old_stty=$(stty -g 2>/dev/null)
+  stty -icanon -echo min 1 time 0 2>/dev/null
+  IFS= read -r -n1 keypress
+  [ -n "$old_stty" ] && stty "$old_stty" 2>/dev/null
+  printf '\n' >&2
+  [ -z "$keypress" ]
+}
 _pc_pick_native() {
   local view="${1:-all}"
   local prompt="${2:-⌕ }"
@@ -437,18 +450,15 @@ _pc_pick_native() {
       return $?
     fi
     if [ "$key" = "ctrl-x" ]; then
-      local ans
       kind=$(printf '%s' "$choice" | cut -f1)
       name=$(printf '%s' "$choice" | cut -f2)
       if [ "$kind" = "active" ] && [ -n "$name" ]; then
-        printf "Kill '%s' ? [y/N] " "$name" >&2
-        IFS= read -r ans
-        case "$ans" in
-          [yY]*)
-            # best-effort : les sessions vivent dans la Session 1 du bureau ; le
-            # kill via sshd peut echouer cross-logon (cf. zellij-windows-pieges).
-            _pc_ssh_win "tuer la session $name" "pwsh -NoProfile -NoLogo -Command \"zellij kill-session '$name'\"" ;;
-        esac
+        printf "Kill '%s'? [Enter=kill / Esc=cancel] " "$name" >&2
+        if _pc_read_confirm; then
+          # best-effort : les sessions vivent dans la Session 1 du bureau ; le
+          # kill via sshd peut echouer cross-logon (cf. zellij-windows-pieges).
+          _pc_ssh_win "tuer la session $name" "pwsh -NoProfile -NoLogo -Command \"zellij kill-session '$name'\""
+        fi
         bash "$refresh_script" >/dev/null 2>&1
         rows="$(cat "$rows_cache" 2>/dev/null || printf '%s\n' "$rows")"
       fi
