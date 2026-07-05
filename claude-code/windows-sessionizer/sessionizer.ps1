@@ -323,13 +323,15 @@ $ItemPrefix = "$TreeLine "
 # Ligne menu d'une session active : verte si joignable d'ici, jaune + suffixe
 # "(tel/web)" si elle vit dans une autre logon session (attach impossible).
 # Champ 2 = nom BRUT (identifiant zellij/chemin), label = pre-shaping arabe.
+# Champ 5 = type ('project'/'vault'/'session') -- lu au kill-confirm (Ctrl+X)
+# pour colorer le nom comme la section dont il vient ($F projets, $M vaults).
 function Get-ActiveLine {
-    param([string]$Name)
+    param([string]$Name, [string]$Kind = 'session')
     $disp = ConvertTo-ArabicDisplay $Name
     if ($JoinableSessions.Contains($Name)) {
-        return "active$T$Name$T$ItemPrefix$G$BulletOn$R $disp  $G(active)$R$T$Name"
+        return "active$T$Name$T$ItemPrefix$G$BulletOn$R $disp  $G(active)$R$T$Name$T$Kind"
     }
-    return "active$T$Name$T$ItemPrefix$G$BulletOn$R $disp  $Y(active - tel/web)$R$T$Name"
+    return "active$T$Name$T$ItemPrefix$G$BulletOn$R $disp  $Y(active - tel/web)$R$T$Name$T$Kind"
 }
 
 function Build-Menu {
@@ -345,7 +347,7 @@ function Build-Menu {
         $lines.Add("sep${T}__sep_projects$T$D$Rule  $F$Diamond Projects$D  $Rule$R$T")
         foreach ($p in $projects) {
             if ($activesCanon -contains $p) {
-                $lines.Add((Get-ActiveLine (Get-ActualName $p)))
+                $lines.Add((Get-ActiveLine (Get-ActualName $p) -Kind 'project'))
             } else {
                 $lines.Add("project$T$p$T$ItemPrefix$BulletOff $(ConvertTo-ArabicDisplay $p)$T$p")
             }
@@ -355,7 +357,7 @@ function Build-Menu {
         $lines.Add("sep${T}__sep_vaults$T$D$Rule  $M$Diamond Obsidian Vaults$D  $Rule$R$T")
         foreach ($v in $vaults) {
             if ($activesCanon -contains $v) {
-                $lines.Add((Get-ActiveLine (Get-ActualName $v)))
+                $lines.Add((Get-ActiveLine (Get-ActualName $v) -Kind 'vault'))
             } else {
                 $lines.Add("vault$T$v$T$ItemPrefix$BulletOff $(ConvertTo-ArabicDisplay $v)$T$v")
             }
@@ -695,22 +697,29 @@ $matches | Sort-Object Score, Index | ForEach-Object { $_.Line }
 # CLI zellij -> no-op documente. Apres l'action on REOUVRE le menu (recursion).
 function Restart-Menu {
     if ($DryRun -or $Pick) { exit 0 }   # pas de boucle en mode test
+    # Efface le prompt hors-fzf (Kill/rename/nouvelle session) avant de rouvrir :
+    # ces ecritures passent par le buffer principal du terminal (fzf tourne dans
+    # le buffer alternatif), donc sans ca chaque cycle Ctrl+X/Ctrl+R empile son
+    # message au-dessus du precedent au lieu de le remplacer (vecu 2026-07-02).
+    try { [Console]::Clear() } catch {}
     & $PSCommandPath -View $View
     exit $LASTEXITCODE
 }
 
 if ($key -eq 'ctrl-x') {
     if ($choice) {
-        $f = $choice -split "`t"
-        if ($f[0] -eq 'active') {
-            $name = $f[1]
-            if (-not $JoinableSessions.Contains($name)) {
-                [Console]::Error.Write("Kill '$name'? Session tel/web (autre logon session) - le kill peut echouer d'ici. [Enter=kill / Esc=cancel] ")
-            } elseif (($projects -contains (Get-CanonicalName $name)) -or ($vaults -contains (Get-CanonicalName $name))) {
-                [Console]::Error.Write("Kill '$name'? Stays listed as inactive. [Enter=kill / Esc=cancel] ")
-            } else {
-                [Console]::Error.Write("Kill '$name'? Disposable - disappears from the list. [Enter=kill / Esc=cancel] ")
-            }
+        # $parts, PAS $f : PowerShell est insensible a la casse sur les noms de
+        # variable -> $f et $F (couleur jaune dossier des projets) sont LA MEME
+        # variable. Un "$f = ..." ecrase silencieusement $F, et $color finit par
+        # contenir le tableau $parts entier (rejoint par des espaces) au lieu du
+        # code ANSI (vecu 2026-07-02 : "Enter to kill active dev-environment [...]").
+        $parts = $choice -split "`t"
+        if ($parts[0] -eq 'active') {
+            $name = $parts[1]
+            $kind = if ($parts.Count -ge 5) { $parts[4] } else { 'session' }
+            $color = if ($kind -eq 'project') { $F } elseif ($kind -eq 'vault') { $M } else { '' }
+            $reset = if ($color) { $R } else { '' }
+            [Console]::Error.Write("Enter to kill $color$name$reset (Esc to cancel) ")
             if (Read-KillConfirm) {
                 Invoke-Step @('zellij', 'kill-session', $name)
             }
@@ -720,9 +729,9 @@ if ($key -eq 'ctrl-x') {
 }
 if ($key -eq 'ctrl-r') {
     if ($choice) {
-        $f = $choice -split "`t"
-        if ($f[0] -eq 'active') {
-            [Console]::Error.Write("New name for '$($f[1])': ")
+        $parts = $choice -split "`t"
+        if ($parts[0] -eq 'active') {
+            [Console]::Error.Write("New name for '$($parts[1])': ")
             $ans = Read-OrCancel
             if ($ans) {
                 [Console]::Error.WriteLine('(rename via the menu is not supported with Zellij yet - skipped)')
@@ -735,8 +744,8 @@ if ($key -eq 'ctrl-r') {
 if ($key -eq 'ctrl-n') { $type = 'new'; $name = '' }
 elseif (-not $choice)  { exit 0 }
 else {
-    $f = $choice -split "`t"
-    $type = $f[0]; $name = $f[1]
+    $parts = $choice -split "`t"
+    $type = $parts[0]; $name = $parts[1]
 }
 
 switch ($type) {

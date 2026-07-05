@@ -306,9 +306,9 @@ On Termux, the `pwsh` menu auto-refreshes while it is open, keeping the last goo
 | 🟣 **Obsidian vault** | ✅ stays, flips to `○` **inactive** | same — the vault folder still exists |
 | ⚪ **disposable** (free name, no folder) | ❌ **disappears entirely** | a `○` row means "folder exists, no session"; a disposable session has no folder, so nothing is left to list |
 
-A "real" session is therefore **never lost** from the list — `Ctrl+X` just deactivates it (`●` → `○`), and you re-enter it later (`claude --resume` recovers the transcript). Only a truly disposable session vanishes, which is the whole point of "disposable". The confirm prompt states which case applies before you commit (`Kill 'x'? Stays listed as inactive.` vs `… Disposable — disappears from the list.`).
+A "real" session is therefore **never lost** from the list — `Ctrl+X` just deactivates it (`●` → `○`), and you re-enter it later (`claude --resume` recovers the transcript). Only a truly disposable session vanishes, which is the whole point of "disposable". The table above is what happens; the prompt itself stays terse (see below) since `Ctrl+X` already means kill.
 
-Confirming is a **single keypress**, not a typed `y`/`n` + Enter: press **Enter** to confirm the kill, **Esc** (or any other key) to cancel. Same one-key reader on both entry points — `[Console]::ReadKey` in `sessionizer.ps1` (F2, desktop) and a raw `stty -icanon` read in `_pc_read_confirm` (`pwsh` from Termux) — so the gesture feels identical whether you're on the desktop or SSH'd in from the phone.
+Confirming is a **single keypress**, not a typed `y`/`n` + Enter: `Ctrl+X` prints `Enter to kill name (Esc to cancel)`, press **Enter** to confirm, **Esc** (or any other key) to cancel. Same one-key reader on both entry points — `[Console]::ReadKey` in `sessionizer.ps1` (F2, desktop) and a raw `stty -icanon` read in `_pc_read_confirm` (`pwsh` from Termux) — so the gesture feels identical whether you're on the desktop or SSH'd in from the phone. The name itself is colored like its section — folder yellow for a `~/dev` project, violet for an Obsidian vault, plain for a disposable session — carried through a 5th TSV field (`project`/`vault`/`session`) that both `sessionizer.ps1` and `_pc_read_confirm`'s caller read off the selected row.
 
 ## Statusline — technical details
 
