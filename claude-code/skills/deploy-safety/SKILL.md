@@ -1,21 +1,6 @@
 ---
 name: deploy-safety
-description: >
-  Se déclenche AVANT toute opération de synchronisation entre `~/.claude/` et le repo
-  `dev-environment/claude-code/` — typiquement avant un `deploy.ps1 -Pull` ou un `-Push`,
-  mais aussi tout `cp` / `robocopy` / `Copy-Item` manuel qui copierait du contenu d'une
-  source vers `~/.claude/`. CRITIQUE : `deploy.ps1 -Pull` écrase aveuglément `~/.claude/`
-  avec le contenu du repo, **sans** vérifier si l'user a du travail local plus récent —
-  c'est exactement comme ça qu'on a perdu 5h de travail sur le statusline le 2026-05-17
-  (cf. `POSTMORTEM-2026-05-17-statusline-deploy.md`). Avant TOUT `-Pull`, exécuter
-  `scripts/deploy-status.ps1` pour vérifier la fraîcheur relative de chaque fichier
-  tracked. Refuser tout `-Pull` si un fichier `~/.claude/` est plus récent que sa
-  contrepartie repo : `-Push` d'abord, PUIS `-Pull`. Si tu veux juste appliquer une fix
-  ponctuelle à `~/.claude/<file>`, faire `cp` ciblé sur ce SEUL fichier — pas `-Pull`.
-  Trigger sur : "deploy.ps1", "lance deploy", "deploy le statusline", "sync ~/.claude",
-  "Pull les skills", "Push les hooks", "applique ma fix à ~/.claude", "déploie cette
-  modif", "copy-item vers ~/.claude", "robocopy vers ~/.claude", toute action qui copie
-  ou écrit dans `~/.claude/{statusline.ps1, settings.json, hooks/, skills/}`.
+description: "Se déclenche AVANT toute synchronisation entre ~/.claude/ et le repo dev-environment/claude-code/ — deploy.ps1 -Pull ou -Push, mais aussi tout cp/robocopy/Copy-Item vers ~/.claude/ (statusline.ps1, settings.json, hooks/, skills/). -Pull écrase aveuglément le travail local plus récent (5 h perdues le 2026-05-17). Avant tout -Pull, exécuter scripts/deploy-status.ps1 ; si LOCAL NEWER → -Push d'abord. Fix ponctuelle → cp ciblé d'UN seul fichier, jamais -Pull. Triggers — « lance deploy », « sync ~/.claude », « Pull les skills », « déploie cette modif »."
 ---
 
 # Deploy Safety — Anti-écrasement avant tout sync de config Claude Code

@@ -1,20 +1,6 @@
 ---
 name: claude-file-recovery
-description: >
-  Se déclenche dès qu'un fichier de configuration Claude Code dans ~/.claude/ a été perdu,
-  écrasé, corrompu, ou qu'une modif précieuse a disparu — typiquement après un `deploy.ps1
-  -Pull` qui écrase la version locale, un Edit accidentel par un agent, un Write malheureux,
-  un `git checkout` raté, ou la disparition inexpliquée d'une feature de la statusline /
-  settings / hooks / skills custom / plans / commands. Utilise le `file-history/` interne de
-  Claude Code et les transcripts JSONL (`projects/`) pour reconstruire l'état EXACT perdu —
-  pas une approximation. CRITIQUE : invoque ce skill AVANT toute tentative de re-recoder de
-  mémoire ou de demander à l'user de te re-décrire ce qu'il voulait — la récupération depuis
-  ces sources locales est presque toujours possible et restaure l'état octet-pour-octet. Sauve
-  potentiellement plusieurs heures de travail user à chaque déclenchement. Trigger sur :
-  "j'ai perdu", "écrasé", "détruit", "tu as cassé", "récupère", "restore", "rollback", "undo",
-  "le fichier X n'a plus", "où est passé", "ça marchait avant", "remet comme avant", "5h de
-  travail perdues", "deploy.ps1 a effacé", "l'agent a supprimé", "rollback statusline /
-  settings / hooks / skills".
+description: "Se déclenche dès qu'un fichier de ~/.claude/ est perdu, écrasé ou corrompu — deploy.ps1 -Pull destructeur, Edit/Write accidentel, git checkout raté, feature disparue (statusline, settings, hooks, skills). Reconstruit l'état EXACT via file-history/ et les transcripts JSONL (projects/) — à invoquer AVANT de re-coder de mémoire ou de redemander à l'user. Triggers — « j'ai perdu », « tu as cassé », « récupère », « restore », « remet comme avant », « ça marchait avant », « deploy.ps1 a effacé »."
 ---
 
 # Claude File Recovery

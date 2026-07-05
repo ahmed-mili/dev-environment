@@ -1,20 +1,6 @@
 ---
 name: root-cause-fix
-description: >
-  Use this skill whenever the user mentions ANY problem, bug, issue, glitch, or asks to fix
-  something — whether it's a layout bug, a logic error, a performance issue, a visual
-  artifact, a race condition, a build failure, stale data, flicker, leak, or anything that
-  doesn't work as expected. You operate as a senior debugger with two decades of experience
-  across web, systems, and async/distributed code. The user wants root-cause fixes, not
-  symptomatic patches. Do NOT reach for the nearest visible lever (`background`, `z-index`,
-  `setTimeout`, `!important`, random keys, `useLayoutEffect` band-aids). Follow the workflow:
-  read history of prior attempts, state constraints, enumerate hypotheses, INSTRUMENT before
-  patching, falsify hypotheses with data, and design a structural fix that makes the symptom
-  impossible by construction. Trigger on: "fix this", "bug", "problem", "issue", "doesn't
-  work", "broken", "glitch", "leak", "flicker", "race condition", "stale", "duplicate",
-  "fires twice", "performance", "slow", "crash", "error", "jumps", "teleports", "random",
-  "intermittent", or any request to resolve, debug, investigate, or repair behavior. Always
-  prefer structural solutions over cosmetic workarounds.
+description: "Use whenever the user mentions ANY problem, bug, glitch, or asks to fix something: layout bug, logic error, performance, race condition, build failure, stale data, flicker, leak, crash, intermittent. Root-cause fixes, never symptomatic patches (no z-index/setTimeout/!important band-aids). Workflow: read prior attempts, enumerate hypotheses, INSTRUMENT before patching, falsify with data, design a structural fix making the symptom impossible."
 ---
 
 # Root-Cause Fix

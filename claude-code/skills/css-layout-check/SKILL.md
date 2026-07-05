@@ -1,6 +1,6 @@
 ---
 name: css-layout-check
-description: Vérifie les conflits CSS après une restructuration HTML/CSS. Détecte les sélecteurs CSS morts (qui ne matchent plus aucun élément HTML), les règles dupliquées ou conflictuelles pour le même sélecteur, et les propriétés qui s'écrasent mutuellement. À utiliser après tout changement de structure HTML qui renomme, déplace ou supprime des éléments, ou après avoir ajouté de nouvelles règles CSS pour des classes existantes. Déclencheurs : refactor HTML/CSS, changement de layout, restructuration de composants, ajout de nouvelles règles pour des classes déjà définies.
+description: "Vérifie les conflits CSS après une restructuration HTML/CSS — sélecteurs morts, règles dupliquées ou conflictuelles, propriétés qui s'écrasent. À utiliser après tout changement de structure HTML (renommage, déplacement, suppression d'éléments) ou ajout de règles pour des classes existantes. Déclencheurs — refactor HTML/CSS, changement de layout, restructuration de composants."
 ---
 
 # Vérification CSS post-restructuration

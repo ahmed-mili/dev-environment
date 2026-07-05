@@ -1,6 +1,6 @@
 ---
 name: sticky-column-bleed-fix
-description: Solve the "transparent sticky column reveals scrolling content underneath" bug in horizontally-scrolling layouts (week/day calendars, spreadsheets, timetables, Gantt charts, timeline editors). Use when content from buffered/off-screen columns visibly leaks into the area occupied by a `position: sticky; left: 0` label column whose background must remain see-through (wallpaper themes, glass UIs, brand transparency). Trigger phrases include "events showing through hours column", "wallpaper transparaît à travers la colonne sticky", "buffer days bleed", "événements qui bavent", "transparent sticky element shows scrolling content behind", "glassmorphism leaking events". DO NOT use this skill if an opaque background on the sticky column is acceptable to the user — that is a one-line fix (`background: var(--bg-secondary)`).
+description: "Solve the transparent sticky column reveals scrolling content underneath bug in horizontally-scrolling layouts (week/day calendars, spreadsheets, Gantt): off-screen columns leak into a position:sticky left:0 label column whose background must stay see-through (wallpaper/glass UIs). Triggers: events showing through hours column, buffer days bleed, événements qui bavent, glassmorphism leaking. NOT needed if an opaque background is acceptable."
 ---
 
 # Sticky-Column Bleed Fix

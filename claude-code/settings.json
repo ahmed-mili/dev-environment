@@ -17,9 +17,6 @@
     "defaultMode": "auto"
   },
   "model": "sonnet",
-  "worktree": {
-    "baseRef": "fresh"
-  },
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -32,6 +29,9 @@
         ]
       }
     ]
+  },
+  "worktree": {
+    "baseRef": "fresh"
   },
   "enableWorkflows": true,
   "statusLine": {
@@ -47,7 +47,9 @@
     "obsidian@ahmed-plugins-local": true,
     "content-researcher@ahmed-plugins-local": true,
     "webappcreator@ahmed-plugins-local": true,
-    "plugin-creator@ahmed-plugins-local": true
+    "plugin-creator@ahmed-plugins-local": true,
+    "efrei@ahmed-plugins-local": true,
+    "phone@ahmed-plugins-local": true
   },
   "language": "French",
   "effortLevel": "xhigh",
