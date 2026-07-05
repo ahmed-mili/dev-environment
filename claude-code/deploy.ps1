@@ -35,7 +35,7 @@ $HomeClaude = "$env:USERPROFILE\.claude"
 # Custom skills tracked in the repo (explicit whitelist)
 $CustomSkills = @(
     'claude-file-recovery', 'copy-edit', 'css-layout-check', 'deploy-safety',
-    'edit-block', 'humanizer', 'lucide-icons', 'release', 'root-cause-fix',
+    'humanizer', 'lucide-icons', 'root-cause-fix',
     'smart-edit', 'sticky-column-bleed-fix', 'webapp-deploy'
 )
 

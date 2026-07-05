@@ -1,6 +1,6 @@
 ---
 name: lucide-icons
-description: Règle obligatoire : toutes les icônes dans un projet web/app doivent utiliser Lucide (SVG inline). Jamais de caractères Unicode, d'emoji, de Font Awesome, de Material Icons, ou d'images PNG/SVG externes pour des icônes d'UI. Se déclenche quand on parle d'icônes, de boutons, d'UI, de site web, de web app, ou quand on modifie du HTML/CSS.
+description: Règle obligatoire : toutes les icônes d'UI dans un projet web/app doivent utiliser Lucide (SVG inline) ; les logos de marque (YouTube, GitHub, Discord…) viennent des sources dédiées listées (Simple Icons, SVG Repo…). Jamais de caractères Unicode, d'emoji, de Font Awesome, de Material Icons, ou d'images PNG/SVG externes pour des icônes d'UI. Se déclenche quand on parle d'icônes, de logos, de boutons, d'UI, de site web, de web app, ou quand on modifie du HTML/CSS.
 ---
 
 # Règle absolue — Icônes Lucide uniquement
@@ -75,6 +75,19 @@ Attributs obligatoires :
 - ✅ Photos/illustrations → `<img>` normal
 - ✅ Sprites de personnages/jeux → `<img>` avec fichier dédié
 - ✅ Favicons → fichier `.ico`/`.png`/`.svg` externe
+
+## Logos de marque (hors Lucide)
+
+Quand Lucide ne propose pas le logo exact d'une marque, plateforme ou jeu (préférer le SVG inline) :
+
+| Source | Type | URL |
+|---|---|---|
+| **Simple Icons** | logos de marques uniquement, SVG monochrome | https://simpleicons.org/ |
+| **SVG Repo** | icônes + logos SVG (mono & multi-couleur) | https://www.svgrepo.com/ |
+| **Iconbuddy** | agrégateur open-source (300k+ icônes) | https://iconbuddy.com/ |
+| **PNGFind** | PNG transparent, fallback si SVG introuvable | https://www.pngfind.com/ |
+
+Workflow : Lucide d'abord (UI générique) → Simple Icons / SVG Repo (logo de marque) → Iconbuddy (SVG trop lourd/sale) → PNGFind (fallback PNG). Les logos de marque peuvent être **filled** et colorés, c'est leur identité visuelle — contrairement aux icônes UI Lucide. Pour un logo dans un vault Obsidian → skill `obsidian:brand-icons`.
 
 ## Comment trouver une icône Lucide
 

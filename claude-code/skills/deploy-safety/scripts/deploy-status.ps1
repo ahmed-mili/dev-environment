@@ -39,7 +39,7 @@ if (-not (Test-Path $HomeDir)) {
 # Si deploy.ps1 évolue, mettre à jour cette liste — ou mieux, parser deploy.ps1.
 $CustomSkills = @(
     'claude-file-recovery', 'copy-edit', 'css-layout-check', 'deploy-safety',
-    'edit-block', 'lucide-icons', 'release', 'root-cause-fix', 'smart-edit',
+    'humanizer', 'lucide-icons', 'root-cause-fix', 'smart-edit',
     'sticky-column-bleed-fix', 'webapp-deploy'
 )
 

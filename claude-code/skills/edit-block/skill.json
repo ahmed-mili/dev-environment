@@ -1,8 +1,0 @@
-{
-  "name": "edit-block",
-  "description": "Édition robuste de fichiers avec gestion des caractères spéciaux et retours à la ligne",
-  "version": "1.0.0",
-  "author": "Claude",
-  "entry": "edit-block.js",
-  "args": ["file", "start-line", "end-line", "replacement-file"]
-}

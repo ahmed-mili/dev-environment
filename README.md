@@ -11,7 +11,7 @@ dev-environment/
 ├── claude-code/    # Claude Code config: statusline (Rust + PowerShell), settings, hooks, skills
 │   ├── termux/     # img2clip: push phone screenshots/photos into desktop clipboard
 │   ├── zellij/     # Zellij config (gruvbox-material + Windows night-owl)
-│   └── skills/     # 11 custom skills (deployed to ~/.claude/skills)
+│   └── skills/     # 10 custom skills (deployed to ~/.claude/skills)
 ├── bootstrap.ps1   # Windows one-liner (8 idempotent steps)
 └── bootstrap.sh    # Android one-liner (auto-detects legacy → migrates)
 ```
@@ -26,13 +26,13 @@ dev-environment/
 
 ### Windows (one-liner)
 
-**Prerequisite**: **Smart App Control = Off** (Settings > Privacy & security > Smart App Control). ⚠️ Disabling SAC is permanent — re-enabling requires a full Windows reset. Most developers already have SAC off.
+**Prerequisite**: **Smart App Control = Off** (Settings > Privacy & security > Smart App Control). Disabling SAC is permanent. Re-enabling requires a full Windows reset. Most developers already have SAC off.
 
 ```powershell
 $b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.ps1 -OutFile $b; Unblock-File $b; & $b
 ```
 
-> Pattern `irm -OutFile + & file` (download to disk, then execute from the file) instead of `iex (irm ...)` (download + in-memory execute). The latter is the classic ClickFix signature (`Trojan:Win32/ClickFix.DAI!MTB`) — Defender now flags any script that combines `iex` with `irm` on a Github raw payload. The former is harmless (oh-my-posh, scoop, etc. all use it) and lets you inspect the downloaded `.ps1` before execution.
+> Pattern `irm -OutFile + & file` (download to disk, then execute from the file) instead of `iex (irm ...)` (download + in-memory execute). The latter is the classic ClickFix signature (`Trojan:Win32/ClickFix.DAI!MTB`). Defender now flags any script that combines `iex` with `irm` on a Github raw payload. The former is harmless (oh-my-posh, scoop, etc. all use it) and lets you inspect the downloaded `.ps1` before execution.
 
 The bootstrap (8 idempotent steps): (1) checks SAC, (2) installs Git, (3) prompts once for `git user.name` / `user.email` if unset, (4) clones the repo to `C:\dev\dev-environment`, (5) installs winget packages (PowerShell 7, Terminal, Fastfetch, Rust toolchain, **Claude Code via `Anthropic.ClaudeCode`**, plus WinLibs/MinGW only if MSVC Build Tools are missing), (6) builds the Rust statusline in `--release`, (7) deploys the Claude Code config (statusline + settings + hooks + skills), (8) installs the official Claude plugins listed in `enabledPlugins` (`frontend-design`, `code-review`, `superpowers`, `rust-analyzer-lsp`).
 

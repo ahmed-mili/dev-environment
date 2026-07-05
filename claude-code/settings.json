@@ -1,20 +1,57 @@
 {
-  "model": "opus",
+  "permissions": {
+    "allow": [
+      "Bash(rm -f ~/.claude-images/*)",
+      "Bash(ssh phone *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
+      "Bash(rm -rf ~/.claude)",
+      "Bash(diskpart *)",
+      "Bash(format *)",
+      "PowerShell(diskpart *)",
+      "PowerShell(Format-Volume *)",
+      "PowerShell(reg delete HKLM*)"
+    ],
+    "defaultMode": "auto"
+  },
+  "model": "sonnet",
+  "worktree": {
+    "baseRef": "fresh"
+  },
+  "enableWorkflows": true,
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/statusline.exe"
+    "command": "~/.claude/statusline.exe",
+    "refreshInterval": 60
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
-    "rust-analyzer-lsp@claude-plugins-official": true
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "obsidian@ahmed-plugins-local": true,
+    "content-researcher@ahmed-plugins-local": true,
+    "webappcreator@ahmed-plugins-local": true,
+    "plugin-creator@ahmed-plugins-local": true
   },
   "language": "French",
   "effortLevel": "xhigh",
   "autoUpdatesChannel": "latest",
+  "tui": "fullscreen",
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  },
   "autoDreamEnabled": true,
   "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
   "theme": "dark-ansi",
+  "preferredNotifChannel": "ghostty",
+  "autoCompactEnabled": true,
+  "switchModelsOnFlag": false,
+  "remoteControlAtStartup": true,
+  "agentPushNotifEnabled": false,
   "skipAutoPermissionPrompt": true
 }

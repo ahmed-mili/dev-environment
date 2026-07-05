@@ -33,3 +33,6 @@ stats-cache.json
 
 # Plans / docs internes d'exécution (workflow perso, pas pour le repo partageable)
 docs/
+
+# Logs Playwright MCP (generes par l'outil, jamais versionnes)
+.playwright-mcp/

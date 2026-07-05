@@ -10,7 +10,7 @@ Claude Code config shared between Windows and Android. Single source of truth.
 | `statusline-rs/` | Rust source for the compiled statusline (xhigh magenta halo + max rainbow stretch). **Requires SAC disabled** — see dedicated section. |
 | `settings.json` | Claude Code config (model, plugins, `.exe` statusline) |
 | `hooks/` | `auto-pull.ps1`, `auto-push.ps1`, `resolve-sync-conflicts.ps1` — reserved for manual/future use, no longer called from SessionStart/End |
-| `skills/` | Custom skills: claude-file-recovery, copy-edit, css-layout-check, deploy-safety, edit-block, lucide-icons, release, root-cause-fix, smart-edit, sticky-column-bleed-fix, webapp-deploy |
+| `skills/` | Custom skills: claude-file-recovery, copy-edit, css-layout-check, deploy-safety, humanizer, lucide-icons, root-cause-fix, smart-edit, sticky-column-bleed-fix, webapp-deploy |
 | `deploy.ps1` | Manual bidirectional sync between this folder and the **Windows** `~/.claude/` |
 | `keybindings.json` | Custom Claude Code keybindings: `Alt+V` image paste (see the Obsidian guide), `Alt+L` → `/login` fallback (see Login / Resume shortcuts below) |
 | `tmux.conf` | tmux forward 24-bit color so Claude Code renders truecolor over `mosh`+`tmux` (see the SSH Android guide) |
