@@ -7,6 +7,7 @@
 
 use std::fs;
 use std::fs::OpenOptions;
+use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -80,16 +81,32 @@ fn run_git(dir: &str, args: &[&str]) -> Option<String> {
 // =================== USAGE / EFFORT / FORMATTING HELPERS ===================
 
 fn get_usage_color(pct: f64, stale: bool) -> String {
+    // Palette inspiree de la barre de contexte de claude.ai (couleurs relevees au
+    // pixel pres), bleu eclairci pour mieux ressortir sur fond sombre. Trois paliers :
+    //   0-69 %  -> bleu   #50A0F0 rgb(80,160,240)  (claude.ai #2A78D6 eclairci)
+    //   70-89 % -> jaune  #FAB219 rgb(250,178,25)
+    //   >= 90 % -> rouge  #D03B3B rgb(208,59,59)
+    // En mode stale (cache d'usage perime), memes teintes mais desaturees/ternies.
     if stale {
-        if pct < 50.0 { return rgb(130, 175, 145); }
-        if pct < 70.0 { return rgb(195, 195, 165); }
-        if pct < 85.0 { return rgb(200, 170, 145); }
-        return rgb(195, 130, 130);
+        if pct < 70.0 { return rgb(130, 165, 205); }
+        if pct < 90.0 { return rgb(200, 180, 120); }
+        return rgb(190, 125, 125);
     }
-    if pct < 50.0 { return rgb(80, 250, 123); }
-    if pct < 70.0 { return rgb(241, 250, 140); }
-    if pct < 85.0 { return rgb(255, 184, 108); }
-    rgb(255, 85, 85)
+    if pct < 70.0 { return rgb(80, 160, 240); }
+    if pct < 90.0 { return rgb(250, 178, 25); }
+    rgb(208, 59, 59)
+}
+
+// Couleur du contexte de fenetre (ligne 1, ex. "136k/1.0M tok"). Distincte de la
+// palette d'usage (bleu/jaune/rouge facon claude.ai) : le contexte n'est pas un
+// quota de session, donc bas niveau = vert (de la place libre) plutot que bleu.
+//   0-69 %  -> vert  #50FA7B rgb(80,250,123)
+//   70-89 % -> jaune #FAB219 rgb(250,178,25)
+//   >= 90 % -> rouge #D03B3B rgb(208,59,59)
+fn get_context_color(pct: f64) -> String {
+    if pct < 70.0 { return rgb(80, 250, 123); }
+    if pct < 90.0 { return rgb(250, 178, 25); }
+    rgb(208, 59, 59)
 }
 
 fn format_tokens(n: i64) -> String {
@@ -109,7 +126,8 @@ fn format_bar(pct: f64, col: &str, width: usize) -> String {
     if filled < 0 { filled = 0; }
     let filled = filled as usize;
     let empty = width - filled;
-    let rail = rgb(80, 80, 95);
+    // Piste (track) calquee sur claude.ai : gris sombre #424240 rgb(66,66,64).
+    let rail = rgb(66, 66, 64);
     format!(
         "{}{}{}{}{}",
         col,
@@ -202,6 +220,19 @@ fn format_reset(reset_at: &Value, reference: Option<DateTime<Utc>>) -> Option<St
         Weekday::Sat => "sam",
     };
     Some(format!("{}. {}", day_abbr, local.format("%H:%M")))
+}
+
+// Age compact pour le marqueur "(perime <age>)" d'une fenetre expiree : secondes
+// depuis le reset rate (toujours >= 0 dans ce contexte). Bornes lisibles a coup
+// d'oeil : s -> m -> h -> j.
+fn fmt_age(secs: i64) -> String {
+    let s = secs.max(0);
+    if s < 60 { return format!("{}s", s); }
+    let m = s / 60;
+    if m < 60 { return format!("{}m", m); }
+    let h = m / 60;
+    if h < 24 { return format!("{}h", h); }
+    format!("{}j", h / 24)
 }
 
 // =================== GIT ===================
@@ -326,6 +357,24 @@ fn read_credentials(claude_dir: &Path) -> Option<CredsRoot> {
     let path = claude_dir.join(".credentials.json");
     let raw = fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
+}
+
+// Empreinte non reversible du token OAuth courant. Sert a detecter un changement
+// de compte (/login reecrit .credentials.json avec un nouveau accessToken) sans
+// stocker le token en clair ni dependre du mtime du fichier (peu fiable a cause du
+// cache de metadonnees NTFS). Un refresh de token (meme compte) change aussi
+// l'empreinte -> declenche juste un refresh API supplementaire, inoffensif.
+fn token_fingerprint(token: &str) -> String {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    token.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
+fn current_token_fingerprint(claude_dir: &Path) -> Option<String> {
+    read_credentials(claude_dir)
+        .and_then(|c| c.claude_ai_oauth)
+        .and_then(|o| o.access_token)
+        .map(|t| token_fingerprint(&t))
 }
 
 // Cache 1h de la version de claude.exe pour le User-Agent. Si l'API Anthropic
@@ -477,11 +526,42 @@ fn read_usage(
     // staleness moderee acceptable).
     if let Some(stdin_data) = stdin_rate_limits {
         let mut merged = stdin_data;
-        if let Ok(raw) = fs::read_to_string(&cache_path) {
-            if let Ok(cached) = serde_json::from_str::<Value>(&raw) {
-                if let Some(sdo) = cached.get("seven_day_opus") {
-                    if let Some(merged_obj) = merged.as_object_mut() {
-                        merged_obj.insert("seven_day_opus".to_string(), sdo.clone());
+
+        // Rafraichissement de l'opus en arriere-plan. five_hour/seven_day viennent
+        // du stdin (toujours frais), mais seven_day_opus n'est PAS expose sur stdin
+        // (cf. doc officielle code.claude.com/docs/en/statusline) : il est servi
+        // depuis le cache, rempli par un appel API detache. On (re)declenche ce
+        // refresh quand :
+        //   - notre dernier refresh date de > 55 s  -> actualisation ~1/min ;
+        //   - OU le token a change (signal d'un /login : changement de compte).
+        //     Dans ce cas l'opus en cache appartient a l'ANCIEN compte, donc on ne
+        //     l'enrichit pas tant que le refresh n'a pas repopule le cache (et
+        //     reecrit usage-account.txt) avec le nouveau compte.
+        let refresh_marker = claude_dir.join("usage-refresh-last");
+        let account_path = claude_dir.join("usage-account.txt");
+        let current_fp = current_token_fingerprint(claude_dir);
+        let stored_fp = fs::read_to_string(&account_path).ok().map(|s| s.trim().to_string());
+        let account_changed = match (&current_fp, &stored_fp) {
+            (Some(c), Some(s)) => c != s,
+            (Some(_), None) => true, // jamais enregistre (bootstrap / 1er tick)
+            (None, _) => false,      // pas de credentials -> rien a detecter
+        };
+        let stale_opus = file_age_secs(&refresh_marker).map_or(true, |a| a >= 55.0);
+        if account_changed || stale_opus {
+            touch(&refresh_marker);
+            spawn_usage_refresh(claude_dir);
+        }
+
+        // Enrichir l'opus depuis le cache, SAUF juste apres un changement de compte
+        // (l'opus en cache serait celui de l'ancien compte -> on l'omet jusqu'au
+        // refresh, qui le repopulera avec le nouveau compte).
+        if !account_changed {
+            if let Ok(raw) = fs::read_to_string(&cache_path) {
+                if let Ok(cached) = serde_json::from_str::<Value>(&raw) {
+                    if let Some(sdo) = cached.get("seven_day_opus") {
+                        if let Some(merged_obj) = merged.as_object_mut() {
+                            merged_obj.insert("seven_day_opus".to_string(), sdo.clone());
+                        }
                     }
                 }
             }
@@ -623,6 +703,71 @@ fn read_usage(
         api_ms,
         api_status,
         api_attempts,
+    }
+}
+
+// Spawn detache d'une re-invocation de soi-meme (`statusline.exe --refresh-usage`)
+// qui rafraichit usage-cache.json via l'API. Meme pattern detache que le git fetch
+// / spawn_context_resolver : zero blocage du chemin chaud 10 Hz. Le cooldown (touch
+// du marqueur usage-refresh-last) est gere par l'appelant (read_usage), pas ici.
+fn spawn_usage_refresh(claude_dir: &Path) {
+    let _ = claude_dir; // chemin transmis via USERPROFILE au process enfant
+    let Ok(exe) = std::env::current_exe() else { return; };
+    let mut cmd = Command::new(exe);
+    cmd.arg("--refresh-usage");
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW | 0x00000008 /* DETACHED_PROCESS */);
+    let _ = cmd.spawn();
+}
+
+// Mode detache : interroge /api/oauth/usage et ecrit usage-cache.json. Sert a
+// rafraichir seven_day_opus (absent du stdin) ~1/min et apres un /login. Best-effort,
+// silencieux. Respecte le cooldown 429 (usage-ratelimit.txt) pour ne pas marteler.
+fn run_usage_refresh(claude_dir: &Path) {
+    let cache_path = claude_dir.join("usage-cache.json");
+    let ratelimit_path = claude_dir.join("usage-ratelimit.txt");
+
+    // Cooldown 5 min apres un 429.
+    if let Ok(raw) = fs::read_to_string(&ratelimit_path) {
+        if let Ok(ts) = DateTime::parse_from_rfc3339(raw.trim()) {
+            let elapsed = Utc::now().signed_duration_since(ts.with_timezone(&Utc));
+            if elapsed.num_seconds() < 300 {
+                return;
+            }
+        }
+    }
+
+    let Some(creds) = read_credentials(claude_dir) else { return; };
+    let Some(token) = creds.claude_ai_oauth.and_then(|o| o.access_token) else { return; };
+    let version = detect_claude_version(claude_dir);
+    let user_agent = format!("claude-code/{}", version);
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(4))
+        .build();
+    let mut outcome = fetch_usage_once(&agent, &token, &user_agent);
+    if matches!(outcome, FetchOutcome::Io) {
+        std::thread::sleep(Duration::from_millis(500));
+        outcome = fetch_usage_once(&agent, &token, &user_agent);
+    }
+    match outcome {
+        FetchOutcome::Ok(v) => {
+            // L'API renvoie les 3 fenetres (dont seven_day_opus). On ecrit tout ;
+            // le prochain tick stdin re-ecrasera five_hour/seven_day par les valeurs
+            // stdin (autoritaires), en conservant l'opus frais qu'on vient d'ecrire.
+            if let Ok(body) = serde_json::to_string(&v) {
+                let _ = fs::write(&cache_path, body.as_bytes());
+            }
+            let _ = fs::remove_file(&ratelimit_path);
+            // Enregistre l'empreinte du compte pour lequel ce cache est valide :
+            // le prochain tick stdin la comparera au token courant pour detecter un
+            // changement de compte (/login).
+            let _ = fs::write(claude_dir.join("usage-account.txt"), token_fingerprint(&token));
+        }
+        FetchOutcome::Status(429) => {
+            let _ = fs::write(&ratelimit_path, Utc::now().to_rfc3339().as_bytes());
+        }
+        _ => {}
     }
 }
 
@@ -940,13 +1085,13 @@ fn build_line1(
     }
 
     let ctx_pct_safe = ctx_pct.unwrap_or(0.0);
-    let col = get_usage_color(ctx_pct_safe, false);
+    let col = get_context_color(ctx_pct_safe);
     match (ctx_tokens, ctx_size) {
         (Some(t), Some(sz)) => {
             line1.push_str(&format!("{}{}/{}{} tok", col, format_tokens(t), format_tokens(sz), s2_fg));
         }
         _ => {
-            line1.push_str(&format!("ctx {}{}%{}", col, ctx_pct_safe as i64, s2_fg));
+            line1.push_str(&format!("ctx {}{} %{}", col, ctx_pct_safe as i64, s2_fg));
         }
     }
     line1.push(' ');
@@ -963,9 +1108,36 @@ fn build_line1(
 // =================== BUILD LINE 2 (usage) ===================
 
 fn build_usage_seg(label: &str, util: f64, resets_at: &Value, stale: bool, reference: Option<DateTime<Utc>>) -> String {
+    // Fenetre EXPIREE : resets_at deja passe (compare a l'heure REELLE Utc::now(),
+    // PAS au mtime du cache -- sinon on raterait une fenetre expiree entre le mtime
+    // et maintenant). Sa valeur d'usage appartient a la fenetre PRECEDENTE, que la
+    // source soit le cache stale OU le stdin de claude : ce dernier continue de
+    // rapporter l'ancienne fenetre (ancien %, ancien resets_at deja passe -> "now")
+    // tant que claude n'a pas refait d'appel API apres le reset. C'est exactement le
+    // "5h 100 % (now)" rouge trompeur signale : on est en realite au debut d'une
+    // nouvelle fenetre (~0 %). On neutralise donc au lieu d'afficher une fausse
+    // alerte : label + barre grises (derniere valeur connue, jamais en rouge), "—"
+    // au lieu du %, et marqueur "(perime <age depuis le reset>)".
+    if let Some(reset_utc) = resets_at
+        .as_str()
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&Utc))
+    {
+        let now = Utc::now();
+        if reset_utc <= now {
+            let grey = rgb(140, 145, 165);
+            let bar = format_bar(util, &grey, 14);
+            let age = fmt_age(now.signed_duration_since(reset_utc).num_seconds());
+            return format!(
+                "{}{}{} {} {}\u{2014} (p\u{00E9}rim\u{00E9} {}){}",
+                grey, label, RESET, bar, grey, age, RESET
+            );
+        }
+    }
+
     let col = get_usage_color(util, stale);
     let bar = format_bar(util, &col, 14);
-    let mut seg = format!("{}{}{} {} {}{}%{}", col, label, RESET, bar, col, util as i64, RESET);
+    let mut seg = format!("{}{}{} {} {}{} %{}", col, label, RESET, bar, col, util as i64, RESET);
     if let Some(rst) = format_reset(resets_at, reference) {
         let reset_col = rgb(140, 145, 165);
         seg.push_str(&format!(" {}({}){}", reset_col, rst, RESET));
@@ -1137,7 +1309,7 @@ fn build_line2_ollama(u: &Value) -> String {
                     .map(String::from)
                     .unwrap_or_else(|| (util as i64).to_string());
                 let mut seg = format!(
-                    "{}{}{} {} {}{}%{}",
+                    "{}{}{} {} {}{} %{}",
                     col, label, RESET, bar, col, pct, RESET
                 );
                 if let Some(rst) = w.get("reset").and_then(|v| v.as_str()) {
@@ -1324,6 +1496,31 @@ fn main() {
             .unwrap_or_default();
         let claude_dir = PathBuf::from(&home).join(".claude");
         run_context_resolver(&claude_dir, &argv[2]);
+        return;
+    }
+
+    // Mode refresh d'usage detache (cf. spawn_usage_refresh) : interroge
+    // /api/oauth/usage et met a jour usage-cache.json (notamment seven_day_opus,
+    // absent du stdin). N'imprime pas de statusline. Branche avant la lecture stdin.
+    if argv.len() >= 2 && argv[1] == "--refresh-usage" {
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        let claude_dir = PathBuf::from(&home).join(".claude");
+        run_usage_refresh(&claude_dir);
+        return;
+    }
+
+    // Mode diagnostic : imprime l'empreinte du token courant (debug du mecanisme
+    // de detection de changement de compte). Ne fait aucun appel reseau.
+    if argv.len() >= 2 && argv[1] == "--token-fp" {
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        let claude_dir = PathBuf::from(&home).join(".claude");
+        if let Some(fp) = current_token_fingerprint(&claude_dir) {
+            println!("{}", fp);
+        }
         return;
     }
 
@@ -1570,5 +1767,38 @@ mod tests {
     fn idempotence() {
         let shaped = s(&[0xFEE1, 0xFEFC, 0xFEB3, 0xFEF9, 0xFE8D]);
         assert_eq!(arabic_display(&shaped), shaped);
+    }
+
+    use super::{build_usage_seg, fmt_age};
+    use serde_json::Value;
+
+    #[test]
+    fn fmt_age_paliers() {
+        assert_eq!(fmt_age(-5), "0s");
+        assert_eq!(fmt_age(30), "30s");
+        assert_eq!(fmt_age(90), "1m");
+        assert_eq!(fmt_age(3600), "1h");
+        assert_eq!(fmt_age(90_000), "1j");
+    }
+
+    // Fenetre dont resets_at est dans le passe (2020 < maintenant) : neutralisee.
+    // On ne doit JAMAIS voir le "100 %" ni le "(now)" rouge, mais le marqueur perime.
+    #[test]
+    fn usage_seg_expiree_neutralise() {
+        let past = Value::from("2020-01-01T00:00:00+00:00");
+        let seg = build_usage_seg("5h", 100.0, &past, false, None);
+        assert!(seg.contains("p\u{00E9}rim\u{00E9}"), "marqueur perime attendu");
+        assert!(!seg.contains("100 %"), "le pourcentage stale ne doit pas s'afficher");
+        assert!(!seg.contains("(now)"), "pas de (now) trompeur");
+    }
+
+    // Fenetre encore valide (resets_at en 2099) : affichage normal du pourcentage,
+    // pas de marqueur perime. Vrai aussi pour une donnee stale non expiree.
+    #[test]
+    fn usage_seg_valide_affiche_pct() {
+        let future = Value::from("2099-01-01T00:00:00+00:00");
+        let seg = build_usage_seg("5h", 42.0, &future, false, None);
+        assert!(seg.contains("42 %"), "pourcentage courant attendu");
+        assert!(!seg.contains("p\u{00E9}rim\u{00E9}"), "pas de marqueur perime sur fenetre valide");
     }
 }
