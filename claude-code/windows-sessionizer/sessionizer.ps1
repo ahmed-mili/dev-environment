@@ -247,8 +247,13 @@ function Get-ActiveSessions {
     return @($names | Where-Object { $_ -ne 'web_server_bus' })
 }
 
+# Un dossier en point est un cache d'outil, pas un projet (.playwright-mcp, cree
+# par le MCP Playwright dans son cwd). Windows ne pose PAS l'attribut Hidden sur
+# ces dossiers -- le point n'y a aucune semantique -> -Directory seul les liste,
+# et ils polluent la section Projects. Filtrage explicite sur le nom (parite .sh).
 function Get-Projects {
     @(Get-ChildItem $DevDir -Directory -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.Name.StartsWith('.') } |
         Sort-Object Name | Select-Object -ExpandProperty Name)
 }
 

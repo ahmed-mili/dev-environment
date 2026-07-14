@@ -77,8 +77,11 @@ zj_actives_win() {
 }
 actives=()   # filled per-view in the PC_VIEW case below
 
+# Dot-directories are tool caches, not projects (.playwright-mcp, dropped by the
+# Playwright MCP into its cwd). Windows never sets the Hidden attribute on those,
+# so they show up as bogus entries unless we filter them out by name.
 projects=()
-mapfile -t projects < <(find "$DEV_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort || true)
+mapfile -t projects < <(find "$DEV_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%f\n' 2>/dev/null | sort || true)
 
 # Obsidian vaults = subfolders of VAULTS_DIR that contain a .obsidian/
 # (that's what tells a real vault apart from a plain folder).
