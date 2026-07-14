@@ -324,6 +324,12 @@ Install-WingetPackage -Id 'Rustlang.Rustup'               -DisplayName 'Rust too
 # `claude` install. Native installer would work but uses `irm | iex` which
 # Defender flags (ClickFix.DAI!MTB) -- winget is the safe path.
 Install-WingetPackage -Id 'Anthropic.ClaudeCode'          -DisplayName 'Claude Code'
+# Zellij (portage Windows natif) : dependance du sessionizer F2. Sans lui, le
+# keybind F2 du profil PS7 (Invoke-Sessionizer) plante des l'ouverture du menu
+# ('zellij' introuvable) et toute selection (projet/vault/session) echoue, car
+# Open-Session termine toujours par `zellij attach`. L'officiel Zellij.Zellij ne
+# tourne pas nativement sous Windows -> on prend le port arndawg.zellij-windows.
+Install-WingetPackage -Id 'arndawg.zellij-windows'        -DisplayName 'Zellij (Windows port)'
 
 # ---------------------------------------------------------------------------
 # 2) PowerShell 7 profile
@@ -400,8 +406,19 @@ if ((Test-Path $sessionizerSrc) -and (Test-Path $arabicSrc)) {
 # fantome injoignable, freeze de l'attach F2).
 
 Write-Step 'Zellij web server (logon task)'
+# Resolution du binaire : le port winget (arndawg.zellij-windows) pose un shim
+# `zellij` sur le PATH (WinGet\Links) mais PAS a %LOCALAPPDATA%\Zellij\zellij.exe.
+# On prefere ce chemin canonique s'il existe (installs manuelles historiques),
+# sinon on retombe sur le shim resolu via Get-Command. Le PATH machine/user peut
+# ne pas etre encore visible dans ce process juste apres le winget install ->
+# on le rafraichit avant la resolution.
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
+            [Environment]::GetEnvironmentVariable('Path','User')
 $zellijExe = Join-Path $env:LOCALAPPDATA 'Zellij\zellij.exe'
-if (Test-Path $zellijExe) {
+if (-not (Test-Path $zellijExe)) {
+    $zellijExe = (Get-Command zellij -ErrorAction SilentlyContinue).Source
+}
+if ($zellijExe -and (Test-Path $zellijExe)) {
     $webArgs = 'web --daemonize --ip 127.0.0.1 --port 8082'
     # Chemin ABSOLU obligatoire : le Planificateur ne resout pas pwsh.exe via le
     # PATH user (0x80070002). L'alias WindowsApps est stable a travers les mises
