@@ -34,8 +34,37 @@ Noto Color Emoji. **PSGallery modules:** CompletionPredictor, PSFzf, Terminal-Ic
 the phone are born desktop-native (joinable from the F2 sessionizer). Never
 start this server from an ssh context (Session 0).
 
-All payloads are base64-encoded inside `install.ps1` to avoid quoting issues
-with ANSI escapes and Nerd Font glyphs.
+Payloads (PS profiles, Terminal settings, Fastfetch config) live in `windows/files/`
+as plain files and are copied as-is — *not* base64-inlined: the decode-then-write
+pattern is the standard heuristic signature of a stager, and it got `install.ps1`
+flagged by Defender as `Trojan:Win32/ClickFix.AAC!MTB`.
+
+## SSH server (phone → PC)
+
+Needed by the Termux `pwsh` / `dev` / `sleep-pc` functions (`android/files/bashrc`),
+which reach the desktop over the Windows sshd on **port 2222**.
+
+```powershell
+# From an ADMIN PowerShell (unlike install.ps1, this one needs UAC):
+$k = ssh phone "cat ~/.ssh/id_ed25519.pub"
+.\install-sshd.ps1 -PublicKey $k
+```
+
+Installs the OpenSSH Server capability, listens on 2222, **key-only auth**
+(`PasswordAuthentication no`), and a firewall rule scoped to the **Tailscale CGNAT
+range only** (`100.64.0.0/10`) — the port is never exposed to the LAN or a public
+Wi-Fi. Idempotent.
+
+Three traps this script exists to absorb:
+
+- `Add-WindowsCapability` fails with *"Class not registered"* under PowerShell 7
+  (the DISM module isn't loaded there). The script delegates to Windows PowerShell 5.1.
+- For a user in the **administrators** group, sshd reads
+  `__PROGRAMDATA__/ssh/administrators_authorized_keys`, **not** `~/.ssh/authorized_keys`
+  (see the `Match Group administrators` block in `sshd_config`). A key in the wrong
+  file is ignored silently. Its ACL must also be Administrators + SYSTEM only.
+- Reinstalling Windows registers a **new Tailscale node with a new IP**, so the phone's
+  `~/.ssh/config` keeps pointing at the dead one. Fix `HostName` with `tailscale ip -4`.
 
 ## Highlights
 
