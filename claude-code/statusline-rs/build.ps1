@@ -55,30 +55,45 @@ function Update-ProcessPath {
                 $CargoBin
 }
 
-function Test-GnuBuildTools {
-    # ring (rustls' crypto backend) is built via the cc crate, which looks
-    # for gcc.exe on PATH for target x86_64-pc-windows-gnu. dlltool.exe is
-    # used by the linker for import-lib generation on some deps.
-    return [bool]((Get-Command gcc.exe -ErrorAction SilentlyContinue) -and
-                  (Get-Command dlltool.exe -ErrorAction SilentlyContinue))
+# Find a genuinely 64-bit gcc (dumpmachine reports x86_64). A stale 32-bit
+# MinGW (e.g. C:\MinGW\bin\gcc.exe reporting 'mingw32') satisfies a naive
+# gcc.exe presence check but then fails ring's build with
+#   sorry, unimplemented: 64-bit mode not compiled in
+# So we must probe the compiler's TARGET, not merely its existence, and pick
+# WinLibs' x86_64 gcc explicitly even if a 32-bit one sits earlier on PATH.
+function Get-X64Gcc {
+    $candidates = @()
+    # 1) WinLibs winget package (portable install under WinGet\Packages).
+    $pkgRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+    if (Test-Path $pkgRoot) {
+        $candidates += @(Get-ChildItem $pkgRoot -Recurse -Filter 'gcc.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'WinLibs' } | ForEach-Object { $_.FullName })
+    }
+    # 2) Every gcc.exe resolvable on PATH (there can be more than one).
+    $candidates += @(Get-Command gcc.exe -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
+    foreach ($gcc in ($candidates | Select-Object -Unique)) {
+        $machine = try { (& $gcc -dumpmachine 2>&1) } catch { '' }
+        if ("$machine" -match '^x86_64') { return $gcc }
+    }
+    return $null
 }
 
 function Ensure-GnuBuildTools {
     Update-ProcessPath
-    if (Test-GnuBuildTools) { return }
+    if (Get-X64Gcc) { return }
 
     $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
     if (-not $winget) {
-        throw "gcc.exe/dlltool.exe not found and winget is unavailable. Install WinLibs manually, then re-run."
+        throw "No 64-bit gcc found and winget is unavailable. Install WinLibs (x86_64) manually, then re-run."
     }
 
-    Write-Host "==> Installing WinLibs/MinGW (gcc + dlltool) via winget..."
+    Write-Host "==> No 64-bit gcc found - installing WinLibs/MinGW (x86_64) via winget..."
     & $winget.Source install --id $WinLibsId --exact --source winget --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -ne 0) { throw "winget install $WinLibsId failed" }
 
     Update-ProcessPath
-    if (-not (Test-GnuBuildTools)) {
-        throw "WinLibs installed, but gcc.exe or dlltool.exe is still not visible on PATH. Restart the shell and re-run."
+    if (-not (Get-X64Gcc)) {
+        throw "WinLibs installed, but no x86_64 gcc.exe is visible. Restart the shell and re-run."
     }
 }
 
@@ -93,6 +108,18 @@ if ($useGnu) {
     & $Rustup toolchain install stable-gnu --no-self-update --profile minimal
     if ($LASTEXITCODE -ne 0) { throw "rustup toolchain install stable-gnu failed" }
     Ensure-GnuBuildTools
+
+    # Pin the compiler to the 64-bit gcc explicitly. A stale 32-bit MinGW may
+    # sit ahead of WinLibs on PATH; cc-rs picks the first gcc.exe it finds, so
+    # we both prepend the good toolchain's dir AND set CC_<target> to its path.
+    $x64Gcc = Get-X64Gcc
+    if (-not $x64Gcc) { throw "no x86_64 gcc available after Ensure-GnuBuildTools" }
+    $gccBin = Split-Path -Parent $x64Gcc
+    $env:PATH = "$gccBin;$env:PATH"
+    $env:CC_x86_64_pc_windows_gnu  = $x64Gcc
+    $env:CXX_x86_64_pc_windows_gnu = (Join-Path $gccBin 'g++.exe')
+    $env:AR_x86_64_pc_windows_gnu  = (Join-Path $gccBin 'ar.exe')
+    Write-Host "    gcc: $x64Gcc"
 }
 
 $env:CARGO_TARGET_DIR = $TargetDir
