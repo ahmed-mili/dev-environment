@@ -12,6 +12,10 @@
     permanent (requires full Windows reset to re-enable).
 
 .EXAMPLE
+    irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/install.ps1 | iex
+
+.EXAMPLE
+    # Equivalent manual form (what install.ps1 automates):
     $b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.ps1 -OutFile $b; Unblock-File $b; & $b
 #>
 
@@ -292,7 +296,7 @@ if (-not $claudeCmd) {
 }
 
 # ---------------------------------------------------------------------------
-# 9. Plugin integrity check — ensure all enabledPlugins are actually installed
+# 9. Plugin integrity check - ensure all enabledPlugins are actually installed
 # ---------------------------------------------------------------------------
 Write-Step 'Checking plugin integrity'
 $checkScript = Join-Path $RepoPath 'claude-code\scripts\check-plugins.ps1'
@@ -300,7 +304,7 @@ if (Test-Path $checkScript) {
     & $checkScript -Fix 2>$null | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
     Write-Ok 'plugin integrity check complete'
 } else {
-    Write-Warn 'check-plugins.ps1 not found — skipping'
+    Write-Warn 'check-plugins.ps1 not found - skipping'
 }
 
 # ---------------------------------------------------------------------------

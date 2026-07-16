@@ -29,10 +29,14 @@ dev-environment/
 **Prerequisite**: **Smart App Control = Off** (Settings > Privacy & security > Smart App Control). Disabling SAC is permanent. Re-enabling requires a full Windows reset. Most developers already have SAC off.
 
 ```powershell
-$b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.ps1 -OutFile $b; Unblock-File $b; & $b
+irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/install.ps1 | iex
 ```
 
-> Pattern `irm -OutFile + & file` (download to disk, then execute from the file) instead of `iex (irm ...)` (download + in-memory execute). The latter is the classic ClickFix signature (`Trojan:Win32/ClickFix.DAI!MTB`). Defender now flags any script that combines `iex` with `irm` on a Github raw payload. The former is harmless (oh-my-posh, scoop, etc. all use it) and lets you inspect the downloaded `.ps1` before execution.
+> `install.ps1` is a tiny stub: it downloads `bootstrap.ps1` to `%TEMP%` (a real file you can inspect), runs `Unblock-File` on it, then executes it. The heavy lifting never runs in-memory: Defender's ClickFix heuristics (`Trojan:Win32/ClickFix.DAI!MTB`) target in-memory `iex (irm ...)` payload chains on raw GitHub content, which is why the installer itself always lands on disk first (same pattern as oh-my-posh and scoop). If Defender still balks at the stub on your machine, use the equivalent manual form:
+>
+> ```powershell
+> $b="$env:TEMP\dev-env-bootstrap.ps1"; irm https://raw.githubusercontent.com/ahmed-mili/dev-environment/main/bootstrap.ps1 -OutFile $b; Unblock-File $b; & $b
+> ```
 
 The bootstrap (8 idempotent steps): (1) checks SAC, (2) installs Git, (3) prompts once for `git user.name` / `user.email` if unset, (4) clones the repo to `C:\dev\dev-environment`, (5) installs winget packages (PowerShell 7, Terminal, Fastfetch, Rust toolchain, **Claude Code via `Anthropic.ClaudeCode`**, plus WinLibs/MinGW only if MSVC Build Tools are missing), (6) builds the Rust statusline in `--release`, (7) deploys the Claude Code config (statusline + settings + hooks + skills), (8) installs the official Claude plugins listed in `enabledPlugins` (`frontend-design`, `code-review`, `superpowers`, `rust-analyzer-lsp`).
 
