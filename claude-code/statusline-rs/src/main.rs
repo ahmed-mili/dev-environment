@@ -1,9 +1,15 @@
-// Port Rust de statusline.ps1 — cible 10 Hz (refreshInterval=0.1 dans settings.json).
+// Port Rust de statusline.ps1 -- invoque par claude.exe sur chaque evenement de
+// conversation ET toutes les `statusLine.refreshInterval` secondes (settings.json).
 //
-// L'enjeu : PowerShell met ~420 ms par spawn, donc refreshInterval < 0.5 s y kill
-// le process avant qu'il produise sa sortie (cf. la fonction I() dans claude.exe qui
-// appelle `_.current?.abort()` a chaque tick). Un binaire natif demarre en ~10 ms =
-// largement sous le seuil = on tient 10 Hz sans abort.
+// Cadence maximale NATIVE : 1 Hz. Verifie dans le schema settings de claude.exe
+// 2.1.211 : `refreshInterval: number().min(1).optional().catch(undefined)` -- une
+// valeur < 1 (ex. 0.1) est REJETEE par le schema et il ne reste AUCUN refresh
+// periodique ; cote UI le timer fait de toute facon Math.max(1, j)*1000. Ne jamais
+// remettre 0.1 : c'etait l'objectif historique du binaire, invalide depuis.
+//
+// L'enjeu du binaire natif : PowerShell met ~420 ms par spawn, donc claude.exe
+// (abort du subprocess a ~100 ms au tick suivant) le tuait avant sa sortie. Un
+// binaire natif demarre en ~10 ms = marge confortable meme a 1 Hz.
 
 use std::fs;
 use std::fs::OpenOptions;
@@ -417,6 +423,9 @@ enum UsageSource {
     Stdin,              // rate_limits.* directement dans le stdin JSON (Pro/Max
                         // apres 1er API call). Source la plus fiable -- pas
                         // d'appel HTTP, pas de token, pas de cache.
+    StdinCacheMerged,   // stdin dont au moins une fenetre expiree a ete
+                        // remplacee par la version plus fraiche du cache API
+                        // (session idle apres un reset de fenetre).
     CacheFresh,
     ApiSuccess,
     ApiSuccessRetry,    // succes au 2e essai apres retry 500ms
@@ -511,6 +520,84 @@ fn build_usage_from_stdin_rate_limits(data: &Value) -> Option<Value> {
     }
 }
 
+// Fenetre "vivante" = resets_at present, parseable, strictement futur. Une
+// fenetre expiree decrit la fenetre PRECEDENTE (le stdin de claude.exe fige
+// tant qu'aucun appel API principal n'est refait -- source du "perime" qui
+// collait a l'ecran sur session idle).
+fn window_alive(w: Option<&Value>, now: DateTime<Utc>) -> bool {
+    w.and_then(|x| x.get("resets_at"))
+        .and_then(|v| v.as_str())
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&Utc) > now)
+        .unwrap_or(false)
+}
+
+// Merge stdin <-> cache API par fenetre : la donnee VIVANTE gagne.
+//   - stdin vivant -> stdin (autoritaire, cas nominal, zero cout).
+//   - stdin expire/absent + cache vivant -> cache (rempli ~1/min par
+//     `--refresh-usage`, seule source qui bouge sur une session idle).
+//   - stdin expire + cache interroge APRES le reset (fetched_at > resets_at)
+//     sans fenetre vivante -> la fenetre est reellement close, aucune session
+//     n'a redemarre : on affiche 0 % (sans resets_at) au lieu d'un "perime"
+//     qui ne se dissipera jamais.
+//   - sinon -> stdin tel quel (l'affichage neutralise en "perime", le refresh
+//     API suivant corrigera en <= ~55 s).
+// seven_day_opus (jamais dans le stdin) et fetched_at (date du dernier fetch
+// API reel, ecrite par run_usage_refresh) sont recopies du cache pour survivre
+// aux ecritures stdin du cache. Retourne (merged, au_moins_une_fenetre_du_cache).
+fn merge_usage_windows(stdin_data: Value, cached: Option<&Value>, now: DateTime<Utc>) -> (Value, bool) {
+    let mut merged = stdin_data;
+    let mut from_cache = false;
+    if let Some(cache) = cached {
+        for key in ["five_hour", "seven_day"] {
+            if window_alive(merged.get(key), now) {
+                continue; // stdin vivant -> autoritaire
+            }
+            let cache_w = cache.get(key);
+            if window_alive(cache_w, now) {
+                let replacement = cache_w.cloned().unwrap_or(Value::Null);
+                if let Some(obj) = merged.as_object_mut() {
+                    obj.insert(key.to_string(), replacement);
+                    from_cache = true;
+                }
+                continue;
+            }
+            // stdin expire + API consultee APRES ce reset sans renvoyer de
+            // fenetre vivante -> la fenetre est reellement close : 0 %.
+            let stdin_reset = merged
+                .get(key)
+                .and_then(|w| w.get("resets_at"))
+                .and_then(|v| v.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|d| d.with_timezone(&Utc));
+            let fetched = cache
+                .get("fetched_at")
+                .and_then(|v| v.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|d| d.with_timezone(&Utc));
+            if let (Some(reset), Some(fetched)) = (stdin_reset, fetched) {
+                if fetched > reset {
+                    let mut zero = serde_json::Map::new();
+                    zero.insert("utilization".to_string(), Value::from(0.0));
+                    if let Some(obj) = merged.as_object_mut() {
+                        obj.insert(key.to_string(), Value::Object(zero));
+                        from_cache = true;
+                    }
+                }
+            }
+        }
+        if let Some(obj) = merged.as_object_mut() {
+            if let Some(sdo) = cache.get("seven_day_opus") {
+                obj.insert("seven_day_opus".to_string(), sdo.clone());
+            }
+            if let Some(f) = cache.get("fetched_at") {
+                obj.insert("fetched_at".to_string(), f.clone());
+            }
+        }
+    }
+    (merged, from_cache)
+}
+
 fn read_usage(
     claude_dir: &Path,
     stdin_rate_limits: Option<Value>,
@@ -525,18 +612,17 @@ fn read_usage(
     // documentee Anthropic, opus_usage change peu sur une window 7j donc
     // staleness moderee acceptable).
     if let Some(stdin_data) = stdin_rate_limits {
-        let mut merged = stdin_data;
-
-        // Rafraichissement de l'opus en arriere-plan. five_hour/seven_day viennent
-        // du stdin (toujours frais), mais seven_day_opus n'est PAS expose sur stdin
-        // (cf. doc officielle code.claude.com/docs/en/statusline) : il est servi
-        // depuis le cache, rempli par un appel API detache. On (re)declenche ce
-        // refresh quand :
+        // Rafraichissement API en arriere-plan. five_hour/seven_day du stdin sont
+        // frais TANT QUE la session parle a l'API ; sur session idle ils figent
+        // (fenetre expiree -> "perime"). seven_day_opus n'est de toute facon PAS
+        // expose sur stdin (cf. doc officielle code.claude.com/docs/en/statusline).
+        // Le cache API (usage-cache.json) est donc la seule source vivante en
+        // idle. On (re)declenche son refresh quand :
         //   - notre dernier refresh date de > 55 s  -> actualisation ~1/min ;
         //   - OU le token a change (signal d'un /login : changement de compte).
-        //     Dans ce cas l'opus en cache appartient a l'ANCIEN compte, donc on ne
-        //     l'enrichit pas tant que le refresh n'a pas repopule le cache (et
-        //     reecrit usage-account.txt) avec le nouveau compte.
+        //     Dans ce cas le cache appartient a l'ANCIEN compte : on ne merge
+        //     RIEN depuis le cache tant que le refresh n'a pas repopule le cache
+        //     (et reecrit usage-account.txt) avec le nouveau compte.
         let refresh_marker = claude_dir.join("usage-refresh-last");
         let account_path = claude_dir.join("usage-account.txt");
         let current_fp = current_token_fingerprint(claude_dir);
@@ -552,21 +638,17 @@ fn read_usage(
             spawn_usage_refresh(claude_dir);
         }
 
-        // Enrichir l'opus depuis le cache, SAUF juste apres un changement de compte
-        // (l'opus en cache serait celui de l'ancien compte -> on l'omet jusqu'au
-        // refresh, qui le repopulera avec le nouveau compte).
-        if !account_changed {
-            if let Ok(raw) = fs::read_to_string(&cache_path) {
-                if let Ok(cached) = serde_json::from_str::<Value>(&raw) {
-                    if let Some(sdo) = cached.get("seven_day_opus") {
-                        if let Some(merged_obj) = merged.as_object_mut() {
-                            merged_obj.insert("seven_day_opus".to_string(), sdo.clone());
-                        }
-                    }
-                }
-            }
-        }
-        // Update cache avec donnees fraiches stdin pour futur fallback API
+        let cached_json: Option<Value> = if account_changed {
+            None
+        } else {
+            fs::read_to_string(&cache_path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        };
+        let (merged, from_cache) = merge_usage_windows(stdin_data, cached_json.as_ref(), Utc::now());
+
+        // Update cache avec le meilleur etat connu (fenetres vivantes preservees,
+        // fetched_at conserve) pour le futur fallback API et les autres sessions.
         if let Ok(body) = serde_json::to_string(&merged) {
             let _ = fs::write(&cache_path, body.as_bytes());
         }
@@ -578,7 +660,7 @@ fn read_usage(
             json: Some(merged),
             stale: false,
             reference: None,
-            source: UsageSource::Stdin,
+            source: if from_cache { UsageSource::StdinCacheMerged } else { UsageSource::Stdin },
             api_ms: None,
             api_status: None,
             api_attempts: 0,
@@ -751,10 +833,15 @@ fn run_usage_refresh(claude_dir: &Path) {
         outcome = fetch_usage_once(&agent, &token, &user_agent);
     }
     match outcome {
-        FetchOutcome::Ok(v) => {
-            // L'API renvoie les 3 fenetres (dont seven_day_opus). On ecrit tout ;
-            // le prochain tick stdin re-ecrasera five_hour/seven_day par les valeurs
-            // stdin (autoritaires), en conservant l'opus frais qu'on vient d'ecrire.
+        FetchOutcome::Ok(mut v) => {
+            // L'API renvoie les 3 fenetres (dont seven_day_opus). On ecrit tout,
+            // date par fetched_at : le merge stdin<->cache s'en sert pour savoir
+            // si l'API a ete consultee APRES l'expiration d'une fenetre stdin
+            // (fenetre reellement close -> 0 %, au lieu d'un "perime" eternel).
+            // Les ticks stdin preservent ce champ tel quel dans leurs ecritures.
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("fetched_at".to_string(), Value::from(Utc::now().to_rfc3339()));
+            }
             if let Ok(body) = serde_json::to_string(&v) {
                 let _ = fs::write(&cache_path, body.as_bytes());
             }
@@ -1689,6 +1776,15 @@ fn main() {
     let total_ms = t_main_start.elapsed().as_millis();
     let _ = (|| -> std::io::Result<()> {
         let log_path = claude_dir.join("statusline-tick-log.txt");
+        // Rotation : a 1 Hz x N sessions le log grossit de dizaines de Mo/jour.
+        // Au-dela de 8 Mo on bascule vers .old (ecrase le precedent .old) --
+        // garde toujours les ~derniers jours sans croissance infinie.
+        const LOG_MAX_BYTES: u64 = 8 * 1024 * 1024;
+        if fs::metadata(&log_path).map(|m| m.len() > LOG_MAX_BYTES).unwrap_or(false) {
+            let old = claude_dir.join("statusline-tick-log.old.txt");
+            let _ = fs::remove_file(&old);
+            let _ = fs::rename(&log_path, &old);
+        }
         let line = format!(
             "{} tick={} effort={} git_ms={} usage_ms={} usage_src={} api_status={} api_attempts={} api_ms={} total_ms={} pid={}\n",
             start_ms_unix,
@@ -1800,5 +1896,91 @@ mod tests {
         let seg = build_usage_seg("5h", 42.0, &future, false, None);
         assert!(seg.contains("42 %"), "pourcentage courant attendu");
         assert!(!seg.contains("p\u{00E9}rim\u{00E9}"), "pas de marqueur perime sur fenetre valide");
+    }
+
+    // ---- merge stdin <-> cache API (fix "perime" fige sur session idle) ----
+
+    use super::merge_usage_windows;
+    use chrono::{TimeZone, Utc};
+    use serde_json::json;
+
+    fn test_now() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 16, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn merge_stdin_vivant_prioritaire() {
+        let stdin = json!({"five_hour": {"utilization": 42.0, "resets_at": "2026-07-16T14:00:00+00:00"}});
+        let cache = json!({"five_hour": {"utilization": 99.0, "resets_at": "2026-07-16T15:00:00+00:00"}});
+        let (m, from_cache) = merge_usage_windows(stdin, Some(&cache), test_now());
+        assert_eq!(m["five_hour"]["utilization"], 42.0, "stdin vivant reste autoritaire");
+        assert!(!from_cache);
+    }
+
+    #[test]
+    fn merge_stdin_expire_cache_vivant() {
+        let stdin = json!({
+            "five_hour": {"utilization": 100.0, "resets_at": "2026-07-16T10:00:00+00:00"},
+            "seven_day": {"utilization": 7.0,  "resets_at": "2026-07-20T00:00:00+00:00"}
+        });
+        let cache = json!({"five_hour": {"utilization": 3.0, "resets_at": "2026-07-16T16:30:00+00:00"}});
+        let (m, from_cache) = merge_usage_windows(stdin, Some(&cache), test_now());
+        assert_eq!(m["five_hour"]["utilization"], 3.0, "fenetre expiree remplacee par le cache vivant");
+        assert_eq!(m["five_hour"]["resets_at"], "2026-07-16T16:30:00+00:00");
+        assert_eq!(m["seven_day"]["utilization"], 7.0, "fenetre stdin vivante conservee");
+        assert!(from_cache);
+    }
+
+    #[test]
+    fn merge_fenetre_close_api_posterieure_donne_zero() {
+        // L'API a repondu APRES le reset sans renvoyer de five_hour vivante
+        // -> fenetre reellement close (aucune session ne l'a redemarree) : 0 %.
+        let stdin = json!({"five_hour": {"utilization": 100.0, "resets_at": "2026-07-16T10:00:00+00:00"}});
+        let cache = json!({"fetched_at": "2026-07-16T11:58:00+00:00"});
+        let (m, from_cache) = merge_usage_windows(stdin, Some(&cache), test_now());
+        assert_eq!(m["five_hour"]["utilization"], 0.0);
+        assert!(m["five_hour"].get("resets_at").is_none(), "pas de resets_at synthetique");
+        assert!(from_cache);
+    }
+
+    #[test]
+    fn merge_stdin_expire_cache_muet_reste_stdin() {
+        // fetch anterieur au reset : on ne sait rien de mieux -> stdin conserve,
+        // l'affichage neutralise en "perime" (le refresh API suivant corrigera).
+        let stdin = json!({"five_hour": {"utilization": 100.0, "resets_at": "2026-07-16T10:00:00+00:00"}});
+        let cache = json!({"fetched_at": "2026-07-16T09:00:00+00:00"});
+        let (m, from_cache) = merge_usage_windows(stdin, Some(&cache), test_now());
+        assert_eq!(m["five_hour"]["utilization"], 100.0);
+        assert_eq!(m["five_hour"]["resets_at"], "2026-07-16T10:00:00+00:00");
+        assert!(!from_cache);
+    }
+
+    #[test]
+    fn merge_opus_et_fetched_at_recopies() {
+        let stdin = json!({"five_hour": {"utilization": 11.0, "resets_at": "2026-07-16T14:00:00+00:00"}});
+        let cache = json!({
+            "seven_day_opus": {"utilization": 5.0, "resets_at": "2026-07-20T00:00:00+00:00"},
+            "fetched_at": "2026-07-16T11:59:00+00:00"
+        });
+        let (m, _) = merge_usage_windows(stdin, Some(&cache), test_now());
+        assert_eq!(m["seven_day_opus"]["utilization"], 5.0);
+        assert_eq!(m["fetched_at"], "2026-07-16T11:59:00+00:00", "date du dernier fetch API preservee");
+    }
+
+    #[test]
+    fn merge_sans_cache_stdin_intact() {
+        let stdin = json!({"five_hour": {"utilization": 100.0, "resets_at": "2026-07-16T10:00:00+00:00"}});
+        let (m, from_cache) = merge_usage_windows(stdin.clone(), None, test_now());
+        assert_eq!(m, stdin);
+        assert!(!from_cache);
+    }
+
+    #[test]
+    fn merge_stdin_sans_fenetre_cache_vivant_ajoute() {
+        let stdin = json!({"five_hour": {"utilization": 11.0, "resets_at": "2026-07-16T14:00:00+00:00"}});
+        let cache = json!({"seven_day": {"utilization": 9.0, "resets_at": "2026-07-20T00:00:00+00:00"}});
+        let (m, from_cache) = merge_usage_windows(stdin, Some(&cache), test_now());
+        assert_eq!(m["seven_day"]["utilization"], 9.0, "fenetre absente du stdin completee par le cache vivant");
+        assert!(from_cache);
     }
 }

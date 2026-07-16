@@ -37,7 +37,7 @@
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.exe",
-    "refreshInterval": 60
+    "refreshInterval": 1
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,
