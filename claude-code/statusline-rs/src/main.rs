@@ -67,8 +67,14 @@ fn touch(path: &Path) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    // Cree ou met a jour le mtime
-    let _ = fs::File::create(path);
+    // ECRIRE des octets, pas juste File::create : re-creer (truncate) un
+    // fichier VIDE n'ecrit rien et NTFS ne bump alors PAS LastWriteTime.
+    // Consequence historique : tous les cooldowns bases sur file_age_secs
+    // (git fetch 30 s, usage refresh 55 s, ollama 15 s) etaient morts -- spawn
+    // a CHAQUE tick, rafales concurrentes sur /api/oauth/usage -> 429
+    // chronique auto-inflige (constate 2026-07-17, marqueur fige au 25 juin).
+    // Le contenu (now_ms) est purement informatif ; seul le write compte.
+    let _ = fs::write(path, now_ms().to_string().as_bytes());
 }
 
 fn run_git(dir: &str, args: &[&str]) -> Option<String> {
@@ -1973,6 +1979,32 @@ mod tests {
         let (m, from_cache) = merge_usage_windows(stdin.clone(), None, test_now());
         assert_eq!(m, stdin);
         assert!(!from_cache);
+    }
+
+    // touch() est la cle de voute des cooldowns (git fetch 30 s, refresh usage
+    // 55 s, ollama 15 s) : si le mtime ne bouge pas, CHAQUE tick re-spawn le
+    // travail "cooldowne" -> spam (429 chronique constate le 2026-07-17, le
+    // marqueur usage-refresh-last etait fige au 25 juin). Piege NTFS : re-creer
+    // (truncate) un fichier VIDE n'ecrit aucun octet et ne bump pas
+    // LastWriteTime. touch() doit donc ecrire des donnees.
+    #[test]
+    fn touch_bumpe_mtime_fichier_vide_existant() {
+        use std::time::{Duration, SystemTime};
+        let path = std::env::temp_dir().join("statusline-touch-test-marker");
+        let _ = std::fs::remove_file(&path);
+        std::fs::File::create(&path).unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(600)).unwrap();
+        drop(f);
+        let age_before = super::file_age_secs(&path).unwrap();
+        assert!(age_before > 500.0, "pre-condition : marqueur backdate ({age_before}s)");
+        super::touch(&path);
+        let age_after = super::file_age_secs(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            age_after < 60.0,
+            "touch() doit rajeunir le mtime d'un marqueur vide existant (age: {age_after}s)"
+        );
     }
 
     #[test]
