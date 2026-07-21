@@ -175,7 +175,11 @@ if ($script:HasInteractiveConsole -and (Get-Module -Name PSReadLine -ListAvailab
 
 # ---- CompletionPredictor: smart predictions beyond shell history
 # (cmdlet parameters, git branches, file paths, etc.) ----
-if (Get-Module -ListAvailable -Name CompletionPredictor) {
+# HasInteractiveConsole obligatoire : un predicteur ne sert qu'a la saisie, et
+# son Import-Module FIGE indefiniment un pwsh demarre sans console (`pwsh
+# -Command ...`, donc tout `ssh desktop "commande"` depuis que le DefaultShell
+# OpenSSH est pwsh). Meme garde que PSReadLine et PSFzf ci-dessus.
+if ($script:HasInteractiveConsole -and (Get-Module -ListAvailable -Name CompletionPredictor)) {
     Import-Module CompletionPredictor -ErrorAction SilentlyContinue
 }
 
