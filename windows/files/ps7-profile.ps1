@@ -338,7 +338,13 @@ function claude {
         & $detectScript 2>$null
     }
     Start-ClaudeClipboardWatcher
-    $claudeCmd = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue
+    # Select-Object -First 1 : Get-Command renvoie UNE entree PAR emplacement du
+    # PATH ou l'exe existe. Avec deux claude.exe (installeur natif dans
+    # ~\.local\bin ET shim winget dans WinGet\Links), .Source devient un TABLEAU
+    # que `&` aplatit en une seule chaine "chemin1 chemin2" -> "The term '...'
+    # is not recognized". -First 1 prend celui que le PATH aurait choisi.
+    $claudeCmd = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
     if (-not $claudeCmd) {
         Write-Error "claude not found on PATH"
         return
@@ -352,7 +358,8 @@ function ollama {
     if ($args.Count -ge 2 -and $args[0] -eq 'launch' -and $args[1] -eq 'claude') {
         Start-ClaudeClipboardWatcher
     }
-    $ollamaCmd = Get-Command ollama -CommandType Application -ErrorAction SilentlyContinue
+    $ollamaCmd = Get-Command ollama -CommandType Application -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
     if (-not $ollamaCmd) {
         Write-Error "ollama not found on PATH"
         return

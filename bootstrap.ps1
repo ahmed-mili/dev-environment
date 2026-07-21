@@ -263,7 +263,11 @@ if ($LASTEXITCODE -ne 0) { throw 'Claude Code config deploy failed' }
 
 Write-Step 'Updating Claude Code + installing plugins'
 $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
-$claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+# -CommandType Application + -First 1 : sans le type, un profil deja charge fait
+# resoudre la FONCTION claude() (Source vide) ; sans -First 1, deux claude.exe sur
+# le PATH donnent un tableau que `&` aplatit en "chemin1 chemin2".
+$claudeCmd = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue |
+             Select-Object -First 1
 if (-not $claudeCmd) {
     Write-Warn 'claude.exe not on PATH yet; skipping update + plugin install.'
     Write-Hint 'Restart your shell, then run `claude update`, `claude plugin marketplace update claude-plugins-official`, and `claude plugin install <name>@claude-plugins-official`.'

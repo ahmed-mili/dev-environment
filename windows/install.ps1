@@ -323,7 +323,17 @@ Install-WingetPackage -Id 'Rustlang.Rustup'               -DisplayName 'Rust too
 # Claude Code itself : the one-liner's whole point is to bootstrap a working
 # `claude` install. Native installer would work but uses `irm | iex` which
 # Defender flags (ClickFix.DAI!MTB) -- winget is the safe path.
-Install-WingetPackage -Id 'Anthropic.ClaudeCode'          -DisplayName 'Claude Code'
+#
+# Mais SEULEMENT si claude est absent. winget ne voit pas l'installeur natif
+# (~\.local\bin\claude.exe) : il installerait par-dessus son propre shim dans
+# WinGet\Links, laissant DEUX claude.exe sur le PATH. Deux installs qui se
+# mettent a jour chacune de leur cote, et surtout un Get-Command qui renvoie
+# deux resultats -- ce qui cassait le wrapper claude() du profil PS7.
+if (Get-Command claude -CommandType Application -ErrorAction SilentlyContinue) {
+    Write-Ok 'Claude Code (deja installe -- winget saute pour ne pas creer un doublon sur le PATH)'
+} else {
+    Install-WingetPackage -Id 'Anthropic.ClaudeCode'      -DisplayName 'Claude Code'
+}
 # Zellij (portage Windows natif) : dependance du sessionizer F2. Sans lui, le
 # keybind F2 du profil PS7 (Invoke-Sessionizer) plante des l'ouverture du menu
 # ('zellij' introuvable) et toute selection (projet/vault/session) echoue, car
@@ -416,7 +426,10 @@ $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
             [Environment]::GetEnvironmentVariable('Path','User')
 $zellijExe = Join-Path $env:LOCALAPPDATA 'Zellij\zellij.exe'
 if (-not (Test-Path $zellijExe)) {
-    $zellijExe = (Get-Command zellij -ErrorAction SilentlyContinue).Source
+    # -First 1 : plusieurs zellij.exe sur le PATH -> .Source serait un tableau,
+    # et la tache planifiee naitrait avec un -Execute invalide.
+    $zellijExe = (Get-Command zellij -CommandType Application -ErrorAction SilentlyContinue |
+                  Select-Object -First 1).Source
 }
 if ($zellijExe -and (Test-Path $zellijExe)) {
     $webArgs = 'web --daemonize --ip 127.0.0.1 --port 8082'
@@ -424,7 +437,11 @@ if ($zellijExe -and (Test-Path $zellijExe)) {
     # PATH user (0x80070002). L'alias WindowsApps est stable a travers les mises
     # a jour MSIX, contrairement au chemin versionne de Program Files.
     $pwshExe = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
-    if (-not (Test-Path $pwshExe)) { $pwshExe = (Get-Command pwsh.exe).Source }
+    if (-not (Test-Path $pwshExe)) {
+        # pwsh.exe est presque toujours en double (alias WindowsApps + MSIX
+        # versionne) : sans -First 1, .Source est un tableau.
+        $pwshExe = (Get-Command pwsh.exe -CommandType Application | Select-Object -First 1).Source
+    }
     $action   = New-ScheduledTaskAction -Execute $pwshExe `
         -Argument "-NoProfile -WindowStyle Hidden -Command `"& '$zellijExe' $webArgs`""
     $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME

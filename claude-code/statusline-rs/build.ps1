@@ -29,8 +29,10 @@ $WinLibsId   = 'BrechtSanders.WinLibs.POSIX.UCRT'
 # fall back to PATH.
 $Cargo  = Join-Path $CargoBin 'cargo.exe'
 $Rustup = Join-Path $CargoBin 'rustup.exe'
-if (-not (Test-Path -LiteralPath $Cargo))  { $Cargo  = (Get-Command cargo  -ErrorAction SilentlyContinue).Source }
-if (-not (Test-Path -LiteralPath $Rustup)) { $Rustup = (Get-Command rustup -ErrorAction SilentlyContinue).Source }
+# -First 1 : deux cargo.exe sur le PATH (rustup + une install manuelle) donnent
+# un tableau, dont Test-Path -LiteralPath ne veut pas -> faux "cargo not found".
+if (-not (Test-Path -LiteralPath $Cargo))  { $Cargo  = (Get-Command cargo  -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
+if (-not (Test-Path -LiteralPath $Rustup)) { $Rustup = (Get-Command rustup -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
 if (-not $Cargo -or -not (Test-Path -LiteralPath $Cargo)) {
     throw "cargo not found. Install Rust first: winget install Rustlang.Rustup, then re-run."
 }
