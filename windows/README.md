@@ -66,6 +66,39 @@ Three traps this script exists to absorb:
 - Reinstalling Windows registers a **new Tailscale node with a new IP**, so the phone's
   `~/.ssh/config` keeps pointing at the dead one. Fix `HostName` with `tailscale ip -4`.
 
+## SSH client (machine → machine)
+
+Counterpart of `install-sshd.ps1`, which sets up the *server*. This one prepares
+a machine to **reach** the others: generates `~/.ssh/id_ed25519` if missing, then
+writes one marker-delimited `Host` block per peer into `~/.ssh/config` and prints
+the public key to authorise on the far end.
+
+```powershell
+# No UAC needed. Peers are a comma-separated list — repeating -Peer is an error
+# ("parameter specified more than once").
+.\setup-ssh-peers.ps1 -Peer "desktop=<win-user>@<tailscale-name>:2222",
+                            "phone=<termux-user>@<tailscale-name>:8022"
+```
+
+Hostnames, ports and usernames come from the command line, never from the file —
+`tailscale status` lists them. Prefer the **MagicDNS name over an IP**: reinstalling
+Windows registers a new Tailscale node with a new IP, and the name follows it while
+a hardcoded IP points at a dead host.
+
+Idempotent, and deliberately so on two levels: an existing block is replaced rather
+than duplicated — including a `Host <alias>` written by hand before this script, since
+ssh honours the **first** match for an alias and a duplicate would silently shadow the
+new settings — and a re-run leaves the file byte-identical.
+
+Bootstrapping a mesh takes two passes, because a host can only authorise a key it
+has already been given:
+
+1. **On the new machine** — `install-sshd.ps1 -PublicKey "<key of a machine that
+   should reach it>"`, then `setup-ssh-peers.ps1`, which prints its own key.
+2. **From the other machines** — now that step 1 lets them log in, harvest that key
+   over ssh and authorise it on every host the new machine must reach
+   (`administrators_authorized_keys` on Windows, `~/.ssh/authorized_keys` on Termux).
+
 ## Highlights
 
 - **Fastfetch splash** — mauve→sapphire gradient on divider, module icons and
