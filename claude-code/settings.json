@@ -25,6 +25,11 @@
     ],
     "defaultMode": "auto"
   },
+  "deniedMcpServers": [
+    { "serverUrl": "https://gmailmcp.googleapis.com/*" },
+    { "serverUrl": "https://calendarmcp.googleapis.com/*" },
+    { "serverUrl": "https://drivemcp.googleapis.com/*" }
+  ],
   "model": "opus[1m]",
   "fallbackModel": [
     "opus",
