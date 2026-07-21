@@ -27,7 +27,7 @@ L'user a 3 machines (desktop, laptop, phone Android). La synchronisation passe p
 
 ### Le piège fondamental (cause de l'incident du 2026-05-17)
 
-**L'user édite `~/.claude/` DEPUIS N'IMPORTE QUEL CWD** — pas seulement depuis le repo `dev-environment/`. C'est même le cas le plus courant : il a une session Claude Code dans `C:\Users\Ahmed\test\` (ou n'importe quel dossier de scratch) qui édite `~/.claude/statusline.ps1` en live pour itérer rapidement.
+**L'user édite `~/.claude/` DEPUIS N'IMPORTE QUEL CWD** — pas seulement depuis le repo `dev-environment/`. C'est même le cas le plus courant : il a une session Claude Code dans `%USERPROFILE%\test\` (ou n'importe quel dossier de scratch) qui édite `~/.claude/statusline.ps1` en live pour itérer rapidement.
 
 Conséquences :
 
@@ -94,7 +94,7 @@ C'est exactement le scénario qui a causé l'incident du 2026-05-17. **Ne PAS la
 
 ```powershell
 # Copier UN seul fichier modifié vers ~/.claude/, sans toucher au reste
-cp 'C:/dev/dev-environment/claude-code/statusline.ps1'  'C:/Users/Ahmed/.claude/statusline.ps1'
+cp 'C:/dev/dev-environment/claude-code/statusline.ps1'  '$env:USERPROFILE/.claude/statusline.ps1'
 ```
 
 Si tu hésites parce que le fichier en `~/.claude/` pourrait être plus récent (= contenir du travail user que tu vas écraser), faire d'abord :
@@ -102,7 +102,7 @@ Si tu hésites parce que le fichier en `~/.claude/` pourrait être plus récent 
 ```powershell
 # Comparer mtimes avant la copie
 $repo  = (Get-Item 'C:/dev/dev-environment/claude-code/statusline.ps1').LastWriteTime
-$local = (Get-Item 'C:/Users/Ahmed/.claude/statusline.ps1').LastWriteTime
+$local = (Get-Item '$env:USERPROFILE/.claude/statusline.ps1').LastWriteTime
 if ($local -gt $repo) {
     Write-Warning "~/.claude/ est plus récent — vérifier avant d'écraser !"
 }

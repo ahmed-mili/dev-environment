@@ -106,11 +106,20 @@ esac
 G=$'\e[32m'; D=$'\e[90m'; R=$'\e[0m'; M=$'\e[38;5;141m'; F=$'\e[38;2;249;226;175m'   # F = folder yellow
 ITEM_PREFIX='▌ '
 
-# Each project/vault stays in ITS place within its section; if it has an active
-# session of the same name we mark it ● (active) instead of moving it to the top.
-# Membership helpers.
+# A project/vault with an active session of the same name rises to the TOP of its
+# section (● active, just under the title, never above it); the others keep their
+# alphabetical ○ place below. Membership helpers.
 in_list()   { local x="$1"; shift; local e; for e in "$@"; do [[ "$e" == "$x" ]] && return 0; done; return 1; }
 is_active() { in_list "$1" "${actives[@]}"; }
+
+# Order a section: active entries first (they bubble to the top of THEIR category,
+# never above the title), then the inactive ones — the original alphabetical order
+# is preserved within each group. $@ = names, already sorted.
+sort_active_first() {
+  local x
+  for x in "$@"; do is_active "$x" && printf '%s\n' "$x"; done
+  for x in "$@"; do is_active "$x" || printf '%s\n' "$x"; done
+}
 
 # Orphans = active sessions that are NEITHER a project NOR a vault (typically
 # created via «＋ new»). With no section of their own -> a small zone at the top.
@@ -124,7 +133,7 @@ n_orphan=${#orphans[@]}; n_proj=${#projects[@]}; n_vault=${#vaults[@]}
 
 # --- menu (TSV: type <TAB> name <TAB> displayed label) -------------------
 build_menu() {
-  local s p v
+  local s p v ordered
   # type 'sep' = decorative title: the arrows skip it (binds), a click on it
   # reopens the menu (dispatch 'sep') -> not selectable.
   # 1) off-category sessions (neither ~/dev project nor vault) under a « ◆ Sessions » title.
@@ -139,7 +148,8 @@ build_menu() {
   if (( n_proj )); then
     printf 'sep\t__gap_projects\t\t\n'
     printf 'sep\t__sep_projects\t%s──────  %s◆ Projects%s  ──────%s\t\n' "$D" "$F" "$D" "$R"
-    for p in "${projects[@]}"; do
+    mapfile -t ordered < <(sort_active_first "${projects[@]}")
+    for p in "${ordered[@]}"; do
       if is_active "$p"; then
         printf 'active\t%s\t%s%s●%s %s  %s(active)%s\t%s\n' "$p" "$ITEM_PREFIX" "$G" "$R" "$p" "$G" "$R" "$p"
       else
@@ -150,7 +160,8 @@ build_menu() {
   # 3) Obsidian vaults under « ◆ Obsidian Vaults » (violet); same active rule.
   if (( n_vault )); then
     printf 'sep\t__sep_vaults\t%s──────  %s◆ Obsidian Vaults%s  ──────%s\t\n' "$D" "$M" "$D" "$R"
-    for v in "${vaults[@]}"; do
+    mapfile -t ordered < <(sort_active_first "${vaults[@]}")
+    for v in "${ordered[@]}"; do
       if is_active "$v"; then
         printf 'active\t%s\t%s%s●%s %s  %s(active)%s\t%s\n' "$v" "$ITEM_PREFIX" "$G" "$R" "$v" "$G" "$R" "$v"
       else

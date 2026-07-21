@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Sur Windows avec Defender realtime monitoring actif, chaque process git lancé est scanné → le `git fetch --quiet` async qu'on faisait depuis `statusline.exe` coûtait ~300 ms juste pour la **création** du process, même avec `DETACHED_PROCESS`. Ajouté aux ~30 ms de `git status`, ça poussait le runtime total à **370–576 ms par tick** dans les git repos, bien au-dessus du seuil d'abort silencieux de Claude Code (~100 ms). Résultat : statusline visible dans `C:\Users\Ahmed` et `C:\dev` (pas des git repos), invisible dans **tous** les repos GitHub du dossier `dev`.
+Sur Windows avec Defender realtime monitoring actif, chaque process git lancé est scanné → le `git fetch --quiet` async qu'on faisait depuis `statusline.exe` coûtait ~300 ms juste pour la **création** du process, même avec `DETACHED_PROCESS`. Ajouté aux ~30 ms de `git status`, ça poussait le runtime total à **370–576 ms par tick** dans les git repos, bien au-dessus du seuil d'abort silencieux de Claude Code (~100 ms). Résultat : statusline visible dans `%USERPROFILE%` et `C:\dev` (pas des git repos), invisible dans **tous** les repos GitHub du dossier `dev`.
 
 **Fix** : déplacer le `Command::spawn()` dans un `std::thread::spawn` daemon. Avant : 370–576 ms. Après : **40–55 ms**.
 
@@ -10,11 +10,11 @@ Sur Windows avec Defender realtime monitoring actif, chaque process git lancé e
 
 | Heure (local) | Événement |
 |---|---|
-| Avant 2026-05-18 | Bug latent dans le code. Aucun signal côté user, parce que sa session active était dans `C:\Users\Ahmed` (pas un git repo) — statusline OK. |
+| Avant 2026-05-18 | Bug latent dans le code. Aucun signal côté user, parce que sa session active était dans `%USERPROFILE%` (pas un git repo) — statusline OK. |
 | 2026-05-18 ~00:43 | Pendant un debug séparé sur la statusline, le `statusLine.command` de `~/.claude/settings.json` est temporairement remplacé par `cmd /c type statusline-replay.txt` (mode replay statique pour comparer des rendus). |
 | ~00:45 | Refactor du mode replay en `replay.bat`. État resté en place par oubli. |
-| ~01:00 | L'user ouvre une nouvelle session dans `C:\Users\Ahmed`, ne voit plus la statusline (replay.bat affiche une capture figée d'un autre cwd → contenu visiblement faux). Signale "Je voit plus mon statusbar". |
-| ~01:00 | Diagnostic via `~/.claude/file-history/` (cf. `claude-file-recovery` skill) : v6 du settings = mode replay, v4 = statusline.exe normal. Restauration → statusline revient dans `C:\Users\Ahmed`. |
+| ~01:00 | L'user ouvre une nouvelle session dans `%USERPROFILE%`, ne voit plus la statusline (replay.bat affiche une capture figée d'un autre cwd → contenu visiblement faux). Signale "Je voit plus mon statusbar". |
+| ~01:00 | Diagnostic via `~/.claude/file-history/` (cf. `claude-file-recovery` skill) : v6 du settings = mode replay, v4 = statusline.exe normal. Restauration → statusline revient dans `%USERPROFILE%`. |
 | ~01:01 | User teste dans ses repos `C:\dev\*` : **toujours pas de statusline**. Différence non triviale : la fix de settings affecte tous les cwd, donc le problème est ailleurs. |
 | 01:02 | Inspection de `~/.claude/statusline-last-input.json` : `cwd = C:\dev\dev-environment`, mtime récent → le binaire **est** lancé, il écrit bien son fichier de debug, mais son stdout n'arrive pas jusqu'à CC. |
 | 01:03 | Test isolé via `pwsh` + `Push-Location` + `& binary` : **8–18 ms**. Pas reproduit. |
@@ -56,13 +56,13 @@ Donc :
 Notre premier test était :
 ```powershell
 Push-Location C:\dev\dev-environment
-Get-Content statusline-last-input.json | & C:/Users/Ahmed/.claude/statusline.exe
+Get-Content statusline-last-input.json | & $env:USERPROFILE/.claude/statusline.exe
 ```
 → 8–18 ms. Apparemment OK.
 
 Le second test, qui reproduit exactement ce que fait CC :
 ```powershell
-$psi.FileName = 'C:/Users/Ahmed/.claude/statusline.exe'
+$psi.FileName = '$env:USERPROFILE/.claude/statusline.exe'
 $psi.WorkingDirectory = 'C:\dev\dev-environment'
 [Process]::Start($psi)
 ```
@@ -144,7 +144,7 @@ Quand on suspecte un timeout dans un binaire CC :
 ```powershell
 # Mesure dans le contexte exact que CC utilise
 $psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = 'C:/Users/Ahmed/.claude/statusline.exe'
+$psi.FileName = '$env:USERPROFILE/.claude/statusline.exe'
 $psi.WorkingDirectory = '<cwd suspect>'
 $psi.UseShellExecute = $false
 $psi.RedirectStandardInput = $true
@@ -166,7 +166,7 @@ Si la médiane dépasse ~80 ms, il y a un risque d'abort dans certaines sessions
 ### Test de non-régression
 
 À chaque modif du binaire qui touche aux git operations ou aux process spawn, faire tourner le mini-bench ci-dessus dans :
-- Un dossier non-git (`C:\Users\Ahmed`)
+- Un dossier non-git (`%USERPROFILE%`)
 - Un git repo "clean" (peu de fichiers, pas de dirty)
 - Un git repo "dirty" (beaucoup de modifs, beaucoup de fichiers)
 
@@ -190,7 +190,7 @@ cat ~/.claude/statusline-last-input.json | ConvertFrom-Json | Select-Object cwd,
 
 # 3. Timing dans le cwd suspect (le test qui reproduit CC)
 $psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = 'C:/Users/Ahmed/.claude/statusline.exe'
+$psi.FileName = '$env:USERPROFILE/.claude/statusline.exe'
 $psi.WorkingDirectory = '<cwd suspect>'
 $psi.UseShellExecute = $false
 $psi.RedirectStandardInput = $true

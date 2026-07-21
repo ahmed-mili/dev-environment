@@ -26,6 +26,17 @@
     passent en LISTE separee par des virgules -- repeter -Peer echoue
     ("parameter specified more than once").
 
+.PARAMETER KeyPath
+    Cle a utiliser pour ces pairs. Defaut ~/.ssh/id_ed25519. Chaque bloc Host
+    la nomme explicitement (IdentityFile + IdentitiesOnly yes).
+
+    Donner une cle DEDIEE quand la cle par defaut est protegee par une
+    passphrase -- typiquement la cle GitHub. Une clef a passphrase rend toute
+    connexion non interactive impossible : le serveur accepte la cle publique,
+    puis le client ne peut pas prouver qu'il la possede faute de pouvoir
+    demander la passphrase, et ssh sort sur un "Permission denied (publickey)"
+    qui ne dit rien de la vraie cause.
+
 .PARAMETER NoKeygen
     N'genere aucune cle ; se contente d'ecrire les entrees de config.
 
@@ -43,6 +54,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string[]]$Peer,
+    [string]$KeyPath = '',
     [switch]$NoKeygen
 )
 
@@ -58,7 +70,17 @@ Write-Host '  -------------------------------' -ForegroundColor DarkGray
 
 $sshDir     = Join-Path $env:USERPROFILE '.ssh'
 $configPath = Join-Path $sshDir 'config'
-$keyPath    = Join-Path $sshDir 'id_ed25519'
+$keyPath    = if ($KeyPath) { $KeyPath } else { Join-Path $sshDir 'id_ed25519' }
+if (-not [IO.Path]::IsPathRooted($keyPath)) { $keyPath = Join-Path $sshDir $keyPath }
+
+# Forme ecrite dans le config : ~/.ssh/<nom> quand la cle vit dans le .ssh de
+# l'utilisateur. OpenSSH Windows comprend le tilde, et cette forme survit a un
+# changement de nom de compte -- contrairement a un C:\Users\<nom> en dur.
+$keyRef = if ($keyPath.StartsWith($sshDir, [StringComparison]::OrdinalIgnoreCase)) {
+    '~/.ssh/' + (Split-Path $keyPath -Leaf)
+} else {
+    $keyPath -replace '\\', '/'
+}
 
 New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
 
@@ -84,7 +106,15 @@ if (-not (Get-Command ssh-keygen -ErrorAction SilentlyContinue)) {
 if (-not $NoKeygen) {
     Write-Step 'Cle locale...'
     if (Test-Path $keyPath) {
-        Write-Ok 'id_ed25519 deja present'
+        Write-Ok "$(Split-Path $keyPath -Leaf) deja present"
+        # Une cle a passphrase ne peut pas servir en non interactif. On ne la
+        # touche pas (c'est souvent la cle GitHub), on previent.
+        & $env:ComSpec /c "ssh-keygen -y -P `"`" -f `"$keyPath`" >nul 2>&1"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Note 'ATTENTION : cette cle est protegee par une passphrase.'
+            Write-Note 'Les connexions non interactives echoueront en "Permission denied (publickey)".'
+            Write-Note 'Relancer avec -KeyPath id_ed25519_mesh pour une cle dediee sans passphrase.'
+        }
     } else {
         # Passphrase vide passee via cmd.exe et non directement : Windows
         # PowerShell 5.1 SUPPRIME un argument '' de la ligne de commande d'un
@@ -165,6 +195,11 @@ foreach ($spec in $Peer) {
     $lines += "    HostName $hostName"
     $lines += "    Port $port"
     $lines += "    User $user"
+    # IdentityFile + IdentitiesOnly : sans eux, ssh propose TOUTES les cles du
+    # dossier .ssh dans son ordre a lui. Une cle a passphrase presentee en
+    # premier suffit alors a faire echouer une connexion non interactive.
+    $lines += "    IdentityFile $keyRef"
+    $lines += '    IdentitiesOnly yes'
     # accept-new : accepte une empreinte inconnue au premier contact, mais
     # refuse toujours une empreinte QUI CHANGE (contrairement a "no", qui
     # avalerait une attaque par interposition en silence).

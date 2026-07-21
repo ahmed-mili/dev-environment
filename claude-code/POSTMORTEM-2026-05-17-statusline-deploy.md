@@ -10,7 +10,7 @@ Un agent Claude Code a tenté de fix un bug mineur sur la statusline en re-dépl
 
 | Heure (local) | Événement |
 |---|---|
-| Nuit du 16→17 mai | L'user bosse intensivement sur sa statusline dans `C:\Users\Ahmed\test`. **17 versions** snapshotées par Claude Code dans `~/.claude/file-history/b1d5454a-.../c3b738d7ad94fb03@v1` à `@v17`. |
+| Nuit du 16→17 mai | L'user bosse intensivement sur sa statusline dans `%USERPROFILE%\test`. **17 versions** snapshotées par Claude Code dans `~/.claude/file-history/b1d5454a-.../c3b738d7ad94fb03@v1` à `@v17`. |
 | 04:10 | v17 du statusline est snapshotée. |
 | 04:16 | Dernier Edit de la session : retire le label `ctx` et ajoute ` tok` à droite. **Pas de snapshot file-history pour cette modif** (Claude Code ne re-snapshote pas à chaque Edit — il y a des seuils). |
 | ~04:48 | L'user lance une nouvelle session dans `C:\dev\dev-environment` pour fix un autre détail (statusbar qui ne refresh pas au `/login`). |
@@ -35,11 +35,11 @@ Le script copie aveuglément `repo → ~/.claude/` sans comparer les mtimes. Le 
 
 Mais quand un user enchaîne plusieurs sessions sans `-Push` entre deux, ou quand un agent lance `-Pull` sans savoir où en est le sync, le `-Pull` détruit le travail local plus récent.
 
-**Aggravation contextuelle** : l'user n'éditait PAS le statusline depuis le repo `dev-environment` mais depuis `C:\Users\Ahmed\test` (un dossier de scratch). Les modifications de `~/.claude/statusline.ps1` étaient invisibles côté repo : pas de `M` dans `git status`, pas de session active dans `dev-environment`, repo "calme et propre". L'agent (moi) a logiquement supposé qu'il n'y avait rien à craindre — mauvaise hypothèse. **`~/.claude/` peut être en avance sur le repo SANS aucun signal visible côté repo.** Le mtime des fichiers est la seule vérité.
+**Aggravation contextuelle** : l'user n'éditait PAS le statusline depuis le repo `dev-environment` mais depuis `%USERPROFILE%\test` (un dossier de scratch). Les modifications de `~/.claude/statusline.ps1` étaient invisibles côté repo : pas de `M` dans `git status`, pas de session active dans `dev-environment`, repo "calme et propre". L'agent (moi) a logiquement supposé qu'il n'y avait rien à craindre — mauvaise hypothèse. **`~/.claude/` peut être en avance sur le repo SANS aucun signal visible côté repo.** Le mtime des fichiers est la seule vérité.
 
 ### Bug n°2 : `Copy-Item -Recurse` est traître
 ```powershell
-Copy-Item "C:\dev\.../skills/copy-edit"  "C:\Users\Ahmed\.claude\skills\copy-edit"  -Force -Recurse
+Copy-Item "C:\dev\.../skills/copy-edit"  "%USERPROFILE%\.claude\skills\copy-edit"  -Force -Recurse
 ```
 Quand le dossier cible existe déjà, `-Recurse` ne **remplace pas** son contenu — il copie le dossier source **À L'INTÉRIEUR**, créant `~/.claude/skills/copy-edit/copy-edit/`. Multiplié par 9 skills, ça donne 9 sous-dossiers parasites silencieux.
 

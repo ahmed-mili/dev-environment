@@ -17,7 +17,7 @@ minimisé** — pas besoin de le mettre au premier plan ni d'interrompre l'utili
 ## Prérequis
 
 - **Windows 10/11** (Win32 uniquement) et **Obsidian lancé** (`Obsidian.exe`).
-- Le toolkit est auto-hébergé dans `C:\Users\Ahmed\.claude\tools\obsidian-screenshot\`
+- Le toolkit est auto-hébergé dans `%USERPROFILE%\.claude\tools\obsidian-screenshot\`
   (pywin32 vendoré dans `packages/`, pas de dépendance WSL). **Toujours** passer par
   le wrapper `.cmd` — il configure `PYTHONPATH`/`PATH` (DLLs pywin32) et l'encodage
   UTF-8, et appelle le bon interpréteur Python. Ne jamais lancer `python.exe`
@@ -31,7 +31,7 @@ minimisé** — pas besoin de le mettre au premier plan ni d'interrompre l'utili
 
 ## Commandes (wrapper `.cmd`)
 
-Toutes via `C:\Users\Ahmed\.claude\tools\obsidian-screenshot\obsidian_tools.cmd` :
+Toutes via `%USERPROFILE%\.claude\tools\obsidian-screenshot\obsidian_tools.cmd` :
 
 | Besoin | Commande |
 |---|---|

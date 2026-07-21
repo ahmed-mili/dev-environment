@@ -37,7 +37,7 @@ Claude Code écrit silencieusement deux trésors sur disque à chaque modificati
 
 Transcript complet de chaque session Claude Code. Format JSONL : un objet JSON par ligne, chaque ligne = un message ou un tool call. Les `tool_use` Edit/Write contiennent les arguments complets (`input.old_string`, `input.new_string`, `input.content`).
 
-- `<encoded-cwd>` = le `cwd` de la session avec `\` → `-` et `:` → `-` (ex. `C:\Users\Ahmed\test` → `C--Users-Ahmed-test`).
+- `<encoded-cwd>` = le `cwd` de la session avec `\` → `-` et `:` → `-` (ex. `%USERPROFILE%\test` → `C--Users-Ahmed-test`).
 - `<session-id>` = UUID de la session, **identique** à l'UUID utilisé dans `file-history/`.
 - Une session contient TOUS les tool calls : les Edits qui n'ont PAS déclenché de snapshot file-history sont quand même là.
 
@@ -49,7 +49,7 @@ Avant tout, clarifier :
 
 1. **Quel fichier exactement ?** Path absolu (`~/.claude/statusline.ps1` ? `~/.claude/settings.json` ? `~/.claude/skills/<X>/SKILL.md` ?)
 2. **Approximativement quand a-t-il été perdu ?** (Aujourd'hui ? Cette semaine ? Permet de filtrer les snapshots par date.)
-3. **Le `cwd` de la session où le fichier a été créé/modifié ?** L'user le sait souvent ("j'étais dans `C:\Users\Ahmed\test`"). Si non, on cherche dans toutes les sessions.
+3. **Le `cwd` de la session où le fichier a été créé/modifié ?** L'user le sait souvent ("j'étais dans `%USERPROFILE%\test`"). Si non, on cherche dans toutes les sessions.
 4. **Un marker unique** dans le fichier perdu (string distincte, ex. `"five_hour"` pour la statusline, `"five_hour"` n'apparaît probablement nulle part d'autre). Sert à grep efficacement dans file-history.
 
 Si l'user ne sait pas un de ces points, **devine intelligemment** — n'arrête pas la récupération pour demander.

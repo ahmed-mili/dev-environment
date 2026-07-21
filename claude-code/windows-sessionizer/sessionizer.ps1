@@ -339,6 +339,17 @@ function Get-ActiveLine {
     return "active$T$Name$T$ItemPrefix$G$BulletOn$R $disp  $Y(active - tel/web)$R$T$Name$T$Kind"
 }
 
+# Ordonne une section (projets/vaults) : les entrees dont une session est active
+# remontent en tete de LEUR categorie (juste sous le titre, jamais au-dessus),
+# l'ordre alphabetique d'origine etant conserve dans chaque groupe. $Names arrive
+# deja trie (Get-Projects / Get-Vaults). Test d'appartenance sur le nom CANONIQUE
+# ($activesCanon), coherent avec les tests actives<->dossier du reste du script.
+function Sort-ActiveFirst {
+    param([string[]]$Names)
+    @($Names | Where-Object { $activesCanon -contains $_ }) +
+    @($Names | Where-Object { $activesCanon -notcontains $_ })
+}
+
 function Build-Menu {
     $lines = [System.Collections.Generic.List[string]]::new()
     if ($orphans.Count) {
@@ -350,7 +361,7 @@ function Build-Menu {
     if ($projects.Count) {
         $lines.Add("sep${T}__gap_projects${T}${T}")
         $lines.Add("sep${T}__sep_projects$T$D$Rule  $F$Diamond Projects$D  $Rule$R$T")
-        foreach ($p in $projects) {
+        foreach ($p in (Sort-ActiveFirst $projects)) {
             if ($activesCanon -contains $p) {
                 $lines.Add((Get-ActiveLine (Get-ActualName $p) -Kind 'project'))
             } else {
@@ -360,7 +371,7 @@ function Build-Menu {
     }
     if ($vaults.Count) {
         $lines.Add("sep${T}__sep_vaults$T$D$Rule  $M$Diamond Obsidian Vaults$D  $Rule$R$T")
-        foreach ($v in $vaults) {
+        foreach ($v in (Sort-ActiveFirst $vaults)) {
             if ($activesCanon -contains $v) {
                 $lines.Add((Get-ActiveLine (Get-ActualName $v) -Kind 'vault'))
             } else {

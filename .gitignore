@@ -36,3 +36,7 @@ docs/
 
 # Logs Playwright MCP (generes par l'outil, jamais versionnes)
 .playwright-mcp/
+
+# Presse-papiers capture par le skill copy-edit : contenu arbitraire,
+# jamais versionne (une copie peut contenir n'importe quoi de personnel).
+claude-code/skills/copy-edit/temp_clip.txt

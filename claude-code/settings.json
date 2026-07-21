@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "Bash(rm -f ~/.claude-images/*)",
-      "Bash(ssh phone *)"
+      "Bash(ssh phone *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git show*)",
+      "PowerShell(Get-InstalledModule *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Get-ChildItem *)",
+      "WebFetch(domain:moodle.myefrei.fr)"
     ],
     "deny": [
       "Bash(rm -rf /)",
@@ -16,7 +25,11 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "sonnet",
+  "model": "opus[1m]",
+  "fallbackModel": [
+    "opus",
+    "sonnet"
+  ],
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -46,13 +59,14 @@
     "rust-analyzer-lsp@claude-plugins-official": true,
     "obsidian@ahmed-plugins-local": true,
     "content-researcher@ahmed-plugins-local": true,
-    "webappcreator@ahmed-plugins-local": true,
     "plugin-creator@ahmed-plugins-local": true,
     "efrei@ahmed-plugins-local": true,
-    "phone@ahmed-plugins-local": true
+    "phone@ahmed-plugins-local": true,
+    "senior-dev@ahmed-plugins-local": true
   },
   "language": "French",
-  "effortLevel": "xhigh",
+  "effortLevel": "high",
+  "askUserQuestionTimeout": "5m",
   "autoUpdatesChannel": "latest",
   "tui": "fullscreen",
   "voice": {
