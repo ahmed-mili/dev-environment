@@ -1036,6 +1036,68 @@ struct BannerSeg {
     fg: String,
 }
 
+// Icone de la machine ou tourne claude (pas celle ou sont les mains de l'user :
+// en SSH laptop -> fixe, la statusline s'execute sur le fixe et affiche le fixe,
+// coherent avec le chemin rendu juste a cote).
+//
+// Glyphes Nerd Font, en echappement plutot qu'en litteral (plan supplementaire
+// UTF-8 4 octets). Codepoints releves dans bin/scripts/lib/i_md.sh du depot
+// ryanoasis/nerd-fonts, pas de memoire :
+//   U+F01C5 nf-md-desktop_tower -> desktop
+//   U+F0322 nf-md-laptop        -> laptop  (idem config fastfetch, install.ps1)
+const ICON_DESKTOP: &str = "\u{f01c5}";
+const ICON_LAPTOP: &str = "\u{f0322}";
+
+// Detection par presence de batterie, meme signal que install.ps1 pour fastfetch.
+// GetSystemPowerStatus est un simple appel kernel32 (pas de WMI, pas de process,
+// pas d'I/O) : negligeable face aux dizaines de ms du git du meme tick.
+//
+// Pourquoi pas un `if hostname == ...` : le repo est partageable, un hostname en
+// dur afficherait la mauvaise icone chez quiconque le clone (regle d'or 1 du
+// CLAUDE.md du repo).
+#[cfg(windows)]
+fn device_icon() -> &'static str {
+    #[repr(C)]
+    struct SystemPowerStatus {
+        ac_line_status: u8,
+        battery_flag: u8,
+        battery_life_percent: u8,
+        system_status_flag: u8,
+        battery_life_time: u32,
+        battery_full_life_time: u32,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetSystemPowerStatus(status: *mut SystemPowerStatus) -> i32;
+    }
+
+    let mut status = SystemPowerStatus {
+        ac_line_status: 0,
+        battery_flag: 0,
+        battery_life_percent: 0,
+        system_status_flag: 0,
+        battery_life_time: 0,
+        battery_full_life_time: 0,
+    };
+    let ok = unsafe { GetSystemPowerStatus(&mut status) } != 0;
+
+    // 128 = "No system battery", 255 = "Unknown status". Appel echoue ou statut
+    // inconnu -> desktop, le cas majoritaire, plutot qu'une icone laptop fausse.
+    if !ok || status.battery_flag == 128 || status.battery_flag == 255 {
+        ICON_DESKTOP
+    } else {
+        ICON_LAPTOP
+    }
+}
+
+// Le binaire n'est deploye que sur Windows (settings.json -> ~/.claude/statusline.exe).
+// Ce cfg existe pour que le crate compile ailleurs, pas pour y etre utilise.
+#[cfg(not(windows))]
+fn device_icon() -> &'static str {
+    ICON_DESKTOP
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_line1(
     dir: &str,
@@ -1075,9 +1137,13 @@ fn build_line1(
     let path_text_fg = rgb(25, 28, 42);
     let chevron = '\u{E0B0}';
 
-    // Construction segments du banner path
+    // Construction segments du banner path. L'icone machine est DANS le meme
+    // segment que le chemin : elle herite du fond (degrade ou uni selon le mode)
+    // et compte dans total_len, donc le degrade per-caractere reste continu.
+    // Deux espaces apres le glyphe : les Material Design de Nerd Font sont rendus
+    // double-largeur par Windows Terminal, un seul espace les colle au "C:".
     let mut segs: Vec<BannerSeg> = vec![BannerSeg {
-        text: format!(" {}", dir),
+        text: format!(" {}  {}", device_icon(), dir),
         fg: path_text_fg.clone(),
     }];
 
