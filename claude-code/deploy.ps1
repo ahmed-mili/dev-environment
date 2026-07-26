@@ -171,6 +171,17 @@ if ($Pull) {
     Write-TableRow $scriptsName $st $scriptsW
     Write-TableFooter $scriptsW
 
+    # Tools : outils appeles par des skills (toolkit de capture Obsidian...).
+    # Absents d'ici jusqu'au 2026-07-26, ils n'etaient donc ni deployes ni
+    # restaurables : le toolkit de capture avait disparu de ~/.claude/ pendant
+    # que son SKILL.md continuait de le decrire.
+    $toolsName = 'tools'
+    $toolsW = Get-NameWidth @($toolsName)
+    Write-TableHeader 'Tools' 1 $toolsW
+    $st = Copy-One "$RepoClaude\tools" "$HomeClaude\tools"
+    Write-TableRow $toolsName $st $toolsW
+    Write-TableFooter $toolsW
+
     Write-Host "`nDone. Restart Claude Code so the new skills/settings are picked up." -ForegroundColor Yellow
 }
 
@@ -230,6 +241,14 @@ if ($Push) {
     $st = Copy-One "$HomeClaude\scripts" "$RepoClaude\scripts"
     Write-TableRow $scriptsName $st $scriptsW
     Write-TableFooter $scriptsW
+
+    # Tools (cf. commentaire cote Pull)
+    $toolsName = 'tools'
+    $toolsW = Get-NameWidth @($toolsName)
+    Write-TableHeader 'Tools' 1 $toolsW
+    $st = Copy-One "$HomeClaude\tools" "$RepoClaude\tools"
+    Write-TableRow $toolsName $st $toolsW
+    Write-TableFooter $toolsW
 
     Write-Host "`nDone. Reminder : cd dev-environment ; git add -A ; git commit ; git push" -ForegroundColor Yellow
 }
