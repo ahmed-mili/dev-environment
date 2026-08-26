@@ -170,28 +170,44 @@ $VaultsDir = if ($env:PC_VAULTS_WIN) { $env:PC_VAULTS_WIN } else { 'C:\obsidian-
 
 # --- Collecte -----------------------------------------------------------------
 # Sessions zellij actives, deux sources vivantes :
-#   1. zellij ls -ns              : sessions joignables depuis cette logon session
-#   2. zellij.exe --server <path> : sessions d'autres logon sessions (tel/web)
+#   1. zellij ls / ls -ns         : toutes les sessions connues de l'utilisateur
+#   2. zellij.exe --server <path> : le processus serveur, avec sa logon session
 # Ne pas relire les dossiers IPC/cache directement : ils survivent au reboot et
 # produisent de faux "active - tel/web" alors que le serveur n'existe plus.
+#
+# JOIGNABILITE = le serveur tourne dans MA session Windows, rien d'autre.
+# Un `zellij attach` sur une session d'une AUTRE logon session collisionne sur le
+# pipe nomme et FIGE le client juste apres le rendu (vecu 2026-06-12).
+# La joignabilite ne peut donc PAS se deduire de `zellij ls` : ls lit le dossier
+# IPC/cache de l'utilisateur, partage par toutes ses logon sessions -> depuis sshd
+# (session 0) il liste les sessions du bureau (session 1) comme si elles etaient
+# locales. La garde plus bas ne se declenchait alors jamais et l'attach figeait
+# (vecu 2026-07-21, symptome "en SSH le sessionizer ouvre puis fige").
+$MySessionId  = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+$IsSshSession = [bool]($env:SSH_CONNECTION -or $env:SSH_CLIENT -or $env:SSH_TTY)
 $JoinableSessions = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
-function Get-ZellijServerSessions {
-    $names = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
+
+# Processus serveur zellij visibles, avec leur logon session. Le CommandLine peut
+# etre masque pour un processus d'une AUTRE logon session -> on renvoie aussi les
+# processus sans nom lisible, pour savoir au moins s'il en tourne un chez nous.
+function Get-ZellijServerProcesses {
     Get-CimInstance Win32_Process -Filter "Name = 'zellij.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match '(?i)(^|\s)--server\s+' } |
         ForEach-Object {
-            $serverPath = $null
-            if ($_.CommandLine -match '(?i)--server\s+"([^"]+)"') {
-                $serverPath = $Matches[1]
-            } elseif ($_.CommandLine -match '(?i)--server\s+(\S+)') {
-                $serverPath = $Matches[1]
+            $name = $null
+            if ($_.CommandLine -match '(?i)(^|\s)--server\s+') {
+                $serverPath = $null
+                if ($_.CommandLine -match '(?i)--server\s+"([^"]+)"') {
+                    $serverPath = $Matches[1]
+                } elseif ($_.CommandLine -match '(?i)--server\s+(\S+)') {
+                    $serverPath = $Matches[1]
+                }
+                if ($serverPath) {
+                    $leaf = Split-Path -Leaf $serverPath
+                    if ($leaf -and $leaf -ne 'web_server_bus') { $name = $leaf }
+                }
             }
-            if ($serverPath) {
-                $name = Split-Path -Leaf $serverPath
-                if ($name -and $name -ne 'web_server_bus') { [void]$names.Add($name) }
-            }
+            [pscustomobject]@{ Name = $name; SessionId = $_.SessionId }
         }
-    return @($names)
 }
 
 # Source 3 (vecu 2026-06-12) : named pipes Windows. Un serveur zellij d'une autre
@@ -226,15 +242,34 @@ function Get-ActiveSessions {
         foreach ($n in $forced) { [void]$JoinableSessions.Add($n) }
         return $forced
     }
+    $names = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
     foreach ($l in (& zellij ls -ns 2>$null)) {
-        if ($l -and $l.Trim()) { [void]$JoinableSessions.Add($l.Trim()) }
+        if ($l -and $l.Trim()) { [void]$names.Add($l.Trim()) }
     }
-    $names = [System.Collections.Generic.SortedSet[string]]::new($JoinableSessions, [StringComparer]::Ordinal)
-    foreach ($s in Get-ZellijServerSessions) { [void]$names.Add($s) }
+
+    # Joignabilite (cf. bloc du haut) : nom de serveur lisible ET meme logon session.
+    $servers = @(Get-ZellijServerProcesses)
+    $named   = @($servers | Where-Object { $_.Name })
+    $mineAny = @($servers | Where-Object { $_.SessionId -eq $MySessionId })
+    foreach ($s in $named) {
+        [void]$names.Add($s.Name)
+        if ($s.SessionId -eq $MySessionId) { [void]$JoinableSessions.Add($s.Name) }
+    }
+    # Aucun nom de serveur lisible (WMI muet / CommandLine tous masques) : on ne peut
+    # plus trancher session par session. Deux cas :
+    #  - aucun zellij dans MA logon session -> rien n'est joignable d'ici, c'est sur ;
+    #  - sinon, hors SSH, on retombe sur `zellij ls -ns` (comportement historique) ;
+    #    en SSH on reste prudent : mieux vaut router vers le web qu'un client fige.
+    if (-not $named.Count -and $mineAny.Count -and -not $IsSshSession) {
+        foreach ($l in (& zellij ls -ns 2>$null)) {
+            if ($l -and $l.Trim()) { [void]$JoinableSessions.Add($l.Trim()) }
+        }
+    }
+
     foreach ($s in Get-ZellijPipeSessions)   { [void]$names.Add($s) }
-    # Fallback : zellij ls connait aussi les sessions d'autres logon sessions (cache IPC).
-    # Get-ZellijServerSessions peut rater un processus dont le CommandLine WMI est
-    # protege (ex: session SSH depuis le telephone). Risque : sessions fantomes post-reboot.
+    # Fallback d'AFFICHAGE (jamais de joignabilite) : zellij ls connait aussi les
+    # sessions d'autres logon sessions (cache IPC), dont celles qu'aucun CommandLine
+    # WMI lisible ne revele. Risque : sessions fantomes post-reboot.
     # zellij ls colore sa sortie meme hors TTY : strip ANSI sinon le nom pollue
     # (\e[32;1mfoo\e[0m) cree un DOUBLON du nom propre venant de ls -ns.
     foreach ($l in (& zellij ls 2>$null)) {
@@ -417,11 +452,91 @@ function Invoke-Run {    # commande FINALE (equivalent run()/exec du .sh)
     exit $LASTEXITCODE
 }
 
+# --- Session SSH : ouverture par le web client local ----------------------------
+# Depuis sshd on est dans une AUTRE logon session que le bureau : un `zellij attach`
+# direct fige (pipe nomme cross-logon) et un `attach -c` cree une session fantome,
+# invisible du bureau. Le web server zellij (127.0.0.1:8082, tache planifiee
+# zellij-web-server) sert LA session du bureau, en TCP + token : on s'y connecte
+# avec le client zellij local. C'est exactement le chemin du telephone, sans le
+# tunnel ssh -- inutile ici puisqu'on tourne deja sur la machine.
+# Le web server cree aussi la session absente ; le bloc ZELLIJ_SESSION_NAME du
+# profil pwsh la ramene ensuite dans le bon dossier (d'ou l'absence de -Dir ici).
+$WebTokenFile = Join-Path $env:LOCALAPPDATA 'pc-zellij-web-token'
+$WebPort      = if ($env:PC_ZELLIJ_WEB_PORT) { $env:PC_ZELLIJ_WEB_PORT } else { '8082' }
+
+# Token du web server. Sa valeur n'est affichee qu'a la CREATION ("<token>: <nom>"),
+# d'ou le fichier. Creation reservee au bureau : depuis sshd, tout appel zellij
+# risque de tenir un handle en Session 0 et de rendre les sessions injoignables
+# depuis le bureau (vecu 2026-06-12). En SSH on se contente donc de lire.
+function Get-ZellijWebToken {
+    if (Test-Path $WebTokenFile) {
+        $t = (Get-Content -LiteralPath $WebTokenFile -Raw -ErrorAction SilentlyContinue)
+        if ($t) { $t = $t.Trim() }
+        if ($t) { return $t }
+    }
+    if ($IsSshSession) { return $null }
+    $out = (& zellij web --create-token 2>&1 | Out-String)
+    $m = [regex]::Match($out, '(?m)^(\S+):\s+(\S+)\s*$')
+    if (-not $m.Success) { return $null }
+    # PIEGE (vecu 2026-07-22) : l'ordre des deux champs a CHANGE entre versions --
+    # 0.43.1 imprime "<token>: <nom>", 0.44.3 imprime "<nom>: <token>". Prendre le
+    # champ par sa position enregistrait le nom ("token_2") a la place du token, et
+    # l'attach web echouait a l'authentification. On garde donc le plus LONG des
+    # deux : le token est un GUID de 36 caracteres, le nom un court "token_N".
+    $f1 = $m.Groups[1].Value
+    $f2 = $m.Groups[2].Value
+    $tok = if ($f2.Length -ge $f1.Length) { $f2 } else { $f1 }
+    Set-Content -LiteralPath $WebTokenFile -Value $tok -Encoding ascii -NoNewline
+    return $tok
+}
+
+# Amorce : une session SSH ne PEUT pas creer le token, donc le bureau s'en charge
+# des le premier F2. Une fois le fichier la, ca ne coute qu'un Test-Path.
+if (-not $IsSshSession -and -not $DryRun -and -not $Pick -and -not $List) {
+    [void](Get-ZellijWebToken)
+}
+
+# Sonde TCP plutot que `zellij web --status` : meme raison qu'au-dessus (aucun
+# appel zellij depuis sshd tant qu'on peut l'eviter). Un port ferme coute ~2 s
+# sur ce laptop -- acceptable ici, on n'y passe qu'a l'ouverture d'une session.
+function Test-ZellijWebOnline {
+    $tcp = [Net.Sockets.TcpClient]::new()
+    try { $tcp.Connect('127.0.0.1', [int]$WebPort); return $true }
+    catch { return $false }
+    finally { $tcp.Dispose() }
+}
+
+function Open-SessionViaWeb {
+    param([string]$Name)
+    if (-not (Test-ZellijWebOnline)) {
+        [Console]::Error.WriteLine("Le web server zellij est offline sur ce PC (127.0.0.1:$WebPort).")
+        [Console]::Error.WriteLine("Ouvre une session Windows sur le bureau, ou relance la tache planifiee")
+        [Console]::Error.WriteLine("'zellij-web-server', puis reessaye.")
+        [Console]::Error.Write('Appuie sur une touche pour revenir au menu...')
+        try { [void][Console]::ReadKey($true) } catch {}
+        [Console]::Error.WriteLine()
+        Restart-Menu
+    }
+    $token = Get-ZellijWebToken
+    if (-not $token) {
+        [Console]::Error.WriteLine("Aucun token web zellij enregistre ($WebTokenFile).")
+        [Console]::Error.WriteLine('Lance une fois le sessionizer depuis le bureau (F2) : il le cree tout seul.')
+        [Console]::Error.Write('Appuie sur une touche pour revenir au menu...')
+        try { [void][Console]::ReadKey($true) } catch {}
+        [Console]::Error.WriteLine()
+        Restart-Menu
+    }
+    # Nom encode : les vaults arabes arrivent ici en formes de presentation U+FExx.
+    $url = "http://127.0.0.1:$WebPort/" + [uri]::EscapeDataString($Name)
+    Invoke-Run @('zellij', 'attach', $url, '--token', $token)
+}
+
 # Attache (ou cree) la session $Name avec $Dir pour cwd. $Name est le nom zellij
 # FINAL : forme pre-shapee pour un vault arabe a creer, ou nom REEL d'une session
 # active (Get-ActualName). $Dir reste le chemin BRUT du dossier sur disque.
 function Open-Session {
     param([string]$Name, [string]$Dir)
+    if ($IsSshSession) { Open-SessionViaWeb -Name $Name; return }
     # --web-sharing on : OBLIGATOIRE pour que le telephone puisse attacher cette
     # session via le web server zellij. Defaut zellij = "off" -> une session creee
     # par F2 sans ce flag n'est PAS partagee au web server, et un attach web depuis
@@ -446,7 +561,9 @@ function Open-Session {
 # creait un doublon du meme nom. Message clair + retour menu a la place.
 function Join-ActiveSession {
     param([string]$Name)
-    if (-not $JoinableSessions.Contains($Name)) {
+    # En SSH, "injoignable" est la norme (le bureau est une autre logon session) :
+    # Open-Session route vers le web client au lieu de refuser.
+    if (-not $JoinableSessions.Contains($Name) -and -not $IsSshSession) {
         [Console]::Error.WriteLine("'$Name' est ouverte dans une AUTRE logon session Windows (tel/web).")
         [Console]::Error.WriteLine("Attach impossible depuis ce terminal. Options : la fermer depuis le tel,")
         [Console]::Error.WriteLine("ou Ctrl+X dessus pour tenter un kill (best effort).")

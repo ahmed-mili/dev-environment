@@ -162,15 +162,16 @@ function Format-Tokens([long]$n) {
 }
 
 function Format-Bar([double]$pct, [string]$col, [int]$width = 14) {
-    # Rectangles ▬ (U+25AC) au lieu de blocs pleins █ : occupent moins de hauteur
-    # dans la cellule terminal, donc la ligne paraît moins épaisse verticalement.
+    # Box drawing heavy horizontal (U+2501) : joint les cellules sans interstice
+    # tout en restant moins epais verticalement qu'un bloc plein.
     # Arrondi à l'entier (pas de cellule partielle) : plus lisible et cohérent.
     $filled = [int][Math]::Round($pct / 100.0 * $width)
     if ($filled -gt $width) { $filled = $width }
     if ($filled -lt 0)      { $filled = 0 }
     $empty  = $width - $filled
     $colRail = RGB 80 80 95   # gris-bleu sombre pour la partie vide (rail)
-    return "${col}$('▬' * $filled)${colRail}$('▬' * $empty)${reset}"
+    $barChar = ([char]0x2501).ToString()
+    return "${col}$($barChar * $filled)${colRail}$($barChar * $empty)${reset}"
 }
 
 function Get-EffortDisplay([string]$level) {

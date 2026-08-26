@@ -122,7 +122,7 @@ if ($Pull) {
     Write-Host ("=== Pull : {0} -> {1} ===" -f $RepoClaude, $HomeClaude) -ForegroundColor Cyan
 
     # Top-level files
-    $files = @('statusline.ps1', 'settings.json')
+    $files = @('statusline.ps1', 'settings.json', 'keybindings.json')
     $fileW = Get-NameWidth $files
     Write-TableHeader 'Files' $files.Count $fileW
     foreach ($f in $files) {
@@ -191,7 +191,7 @@ if ($Pull) {
 if ($Push) {
     Write-Host ("=== Push : {0} -> {1} ===" -f $HomeClaude, $RepoClaude) -ForegroundColor Cyan
 
-    $files = @('statusline.ps1', 'settings.json')
+    $files = @('statusline.ps1', 'settings.json', 'keybindings.json')
     $fileW = Get-NameWidth $files
     Write-TableHeader 'Files' $files.Count $fileW
     foreach ($f in $files) {

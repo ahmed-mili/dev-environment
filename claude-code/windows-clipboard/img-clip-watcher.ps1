@@ -47,7 +47,8 @@ param(
     [int]$CallerPid = 0,
     [string]$ImagesDir = '',
     [int]$PollMs = 1000,
-    [int]$FreshWindowMin = 10
+    [int]$FreshWindowMin = 10,
+    [int]$HeartbeatS = 5
 )
 
 $ErrorActionPreference = 'Stop'
@@ -175,6 +176,7 @@ try {
     # re-coller l'historique).
     $lastSeen = ''   # cle "FullName|Ticks|Length" de la derniere image traitee
     $loopErrorWarned = $false
+    $lastBeat = [datetime]::MinValue   # force un battement des le 1er tour
     try {
         $dirs = Resolve-ImagesDirs
         if ($dirs.Count -gt 0) {
@@ -206,6 +208,23 @@ try {
             if ($dirs.Count -eq 0) {
                 if (-not $loopErrorWarned) { Write-Log 'dossier images introuvable : attente'; $loopErrorWarned = $true }
                 continue
+            }
+
+            # --- Battement de vie (choix de la machine cible cote telephone) ------
+            # img2clip lit ce fichier par SFTP avant d'envoyer : il designe la
+            # machine ou une session Claude tourne, donc la seule ou l'image
+            # servira a quelque chose. Ecrit toutes les HeartbeatS secondes et non
+            # a chaque tour : le seuil de fraicheur cote telephone est de 60 s,
+            # inutile de reecrire 86400 fois par jour.
+            # Nom en dotfile : Get-LatestImage filtre '.*', ce fichier ne peut donc
+            # jamais etre pris pour une image a coller.
+            if (((Get-Date) - $lastBeat).TotalSeconds -ge $HeartbeatS) {
+                try {
+                    [System.IO.File]::WriteAllText(
+                        (Join-Path $dirs[0] '.watcher-alive'),
+                        [string][DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
+                    $lastBeat = Get-Date
+                } catch {}
             }
 
             $latest = Get-LatestImage $dirs

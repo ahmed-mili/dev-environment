@@ -2,8 +2,9 @@
 #SingleInstance Force
 
 ; Alt+V : insere le chemin de la capture la plus recente dans la fenetre active
-; (Claude Code). Le chemin est aussi place dans le presse-papiers (fallback Ctrl+V manuel
-; si le collage auto ne marche pas dans le terminal). Le backend glm n'ayant pas la vision,
+; (Claude Code). Le chemin est aussi place dans le presse-papiers en secours.
+; SendText saisit le chemin directement et ne depend pas du Ctrl+V de Warp/Claude Code.
+; Le backend glm n'ayant pas la vision,
 ; Claude analysera ensuite l'image via kimi-vision.ps1 (delegation a kimi-k2.7-code:cloud).
 ; Script installe par Claude Code le 2026-06-17. Dossier screenshots par defaut Windows :
 ; C:\Users\<user>\Pictures\Screenshots (Win+PrtScn).
@@ -26,8 +27,7 @@
         path := LatestScreenshotFile()
     if (path != "") {
         A_Clipboard := path
-        Sleep 80
-        Send "^v"
+        SendText path
     }
 }
 

@@ -33,6 +33,17 @@ set -euo pipefail
 SSH_OPTS=(-o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
 NET_TIMEOUT=30
 
+# Sonde de selection de la machine : delais courts, une machine eteinte ne doit
+# pas couter plus que quelques secondes avant qu'on passe a la suivante.
+PROBE_OPTS=(-o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=3)
+PROBE_TIMEOUT=8
+# Age maximal du battement du watcher pour considerer une machine active. Le
+# watcher ecrit toutes les 5 s : 60 s laisse de la marge pour un PC qui rame ou
+# une horloge legerement desynchronisee, sans jamais retenir une session fermee.
+ALIVE_MAX_AGE=60
+ALIVE_FILE='.claude-images/.watcher-alive'
+REMOTE_DIR='.claude-images'
+
 # Host SSH du desktop (alias ~/.ssh/config du telephone, surchargeable via $DESK).
 WIN_DESK="${WIN_DESK:-desktop}"
 WIN_SSH_PORT="${WIN_SSH_PORT:-2222}"
@@ -47,11 +58,30 @@ if [ -f "$HOME/.bashrc.local" ]; then
   set -u
 fi
 
+# Machines candidates, dans l'ordre de preference en cas d'egalite. Par defaut la
+# seule machine historique : le depot reste mono-machine pour qui le clone. Ajouter
+# des machines se fait hors depot (regle d'or n1, aucune valeur perso versionnee) :
+#   ~/.bashrc.local :  export WIN_HOSTS="laptop desktop"
+#   ~/.ssh/config   :  un bloc `Host laptop` avec son adresse, son port, son user
+# Resolu APRES .bashrc.local pour heriter d'un WIN_DESK eventuellement surcharge.
+WIN_HOSTS="${WIN_HOSTS:-$WIN_DESK}"
+
 # Le pipeline legacy vers WSL a ete retire le 2026-06-13. Seul le depot natif
-# Windows subsiste. On n'utilise pas SFTP : certaines
-# installs OpenSSH Windows acceptent le shell SSH sur :2222 mais ferment le
-# sous-systeme sftp ("subsystem request failed"). Le flux binaire stdin -> pwsh
-# ci-dessous ne depend que du shell SSH, deja requis par pwsh/sessionizer.
+# Windows subsiste.
+#
+# TRANSPORT : SFTP, et surtout PAS une commande shell distante (root cause
+# prouvee 2026-08-08). L'ancien envoi passait par
+# `ssh <host> "pwsh -Command \"...\$dir...\""` avec l'image sur stdin. Des que
+# HKLM\SOFTWARE\OpenSSH\DefaultShell vaut pwsh.exe, le shell de LOGIN interpole
+# cette chaine avant de la transmettre : chaque \$variable devient vide et le
+# script arrive syntaxiquement mort ("ParserError: An expression was expected
+# after '('"). Le curseur du screenshot-watcher est reste fige 19 jours sans
+# qu'aucune capture ne parte. Repro en une ligne :
+#   ssh <host> "echo AVANT\$varInexistante APRES"   -> n'affiche que AVANT/APRES.
+# SFTP est un protocole binaire : aucun shell distant n'entre en jeu, donc la
+# panne est impossible par construction quel que soit le DefaultShell. Le
+# sous-systeme sftp a ete verifie present sur les deux machines (2026-08-08) ;
+# l'ancien commentaire qui l'ecartait datait d'une install OpenSSH obsolete.
 
 # Un fichier image DOIT etre passe en argument (par screenshot-watcher ou par le
 # hook termux-file-editor). Plus de mode "sans argument" (scan de la + recente) :
@@ -159,31 +189,72 @@ if command -v termux-notification >/dev/null 2>&1; then
   trap 'rc=$?; [ "$staged" = 1 ] || [ "$failure_notified" = 1 ] || { command -v termux-notification-remove >/dev/null 2>&1 && termux-notification-remove img2clip >/dev/null 2>&1; }; exit $rc' EXIT
 fi
 
-if [ -n "${WIN_REMOTE:-}" ]; then
-  :
-elif [ -n "${WIN_USER:-}" ]; then
-  WIN_REMOTE="${WIN_USER}@${WIN_DESK}"
-else
-  # Fallback shareable : si ~/.ssh/config contient `Host desktop` + `User`,
-  # OpenSSH le resout. Sinon l'erreur SSH dira clairement que l'utilisateur est
-  # mauvais, sans imposer une valeur personnelle versionnee.
-  WIN_REMOTE="$WIN_DESK"
-fi
+# Destination SSH d'un alias : WIN_REMOTE surcharge tout (mono-machine explicite),
+# sinon WIN_USER prefixe l'alias, sinon on laisse ~/.ssh/config du telephone
+# fournir le User. Aucune valeur perso n'est ainsi versionnee ici.
+remote_for() {
+  if [ -n "${WIN_REMOTE:-}" ]; then printf '%s' "$WIN_REMOTE"
+  elif [ -n "${WIN_USER:-}" ]; then printf '%s@%s' "$WIN_USER" "$1"
+  else printf '%s' "$1"
+  fi
+}
 
-notify_img --ongoing --alert-once --icon sync --title "Sending image to PC" \
-  --content "Transferring to the PC..."
+# --- Choix de la machine cible -------------------------------------------------
+# Une seule connexion SFTP par machine donne les DEUX informations utiles :
+#   connexion refusee            -> machine injoignable, ecartee
+#   connexion OK, fichier absent -> joignable, aucune session Claude ouverte
+#   fichier recupere et frais    -> machine active, candidate
+# Le `-` devant `get` est la tolerance d'erreur de `sftp -b` : un fichier absent
+# n'echoue pas le lot, c'est ce qui permet de separer les deux derniers cas sans
+# payer une seconde connexion.
+# Aucune machine active -> on retombe sur la premiere joignable : l'image attend
+# dans ~/.claude-images et sera collable au prochain demarrage de Claude. Echouer
+# ici ferait vibrer le telephone en boucle pour une capture parfaitement livrable.
+PROBE_DIR="$HOME/.cache"
+mkdir -p "$PROBE_DIR" 2>/dev/null || true
 
-remote_cmd="pwsh -NoProfile -NoLogo -Command \"\
-\$ErrorActionPreference = 'Stop'; \
-\$dir = Join-Path \$env:USERPROFILE '.claude-images'; \
-[void][System.IO.Directory]::CreateDirectory(\$dir); \
-\$dest = Join-Path \$dir '$dest'; \
-\$inputStream = [Console]::OpenStandardInput(); \
-\$outputStream = [System.IO.File]::Open(\$dest, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read); \
-try { \$inputStream.CopyTo(\$outputStream) } finally { \$outputStream.Dispose() }\""
+# Le PREMIER host actif dans l'ordre de WIN_HOSTS gagne, on ne cherche pas le
+# battement le plus recent : les watchers ecrivent tous les 5 s, donc departager
+# deux machines actives au timestamp reviendrait a tirer au sort selon l'instant
+# de la sonde. L'ordre de WIN_HOSTS est deterministe et previsible, et sortir des
+# la premiere machine active economise la sonde des suivantes.
+pick_target() {
+  local host probe alive now fallback=''
+  now=$(date +%s)
+  for host in $WIN_HOSTS; do
+    probe="$PROBE_DIR/img2clip-alive-$host"
+    rm -f "$probe"
+    printf -- '-get %s %s\n' "$ALIVE_FILE" "$probe" \
+      | timeout "$PROBE_TIMEOUT" sftp "${PROBE_OPTS[@]}" -P "$WIN_SSH_PORT" -b - \
+          "$(remote_for "$host")" >/dev/null 2>&1 || continue
+    [ -n "$fallback" ] || fallback="$host"
+    # tr -cd : le fichier ne contient qu'un epoch, mais on se blinde contre un
+    # CRLF ou un BOM qui rendrait la comparaison arithmetique fatale (set -e).
+    # `if` explicite et pas `[ -s ] && alive=...` : sous set -e, une liste `&&`
+    # dont le test echoue renvoie 1 et tuerait le script.
+    alive=''
+    if [ -s "$probe" ]; then alive=$(tr -cd '0-9' < "$probe" || true); fi
+    [ -n "$alive" ] || continue
+    [ "$((now - alive))" -le "$ALIVE_MAX_AGE" ] || continue
+    printf '%s' "$host"
+    return 0
+  done
+  printf '%s' "$fallback"
+}
+
+target_host=$(pick_target)
 
 rc=0
-timeout "$NET_TIMEOUT" ssh "${SSH_OPTS[@]}" -p "$WIN_SSH_PORT" "$WIN_REMOTE" "$remote_cmd" < "$newest" || rc=$?
+if [ -z "$target_host" ]; then
+  rc=255   # aucune machine joignable : meme message que l'echec SSH classique
+else
+  notify_img --ongoing --alert-once --icon sync --title "Sending image to PC" \
+    --content "Transferring to $target_host..."
+  # -mkdir tolere l'echec : creation idempotente du depot sans commande shell.
+  printf -- '-mkdir %s\nput "%s" "%s/%s"\n' "$REMOTE_DIR" "$newest" "$REMOTE_DIR" "$dest" \
+    | timeout "$NET_TIMEOUT" sftp "${SSH_OPTS[@]}" -P "$WIN_SSH_PORT" -b - \
+        "$(remote_for "$target_host")" >/dev/null 2>&1 || rc=$?
+fi
 if [ "$rc" != 0 ]; then
   failure_notified=1
   if [ "$have_notif" = 1 ]; then
@@ -201,12 +272,12 @@ fi
 # No SetImage over SSH here: the Windows watcher, launched beside Claude,
 # observes %USERPROFILE%\.claude-images in the reader's window station.
 staged=1
-echo "OK. Image staged on the PC (native Windows watcher takes over)."
+echo "OK. Image staged on $target_host (native Windows watcher takes over)."
 if [ "$have_notif" = 1 ]; then
   # Bouton "Open image" : ouvre l'image envoyee dans la visionneuse par defaut
   # (cf. open_action en tete : am + file://, JAMAIS termux-open -> galerie MIUI
   # voit 0 octet). Bouton explicite plutot que tap-sur-notif : plus intuitif.
-  notify_img --icon check_circle --title "Image ready on your PC" \
+  notify_img --icon check_circle --title "Image ready on $target_host" \
     --content "Copied to the Windows clipboard - ready to paste" --priority high --vibrate 200 \
     --led-color 00c853 --led-on 250 --led-off 1000 \
     --button1 "Open image" --button1-action "$open_action"

@@ -334,12 +334,67 @@ if (Get-Command claude -CommandType Application -ErrorAction SilentlyContinue) {
 } else {
     Install-WingetPackage -Id 'Anthropic.ClaudeCode'      -DisplayName 'Claude Code'
 }
-# Zellij (portage Windows natif) : dependance du sessionizer F2. Sans lui, le
-# keybind F2 du profil PS7 (Invoke-Sessionizer) plante des l'ouverture du menu
-# ('zellij' introuvable) et toute selection (projet/vault/session) echoue, car
-# Open-Session termine toujours par `zellij attach`. L'officiel Zellij.Zellij ne
-# tourne pas nativement sous Windows -> on prend le port arndawg.zellij-windows.
-Install-WingetPackage -Id 'arndawg.zellij-windows'        -DisplayName 'Zellij (Windows port)'
+# Zellij : dependance du sessionizer F2. Sans lui, le keybind F2 du profil PS7
+# (Invoke-Sessionizer) plante des l'ouverture du menu ('zellij' introuvable) et
+# toute selection echoue, car Open-Session termine toujours par `zellij attach`.
+#
+# PAS winget (vecu 2026-07-21) : le port arndawg.zellij-windows est fige en
+# 0.43.1-win32.5, qui cherche sa config dans %USERPROFILE%\.config\zellij alors
+# que la 0.44 lit %APPDATA%\Zellij\config -> config jamais lue, panes en cmd.exe
+# au lieu de pwsh, cadres et theme par defaut, keybind F2 absent. Il pose en plus
+# un shim sur WinGet\Links qui concurrence le binaire officiel sur le PATH.
+# Depuis 0.44, zellij-org publie un build Windows natif : on l'installe dans
+# %LOCALAPPDATA%\Zellij\, le chemin qu'attendent deja le profil PS7 (secours web
+# server) et la tache planifiee zellij-web-server.
+Write-Step 'Zellij (build Windows officiel)'
+$zjDir = Join-Path $env:LOCALAPPDATA 'Zellij'
+$zjExe = Join-Path $zjDir 'zellij.exe'
+$zjHave = $null
+if (Test-Path $zjExe) {
+    $zjHave = ((& $zjExe --version 2>$null) -replace '^zellij\s+', '').Trim()
+}
+if ($zjHave -and [version](($zjHave -split '-')[0]) -ge [version]'0.44') {
+    Write-Ok "Zellij $zjHave"
+} elseif ($SkipWinget) {
+    Write-Note 'Zellij absent ou trop ancien -- -SkipWinget, telechargement saute'
+} else {
+    $zjTmp = Join-Path $env:TEMP ('zellij-' + [guid]::NewGuid().Guid)
+    New-Item -ItemType Directory -Path $zjTmp -Force | Out-Null
+    try {
+        # Asset EXACT : 'zellij-no-web-*' existe aussi et n'a pas le web server,
+        # dont depend l'attach depuis le telephone.
+        $zjUrl = Get-LatestGithubReleaseAsset -Repo 'zellij-org/zellij' -NamePattern 'zellij-x86_64-pc-windows-msvc.zip'
+        $zjZip = Join-Path $zjTmp 'zellij.zip'
+        Invoke-WebRequest -Uri $zjUrl -OutFile $zjZip -UseBasicParsing
+        Expand-Archive -Path $zjZip -DestinationPath $zjTmp -Force
+        $zjSrc = Get-ChildItem $zjTmp -Recurse -Filter 'zellij.exe' | Select-Object -First 1
+        if (-not $zjSrc) { throw "zellij.exe absent de l'archive" }
+        New-Item -ItemType Directory -Path $zjDir -Force | Out-Null
+        # Une cible existante peut etre un LIEN vers le shim winget : la supprimer
+        # d'abord, sinon Copy-Item ecrit a travers le lien (dans le paquet winget).
+        if (Test-Path $zjExe) { Remove-Item $zjExe -Force }
+        Copy-Item $zjSrc.FullName $zjExe -Force
+        Write-Ok ("Zellij " + ((& $zjExe --version) -replace '^zellij\s+', '').Trim() + " -> " + (Short-Path $zjExe))
+    } catch {
+        Write-Note "Zellij non installe : $($_.Exception.Message)"
+    } finally {
+        Remove-Item $zjTmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+# Le build officiel ne pose aucun shim : sans cette entree, `zellij` est
+# introuvable et le sessionizer plante a la premiere selection.
+$zjUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if (($zjUserPath -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $zjDir.TrimEnd('\')) {
+    [Environment]::SetEnvironmentVariable('Path', ($zjUserPath.TrimEnd(';') + ';' + $zjDir + '\'), 'User')
+    Write-Ok ("PATH utilisateur += " + (Short-Path $zjDir))
+}
+# Ancien port winget encore la = deux zellij sur le PATH (WinGet\Links passe
+# souvent en premier) -> on le signale, sans desinstaller dans le dos.
+if (-not $SkipWinget -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+    if (winget list --id arndawg.zellij-windows --exact --source winget 2>$null | Select-String 'arndawg') {
+        Write-Note 'ancien port winget present -- a retirer : winget uninstall --id arndawg.zellij-windows'
+    }
+}
 
 # ---------------------------------------------------------------------------
 # 2) PowerShell 7 profile

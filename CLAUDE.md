@@ -41,12 +41,13 @@ Les fichiers `.ps1` doivent rester **ASCII-only** (pas de BOM UTF-8 non plus). R
 
 Tout script d'installation (bootstrap, setup, deploy) doit pouvoir être relancé sans effet de bord. Vérifier l'existence avant de créer, nettoyer avant de remplacer.
 
-### 5. Non-régression sur le téléphone
+### 5. Pipeline téléphone : gelé, plus testé en local
 
-Tout changement côté desktop qui touche au pipeline téléphone→desktop (img2clip, screenshot-watcher, clip-watcher) doit être testé sur les 3 sources :
-- Screenshot PC (`Win+Shift+S`)
-- Screenshot téléphone
-- Photo téléphone (appareil photo)
+Depuis le 2026-08-22, Termux est **désinstallé** du téléphone du mainteneur (conso batterie). Les images du téléphone passent désormais par **Remote Control** (pièce jointe dans l'app Claude, aucun process côté tél), et l'accès distant à la machine par un client remote desktop. Conséquences :
+
+- `claude-code/termux/`, `android/setup-ssh-client.sh` et `img-clip-watcher.ps1` restent dans le repo pour ceux qui installent le pipeline, mais **ne sont plus testés ici**. Toute modif s'y fait à l'aveugle : le signaler dans le commit plutôt que de prétendre l'avoir validée.
+- Le watcher presse-papiers est désormais **opt-in** : `ps7-profile.ps1` ne le lance que si `%USERPROFILE%\.claude-images` existe. Pour l'activer : `mkdir "$env:USERPROFILE\.claude-images"`.
+- Si tu remets Termux un jour, la règle d'origine revient : tester sur les 3 sources (screenshot PC `Win+Shift+S`, screenshot téléphone, photo téléphone).
 
 ---
 
@@ -99,5 +100,5 @@ Le presse-papiers Windows **ne doit plus** être alimenté par `ssh -p 2222 ... 
 
 - [ ] `grep -rE "<prenom-perso>|<hostname-perso>|<ip-perso>" --include="*" .` → aucun match dans un fichier versionné (sauf commentaire documentant le pourquoi)
 - [ ] `deploy.ps1 -Pull` (ou `-Push`) testé
-- [ ] img2clip testé sur les 3 sources (PC screenshot, tel screenshot, tel photo)
+- [ ] Si le pipeline téléphone est touché : dit explicitement dans le commit qu'il n'a pas pu être testé (cf. règle 5)
 - [ ] Pas de caractère non-ASCII dans un `.ps1`

@@ -39,10 +39,33 @@ function prompt {
 # ---- Fastfetch splash (Windows logo + system info) ----
 # Uses the config at ~/.config/fastfetch/config.jsonc deployed by this bundle.
 # Runs only in interactive sessions to avoid polluting scripted/piped pwsh calls.
-if ($script:HasInteractiveConsole -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
-    # Aggregate physical-memory info via WMI (portable across any Windows PC) and
-    # expose as $env:FF_RAM so fastfetch's `command` module can echo it cheaply
-    # instead of paying CIM cost on every fastfetch invocation.
+#
+# CACHE (vecu 2026-07-22) : produire ce splash coute ~360 ms (CIM Win32_PhysicalMemory
+# ~110 ms + fastfetch ~250 ms qui sonde GPU, disque et ecran) -- paye a CHAQUE
+# ouverture de terminal, alors que sur un portable RIEN de tout cela ne bouge
+# (seuls RAM et SSD sont remplacables, et pas entre deux prompts). On ecrit donc
+# le splash une fois dans un cache et on le REJOUE (~5 ms). Seule ligne vraiment
+# variable : l'uptime -> stockee en jeton et recalculee a l'affichage depuis
+# TickCount64 (instantane, la ou CIM LastBootUpTime coute ~100 ms).
+# Cache refait automatiquement s'il a plus de 7 jours, ou a la demande avec
+# `refresh-splash` (apres un ajout de RAM ou de SSD).
+$script:SplashCache = Join-Path $env:LOCALAPPDATA 'pc-splash.ansi'
+$script:SplashUptimeToken = '@@UPTIME@@'
+
+function Get-UptimeText {
+    $ts = [TimeSpan]::FromMilliseconds([Environment]::TickCount64)
+    $parts = @()
+    if ($ts.Days)  { $parts += "$($ts.Days) day"   + $(if ($ts.Days  -ne 1) { 's' }) }
+    if ($ts.Hours) { $parts += "$($ts.Hours) hour" + $(if ($ts.Hours -ne 1) { 's' }) }
+    $parts += "$($ts.Minutes) min" + $(if ($ts.Minutes -ne 1) { 's' })
+    return ($parts -join ', ')
+}
+
+function Build-Splash {
+    # RAM : agregee via WMI (portable), puis figee dans la variable d'environnement
+    # UTILISATEUR. Le module `command` de fastfetch l'echo sans payer de CIM, et
+    # tout nouveau process l'herite -- y compris un `fastfetch` tape a la main,
+    # qui afficherait sinon une ligne RAM vide.
     try {
         $m = Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop
         $typeMap = @{ 20='DDR'; 21='DDR2'; 24='DDR3'; 26='DDR4'; 34='DDR5' }
@@ -63,6 +86,7 @@ if ($script:HasInteractiveConsole -and (Get-Command fastfetch -ErrorAction Silen
     } catch {
         $env:FF_RAM = ''
     }
+    try { [Environment]::SetEnvironmentVariable('FF_RAM', $env:FF_RAM, 'User') } catch {}
 
     # Print a per-character gradient USER@HOST header before fastfetch.
     # The gradient walks the same 5 Catppuccin stops as the rest of the splash
@@ -91,9 +115,48 @@ if ($script:HasInteractiveConsole -and (Get-Command fastfetch -ErrorAction Silen
         [void]$sb.Append("$([char]27)[1;38;2;$r;$g;${bb}m$($titleText[$i])")
     }
     [void]$sb.Append("$([char]27)[0m")
-    [Console]::Out.WriteLine($sb.ToString())
 
-    fastfetch
+    # --pipe false : sans ca fastfetch voit une redirection et coupe couleurs et
+    # glyphes -- le cache serait un splash en noir et blanc.
+    $ff = (& fastfetch --pipe false | Out-String)
+    # Ligne Uptime -> jeton. PIEGE : apres le libelle, fastfetch enchaine
+    # directement des sequences ANSI (couleur puis `ESC[14G` qui aligne la colonne),
+    # donc chercher des espaces apres "Uptime" ne matche RIEN. On remplace le
+    # dernier segment de texte de la ligne, celui qui suit la derniere sequence :
+    # couleurs et alignement restent intacts.
+    $ff = ($ff -split "`n" | ForEach-Object {
+        if ($_ -match 'Uptime') {
+            [regex]::Replace($_, '(?<=\x1b\[[0-9;]*[mG])[^\x1b\r\n]+(?=\r?$)', $script:SplashUptimeToken)
+        } else { $_ }
+    }) -join "`n"
+    $text = $sb.ToString() + "`n" + $ff
+    try {
+        [System.IO.File]::WriteAllText($script:SplashCache, $text, [System.Text.UTF8Encoding]::new($false))
+    } catch {}
+    return $text
+}
+
+function Show-Splash {
+    $text = $null
+    $stale = $true
+    if (Test-Path $script:SplashCache) {
+        $stale = ((Get-Date) - (Get-Item $script:SplashCache).LastWriteTime).TotalDays -gt 7
+        if (-not $stale) {
+            try { $text = [System.IO.File]::ReadAllText($script:SplashCache, [System.Text.UTF8Encoding]::new($false)) } catch {}
+        }
+    }
+    if (-not $text) { $text = Build-Splash }
+    [Console]::Out.Write($text.Replace($script:SplashUptimeToken, (Get-UptimeText)))
+}
+
+# Regenere le cache sur demande : ajout de RAM, changement de SSD, nouvel ecran.
+function refresh-splash {
+    [void](Build-Splash)
+    Show-Splash
+}
+
+if ($script:HasInteractiveConsole -and (Get-Command fastfetch -ErrorAction SilentlyContinue)) {
+    Show-Splash
 }
 
 # Zellij web/direct sessions are created by session name. If the session name
@@ -239,9 +302,9 @@ if ($script:HasInteractiveConsole -and (Get-Module -Name PSReadLine -ListAvailab
 # son Import-Module FIGE indefiniment un pwsh demarre sans console (`pwsh
 # -Command ...`, donc tout `ssh desktop "commande"` depuis que le DefaultShell
 # OpenSSH est pwsh). Meme garde que PSReadLine et PSFzf ci-dessus.
-if ($script:HasInteractiveConsole -and (Get-Module -ListAvailable -Name CompletionPredictor)) {
-    Import-Module CompletionPredictor -ErrorAction SilentlyContinue
-}
+# Charge en differe (voir le bloc OnIdle plus bas) : rien de tout cela n'est utile
+# avant la premiere frappe, et l'import se paye sinon avant le premier prompt.
+$global:DeferCompletionPredictor = $script:HasInteractiveConsole
 
 # ---- zoxide: smart `cd` based on frecency. After visiting a dir once,
 # `cd <fuzzy-name>` jumps there from anywhere (e.g. `cd dev-env` ->
@@ -267,31 +330,58 @@ Register-ArgumentCompleter -CommandName cd, Set-Location, sl -ParameterName Path
 }
 
 # ---- Terminal-Icons: Nerd Font icons in Get-ChildItem (`ls`) output ----
-# HasInteractiveConsole obligatoire : des icones ne servent qu'a un oeil humain,
-# et c'est le poste le plus cher du profil (~385 ms mesures : 312 d'import + 73
-# de validation des themes). Sans cette garde il etait paye par TOUT
-# `pwsh -Command ...`, donc par chaque `ssh desktop "..."`, pour rien.
-if ($script:HasInteractiveConsole -and (Get-Module -ListAvailable -Name Terminal-Icons)) {
-    $terminalIconsDir = Join-Path $env:APPDATA 'powershell\Community\Terminal-Icons'
-    if (Test-Path $terminalIconsDir) {
-        Get-ChildItem $terminalIconsDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object {
-            $themeFile = $_.FullName
-            try {
-                $null = Import-Clixml -LiteralPath $themeFile -ErrorAction Stop
-            } catch {
-                $badPath = "$themeFile.bad-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-                Move-Item -LiteralPath $themeFile -Destination $badPath -Force -ErrorAction SilentlyContinue
-            }
-        }
-    }
-    try { Import-Module Terminal-Icons -ErrorAction Stop } catch {}
-}
-
 # ---- PSFzf: Ctrl+R fuzzy reverse-history, Ctrl+T fuzzy file/dir picker ----
-# Only loaded when fzf.exe is available on PATH.
-if ($script:HasInteractiveConsole -and (Get-Module -ListAvailable -Name PSFzf) -and (Get-Command fzf -ErrorAction SilentlyContinue)) {
-    Import-Module PSFzf -ErrorAction SilentlyContinue
-    Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r' -ErrorAction SilentlyContinue
+# Les deux sont charges en differe (bloc OnIdle ci-dessous), donc AUCUNE
+# verification ici : un `Get-Module -ListAvailable` coute ~40 ms par module et
+# n'a rien a faire dans le chemin critique du prompt. L'absence d'un module est
+# rattrapee par le try/catch de l'action.
+$global:DeferTerminalIcons = $script:HasInteractiveConsole
+$global:DeferPSFzf = $script:HasInteractiveConsole
+
+# ---- Chargement DIFFERE des modules d'agrement ------------------------------
+# Terminal-Icons, PSFzf et CompletionPredictor coutaient ~1,3 s AVANT l'affichage
+# du premier prompt (mesure 2026-07-22 : ~640 ms + ~540 ms + gardes), alors
+# qu'aucun ne sert tant qu'une commande n'a pas ete tapee : Terminal-Icons au
+# prochain `ls`, PSFzf au prochain Ctrl+R / Ctrl+T, CompletionPredictor a la
+# premiere frappe. On les charge donc a la premiere accalmie du moteur
+# (PowerShell.OnIdle, declenchee juste apres l'affichage du prompt) : le prompt
+# sort tout de suite et le chargement finit pendant qu'on lit encore le splash.
+# MaxTriggerCount 1 : une seule fois par session.
+#
+# $global: et Import-Module -Global, PAS $script:/import nu : l'action d'un
+# EngineEvent s'execute dans SON propre scope -- une variable $script: du profil y
+# serait vide, et un module importe sans -Global mourrait avec ce scope au lieu
+# de rester dans la session. Verifie en console reelle le 2026-07-22.
+if ($global:DeferTerminalIcons -or $global:DeferPSFzf -or $global:DeferCompletionPredictor) {
+    $null = Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -MaxTriggerCount 1 -Action {
+        if ($global:DeferTerminalIcons) {
+            # Un theme Clixml corrompu fait echouer l'import : on ecarte le fichier
+            # fautif pour que Terminal-Icons reparte sur ses defauts au lieu de
+            # rester mort jusqu'a reparation manuelle.
+            $iconsDir = Join-Path $env:APPDATA 'powershell\Community\Terminal-Icons'
+            if (Test-Path $iconsDir) {
+                Get-ChildItem $iconsDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    try { $null = Import-Clixml -LiteralPath $_.FullName -ErrorAction Stop }
+                    catch {
+                        Move-Item -LiteralPath $_.FullName -Destination "$($_.FullName).bad-$(Get-Date -Format 'yyyyMMdd-HHmmss')" -Force -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+            try { Import-Module Terminal-Icons -Global -ErrorAction Stop } catch {}
+        }
+        if ($global:DeferPSFzf -and (Get-Command fzf -ErrorAction SilentlyContinue)) {
+            try {
+                Import-Module PSFzf -Global -ErrorAction Stop
+                Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r' -ErrorAction SilentlyContinue
+            } catch {}
+        }
+        # Son import FIGE un pwsh demarre sans console -- ici on est forcement dans
+        # une session interactive (OnIdle ne se declenche pas ailleurs), donc sur.
+        if ($global:DeferCompletionPredictor) {
+            try { Import-Module CompletionPredictor -Global -ErrorAction Stop } catch {}
+        }
+        $global:SplashDeferDone = $true
+    }
 }
 
 # ---- Claude Code clipboard watcher ----------------------------------------
@@ -301,6 +391,11 @@ if ($script:HasInteractiveConsole -and (Get-Module -ListAvailable -Name PSFzf) -
 # clipboard, so extra starts are cheap no-ops.
 function Start-ClaudeClipboardWatcher {
     param([switch]$Fast)
+    # Pipeline telephone -> presse-papiers : opt-in via le dossier de depot.
+    # Sans lui, plus rien n alimente le watcher (Termux desinstalle cote tel,
+    # les images passent desormais par Remote Control) et il pollerait dans le
+    # vide a chaque session. Pour (re)activer : mkdir "$env:USERPROFILE\.claude-images"
+    if (-not (Test-Path "$env:USERPROFILE\.claude-images")) { return }
     $watcher = "$env:USERPROFILE\.local\bin\img-clip-watcher.ps1"
     if (Test-Path $watcher) {
         $args = @(

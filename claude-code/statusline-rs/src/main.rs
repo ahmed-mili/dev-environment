@@ -138,14 +138,16 @@ fn format_bar(pct: f64, col: &str, width: usize) -> String {
     if filled < 0 { filled = 0; }
     let filled = filled as usize;
     let empty = width - filled;
+    // U+2501 est un glyphe box-drawing jointif entre cellules, contrairement a
+    // U+25AC (rectangle geometrique) qui conserve des marges laterales visibles.
     // Piste (track) calquee sur claude.ai : gris sombre #424240 rgb(66,66,64).
     let rail = rgb(66, 66, 64);
     format!(
         "{}{}{}{}{}",
         col,
-        "\u{25AC}".repeat(filled),
+        "\u{2501}".repeat(filled),
         rail,
-        "\u{25AC}".repeat(empty),
+        "\u{2501}".repeat(empty),
         RESET
     )
 }
@@ -864,15 +866,12 @@ fn run_usage_refresh(claude_dir: &Path) {
     }
 }
 
-// =================== PRE-SHAPING ARABE (terminaux sans BiDi) ===================
-// Windows Terminal n'applique ni l'algorithme bidirectionnel Unicode ni le
-// shaping contextuel (microsoft/terminal#538) : un chemin contenant de l'arabe
-// (ex. C:\obsidian-vaults\<vault arabe>) sort inverse et deconnecte dans le
-// banner. Meme parade que le sessionizer (ConvertTo-ArabicDisplay dans
-// claude-code/windows-sessionizer/sessionizer.ps1, tests et justification
-// la-bas) : convertir les runs arabes en formes de presentation U+FExx posees
-// en ordre visuel. Applique au chemin AFFICHE uniquement -- compute_git()
-// recoit toujours le chemin brut.
+// =================== PRE-SHAPING ARABE POUR LA TUI CLAUDE ===================
+// La TUI de claude.exe applique le BiDi (elle inverse le run) mais ne fait pas
+// le shaping contextuel. On emet donc des formes de presentation U+FExx en ordre
+// LOGIQUE : Claude les remet ensuite en ordre visuel. Les emettre deja en ordre
+// visuel provoquerait une double inversion. Applique au chemin AFFICHE uniquement
+// -- compute_git() recoit toujours le chemin brut.
 
 /// (isolated, final, initial, medial) ; 0 = forme absente (right-joining :
 /// pas d'initial/medial ; hamza : isolated seule ; tatweel : inchange).
@@ -976,8 +975,9 @@ fn arabic_display(text: &str) -> String {
                     && ar_forms(clusters[k].0).is_some_and(|f| f[1] != 0)
             })
             .collect();
-        // Formes contextuelles + ligatures en ordre logique, puis inversion.
-        let mut visual: Vec<String> = Vec::new();
+        // Formes contextuelles + ligatures conservees en ordre logique. La TUI
+        // Claude effectuera elle-meme la reorganisation BiDi vers l'ordre visuel.
+        let mut logical: Vec<String> = Vec::new();
         let mut k = 0;
         while k < clusters.len() {
             let b = clusters[k].0;
@@ -1018,13 +1018,17 @@ fn arabic_display(text: &str) -> String {
                 }
                 k += 1;
             }
-            visual.push(piece);
+            logical.push(piece);
         }
-        for piece in visual.iter().rev() {
+        for piece in &logical {
             out.push_str(piece);
         }
     }
     out
+}
+
+fn is_arabic_display_char(c: char) -> bool {
+    matches!(c as u32, 0x0600..=0x06FF | 0xFE70..=0xFEFF)
 }
 
 // =================== BUILD LINE 1 (banner) ===================
@@ -1185,7 +1189,9 @@ fn build_line1(
         let seg_count = (stops.len() - 1) as f64;
         let mut idx = 0usize;
         for s in &segs {
-            for c in s.text.chars() {
+            let chars: Vec<char> = s.text.chars().collect();
+            let mut j = 0usize;
+            while j < chars.len() {
                 let u = if total_len > 1 {
                     (idx as f64 / (total_len - 1) as f64) * seg_count
                 } else {
@@ -1203,8 +1209,21 @@ fn build_line1(
                 let bb = (a.2 as f64 + (b.2 as f64 - a.2 as f64) * t).round() as u8;
                 line1.push_str(&bg(r, g, bb));
                 line1.push_str(&s.fg);
-                line1.push(c);
-                idx += 1;
+
+                if is_arabic_display_char(chars[j]) {
+                    // Garder tout le run arabe sous un seul style ANSI. Des SGR
+                    // entre chaque lettre fragmentent le run BiDi dans la TUI
+                    // Claude et cassent son ordre ainsi que ses liaisons.
+                    while j < chars.len() && is_arabic_display_char(chars[j]) {
+                        line1.push(chars[j]);
+                        j += 1;
+                        idx += 1;
+                    }
+                } else {
+                    line1.push(chars[j]);
+                    j += 1;
+                    idx += 1;
+                }
             }
         }
         line1.push_str(RESET);
@@ -1815,8 +1834,8 @@ fn main() {
     };
     let usage_ms = t_usage.elapsed().as_millis();
 
-    // Chemin pour l'AFFICHAGE seulement : pre-shaping arabe (terminal sans
-    // BiDi). compute_git() ci-dessus a recu le chemin brut.
+    // Chemin pour l'AFFICHAGE seulement : pre-shaping arabe en ordre logique
+    // pour le BiDi de la TUI Claude. compute_git() a recu le chemin brut.
     let dir_display = arabic_display(&dir);
 
     let line1 = build_line1(
@@ -1885,7 +1904,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{arabic_display, parse_ollama_context_length};
+    use super::{arabic_display, format_bar, parse_ollama_context_length, RESET};
 
     // Parse de la vraie sortie `ollama show glm-5.2:cloud`.
     #[test]
@@ -1913,28 +1932,35 @@ mod tests {
     #[test]
     fn al_islam_deux_ligatures() {
         let input = s(&[0x0627, 0x0644, 0x0625, 0x0633, 0x0644, 0x0627, 0x0645]);
-        let want = s(&[0xFEE1, 0xFEFC, 0xFEB3, 0xFEF9, 0xFE8D]);
+        let want = s(&[0xFE8D, 0xFEF9, 0xFEB3, 0xFEFC, 0xFEE1]);
         assert_eq!(arabic_display(&input), want);
     }
 
     #[test]
     fn chemin_mixte_vault() {
         let input = format!(r"C:\obsidian-vaults\{}", s(&[0x0627, 0x0644, 0x0625, 0x0633, 0x0644, 0x0627, 0x0645]));
-        let want = format!(r"C:\obsidian-vaults\{}", s(&[0xFEE1, 0xFEFC, 0xFEB3, 0xFEF9, 0xFE8D]));
+        let want = format!(r"C:\obsidian-vaults\{}", s(&[0xFE8D, 0xFEF9, 0xFEB3, 0xFEFC, 0xFEE1]));
         assert_eq!(arabic_display(&input), want);
     }
 
     #[test]
     fn marhaban_right_joiners() {
         let input = s(&[0x0645, 0x0631, 0x062D, 0x0628, 0x0627]);
-        let want = s(&[0xFE8E, 0xFE92, 0xFEA3, 0xFEAE, 0xFEE3]);
+        let want = s(&[0xFEE3, 0xFEAE, 0xFEA3, 0xFE92, 0xFE8E]);
         assert_eq!(arabic_display(&input), want);
     }
 
     #[test]
     fn idempotence() {
-        let shaped = s(&[0xFEE1, 0xFEFC, 0xFEB3, 0xFEF9, 0xFE8D]);
+        let shaped = s(&[0xFE8D, 0xFEF9, 0xFEB3, 0xFEFC, 0xFEE1]);
         assert_eq!(arabic_display(&shaped), shaped);
+    }
+
+    #[test]
+    fn barre_continue_box_drawing() {
+        let plain = format_bar(50.0, "", 4).replace(RESET, "");
+        assert!(plain.starts_with("\u{2501}\u{2501}"));
+        assert!(!plain.contains('\u{25AC}'));
     }
 
     use super::{build_usage_seg, fmt_age};

@@ -244,6 +244,18 @@ Write-Step 'Deploying Claude Code config (statusline + settings + hooks + skills
 & (Join-Path $RepoPath 'claude-code\deploy.ps1') -Pull
 if ($LASTEXITCODE -ne 0) { throw 'Claude Code config deploy failed' }
 
+# Claude Code owns Alt+V on Windows by default and pastes the clipboard image
+# directly. Our keybindings.json unbinds that action; this idempotent installer
+# gives Alt+V to AutoHotkey instead, which pastes the image file path. This is
+# especially useful in Warp because the CLI can read the local path immediately.
+$imagePathShortcutInstaller = Join-Path $env:USERPROFILE '.claude\scripts\install-screenshot-shortcut.ps1'
+if (Test-Path -LiteralPath $imagePathShortcutInstaller) {
+    & $imagePathShortcutInstaller
+    if ($LASTEXITCODE -ne 0) { throw 'Alt+V image-path shortcut install failed' }
+} else {
+    Write-Warn 'Alt+V image-path shortcut installer not found - skipping'
+}
+
 # ---------------------------------------------------------------------------
 # Claude Code plugins (idempotent CLI install)
 # ---------------------------------------------------------------------------

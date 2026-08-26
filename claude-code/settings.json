@@ -2,7 +2,6 @@
   "permissions": {
     "allow": [
       "Bash(rm -f ~/.claude-images/*)",
-      "Bash(ssh phone *)",
       "Bash(git status*)",
       "Bash(git log*)",
       "Bash(git diff*)",
@@ -31,6 +30,7 @@
     { "serverUrl": "https://drivemcp.googleapis.com/*" }
   ],
   "model": "opus[1m]",
+  "outputStyle": "Concise",
   "fallbackModel": [
     "opus",
     "sonnet"
@@ -66,7 +66,7 @@
     "content-researcher@ahmed-plugins-local": true,
     "plugin-creator@ahmed-plugins-local": true,
     "efrei@ahmed-plugins-local": true,
-    "phone@ahmed-plugins-local": true,
+    "phone@ahmed-plugins-local": false,
     "senior-dev@ahmed-plugins-local": true
   },
   "language": "French",

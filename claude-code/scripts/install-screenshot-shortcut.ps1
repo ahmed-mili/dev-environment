@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Bootstrap the Alt+V screenshot shortcut (AutoHotkey v2 + Startup .lnk).
+  Bootstrap the Alt+V image-path shortcut (AutoHotkey v2 + Startup .lnk).
 .DESCRIPTION
-  Idempotent installer for the Alt+V screenshot-paste shortcut used by the
-  glm -> kimi vision delegation chain (kimi-vision.ps1). Steps:
+  Idempotent installer for the Alt+V image-path shortcut used by Claude Code
+  in Windows terminals, including Warp. Steps:
     1. Ensure AutoHotkey v2 is installed (winget --scope user, no UAC).
     2. Ensure screenshot-shortcut.ahk is present in ~/.claude/scripts/
        (run claude-code/deploy.ps1 -Pull first if missing).
@@ -79,5 +79,6 @@ if ($proc) { Write-Host "AHK running: PID=$($proc.Id -join ',')" }
 else { Write-Warning "AHK did not start. Check $AhkScript for syntax errors." }
 
 Write-Host ""
-Write-Host "Done. Alt+V now inserts the path of the latest screenshot into the active"
-Write-Host "window (Claude Code). Relaunches at boot via the Startup .lnk."
+Write-Host "Done. Alt+V now inserts an image file path into the active window"
+Write-Host "(including Claude Code in Warp). Relaunches at boot via Startup."
+exit 0
