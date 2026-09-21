@@ -1887,8 +1887,14 @@ fn read_ollama_usage(claude_dir: &Path) -> Option<Value> {
                 let mut cmd = Command::new("python3");
                 cmd.arg(&helper);
                 cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+                // CREATE_NO_WINDOW SEUL, jamais DETACHED_PROCESS : `python3` peut etre
+                // un lanceur (alias du Python Install Manager) qui spawne le vrai
+                // python.exe en enfant. Detache, le lanceur n'a aucune console, l'enfant
+                // s'en alloue une neuve et Windows 11 ouvre pour ca une fenetre Windows
+                // Terminal qui flashe a chaque refresh. Avec CREATE_NO_WINDOW le lanceur
+                // recoit une console invisible dont l'enfant herite : rien a l'ecran.
                 #[cfg(windows)]
-                cmd.creation_flags(CREATE_NO_WINDOW | 0x00000008 /* DETACHED_PROCESS */);
+                cmd.creation_flags(CREATE_NO_WINDOW);
                 let _ = cmd.spawn();
             }
         }
