@@ -47,3 +47,7 @@ curfew.local.json
 # Marqueur de nuit blanche (#jedors) : etat local d'une nuit, ecrit par le
 # hook dans ~/.claude/, sans rien a faire dans le repo.
 curfew.nuit.json
+
+# Cookie de session ollama.com colle a la main (lu par ollama-usage.py) : secret,
+# jamais versionne.
+ollama-cookie.local

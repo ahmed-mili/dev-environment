@@ -1709,7 +1709,9 @@ fn render_usage_seg(
     seg.push_str(&format_bar(util, col, 14));
     seg.push(' ');
     seg.push_str(col);
+    // Une valeur qui commence par "$" est un montant (budget Ollama Pro) : pas de " %".
     match pct {
+        Some(value) if value.starts_with('$') => seg.push_str(value),
         Some(value) => seg.push_str(&format!("{} %", value)),
         None => seg.push('\u{2014}'),
     }
@@ -1896,26 +1898,28 @@ fn read_ollama_usage(claude_dir: &Path) -> Option<Value> {
 }
 
 // Construit la ligne 2 en mode Ollama : memes couleurs / barres / format que la
-// version Anthropic (cf. build_usage_seg), mais alimentee par session/weekly d'Ollama
-// Cloud. Labels "5h"/"7d" : la session Ollama se reinitialise toutes les 5 h et le
-// quota hebdomadaire tous les 7 j -- meme semantique que les fenetres Anthropic.
+// version Anthropic (cf. build_usage_seg), mais alimentee par le cache d'ollama.com.
+// Deux modeles de quota selon le plan (ollama-usage.py ecrit ce que la page expose) :
+//   - "monthly" (Pro, 2026-09) : budget mensuel en dollars, label "30d", texte
+//     "$0.97/$60" tel qu'Ollama l'ecrit (un % sur 60 $ ne parlerait a personne) ;
+//     la barre se remplit au ratio.
+//   - "session"/"weekly" (fenetres historiques) : labels "5h"/"7d", meme semantique
+//     que les fenetres Anthropic, texte = "% used" exact de la page.
 fn build_line2_ollama(u: &Value) -> String {
     let mut segments: Vec<String> = Vec::new();
-    for (key, label) in [("session", "5h"), ("weekly", "7d")] {
-        if let Some(w) = u.get(key) {
-            if let Some(util) = w.get("utilization").and_then(|v| v.as_f64()) {
-                let col = get_usage_color(util, false);
-                // pct = chaine exacte affichee par ollama.com (ex. "3.5"), repli sur
-                // l'entier tronque si absente. La barre, elle, utilise le float.
-                let pct = w
-                    .get("pct")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-                    .unwrap_or_else(|| (util as i64).to_string());
-                let reset = w.get("reset").and_then(|v| v.as_str());
-                segments.push(render_usage_seg(label, util, &col, Some(&pct), reset));
-            }
-        }
+    for (key, label) in [("monthly", "30d"), ("session", "5h"), ("weekly", "7d")] {
+        let Some(w) = u.get(key) else { continue };
+        let Some(util) = w.get("utilization").and_then(|v| v.as_f64()) else { continue };
+        let col = get_usage_color(util, false);
+        let s = |k: &str| w.get(k).and_then(|v| v.as_str()).map(String::from);
+        // Texte affiche : montants pour le budget mensuel, sinon la chaine exacte du
+        // pourcentage (ex. "3.5"), repli sur l'entier tronque si absente.
+        let text = match (s("used"), s("limit")) {
+            (Some(used), Some(limit)) => format!("${}/${}", used, limit),
+            _ => s("pct").unwrap_or_else(|| (util as i64).to_string()),
+        };
+        let reset = w.get("reset").and_then(|v| v.as_str());
+        segments.push(render_usage_seg(label, util, &col, Some(&text), reset));
     }
     segments.join("  ")
 }
@@ -2847,6 +2851,26 @@ mod tests {
         let l2 = super::build_line2_ollama(&usage);
         assert!(!l2.contains(CHEVRON));
         assert!(l2.contains("3.5 %"), "la chaine formatee par Ollama est preservee");
+    }
+
+    // Plan Pro (2026-09) : budget mensuel en dollars. On affiche les montants tels
+    // qu'Ollama les ecrit ("$0.97/$60"), pas un pourcentage sur 60 $ ; la barre,
+    // elle, se remplit au ratio.
+    #[test]
+    fn line2_ollama_mensuel_affiche_les_dollars() {
+        let usage = json!({
+            "monthly": {
+                "utilization": 1.6,
+                "used": "0.97",
+                "limit": "60",
+                "reset": "in 4 weeks"
+            }
+        });
+        let l2 = super::build_line2_ollama(&usage);
+        assert!(l2.contains("30d"), "label de la fenetre mensuelle");
+        assert!(l2.contains("$0.97/$60"), "montants Ollama preserves : {l2}");
+        assert!(!l2.contains(" %"), "pas de pourcentage sur un budget en dollars");
+        assert!(l2.contains("(in 4 weeks)"));
     }
 
     // =============== SOUS-AGENTS VIVANTS ===============

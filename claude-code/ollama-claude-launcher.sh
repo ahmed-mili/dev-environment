@@ -72,10 +72,10 @@ ollama() {
 # pour choisir. Au-delà de 3 : via "Custom model" dans /model. # = commentaire.
 # Catalogue : https://ollama.com/search?c=cloud
 kimi-k2.6:cloud
-glm-5.1:cloud
+glm-5.3:cloud
 deepseek-v4-pro:cloud
 minimax-m3:cloud
-qwen3.5:cloud
+glm-5.3-flash:cloud
 MODELS
         fi
 

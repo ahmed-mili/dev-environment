@@ -1,22 +1,35 @@
 #!/usr/bin/env python3
-"""Récupère l'usage Ollama Cloud (Session + Weekly) et le met en cache pour la statusline.
+"""Récupère l'usage Ollama Cloud et le met en cache pour la statusline.
 
 Pourquoi ce helper existe — et pourquoi il scrape une page web au lieu d'appeler une API :
   Ollama Cloud n'expose AUCUNE API d'usage (vérifié : /api/usage, /api/account/usage,
-  /api/me/usage… → 404 ; /api/me signé → renvoie le plan mais pas les %; les réponses
-  d'inférence /v1/messages ne portent aucun header rate-limit). Les chiffres
-  Session/Weekly ne vivent QUE sur la page authentifiée https://ollama.com/settings,
-  rendue côté serveur. Le seul moyen de les obtenir par programme est donc de charger
-  cette page avec le cookie de session du navigateur.
+  /api/me/usage… → 404 ; /api/me signé → renvoie le plan mais pas les chiffres ; les
+  réponses d'inférence /v1/messages ne portent aucun header rate-limit). Les chiffres
+  ne vivent QUE sur la page authentifiée https://ollama.com/settings, rendue côté
+  serveur. Le seul moyen de les obtenir par programme est donc de charger cette page
+  avec le cookie de session du navigateur.
 
-Cookie : on lit le cookie `__Secure-session` directement dans le `cookies.sqlite` de
-  Firefox (NON chiffré, contrairement à Chrome/Edge/Brave qui chiffrent via DPAPI).
-  On balaie tous les profils Firefox, Windows (via /mnt/c) comme Linux natif — aucun
-  nom d'utilisateur en dur.
+Deux modèles de quota coexistent selon le plan (2026-09) :
+  - « Included usage » (Pro) : un budget mensuel en dollars, « $0.97 of $60 used »,
+    « Resets in 4 weeks ». Section `monthly` du cache.
+  - « Cloud usage » (historique / autres plans) : « Session usage » (5 h) et
+    « Weekly usage » (7 j) en « xx.x% used ». Sections `session` / `weekly`.
+  On écrit ce que la page expose ; la statusline rend les sections présentes.
+
+Cookie, par ordre de priorité :
+  1. ~/.claude/ollama-cookie.local : la valeur du cookie `__Secure-session` collée à
+     la main depuis les DevTools du navigateur (Brave/Chrome/Edge chiffrent leurs
+     cookies en app-bound, illisibles sans privilèges ; c'est la seule voie fiable).
+     Le fichier peut aussi contenir un header Cookie complet (`a=1; b=2`).
+  2. `cookies.sqlite` de Firefox (NON chiffré), balayé sur tous les profils
+     plausibles — aucun nom d'utilisateur en dur, le repo reste partageable.
 
 Sortie : ~/.claude/ollama-usage-cache.json (écriture atomique) :
-  {"session":{"utilization":19.6,"reset":"6m"},
-   "weekly": {"utilization":3.5, "reset":"3j"},
+  {"monthly":{"utilization":1.6,"used":"0.97","limit":"60","reset":"in 4 weeks"},
+   "fetched_at": 1790000000}
+  ou, sur un plan à fenêtres :
+  {"session":{"utilization":19.6,"pct":"19.6","reset":"in 6 minutes"},
+   "weekly": {"utilization":3.5, "pct":"3.5", "reset":"in 3 days"},
    "fetched_at": 1780531200}
 
 Lancé en arrière-plan (détaché) par le binaire statusline quand le cache a > 60 s ET
@@ -35,16 +48,33 @@ import tempfile
 import time
 
 SETTINGS_URL = "https://ollama.com/settings"
-CACHE = os.path.join(os.path.expanduser("~"), ".claude", "ollama-usage-cache.json")
+CLAUDE_DIR = os.path.join(os.path.expanduser("~"), ".claude")
+CACHE = os.path.join(CLAUDE_DIR, "ollama-usage-cache.json")
+COOKIE_FILE = os.path.join(CLAUDE_DIR, "ollama-cookie.local")
+
+
+def read_cookie_file(path=COOKIE_FILE):
+    """Header Cookie depuis le fichier collé à la main, ou None s'il est absent/vide.
+
+    Une valeur nue (sans `=`) est la valeur de `__Secure-session` ; sinon on prend
+    la ligne telle quelle comme header complet.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = f.read().strip()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    if "=" not in raw:
+        return f"__Secure-session={raw}"
+    return raw
 
 
 def firefox_cookie_dbs():
-    """Tous les cookies.sqlite Firefox plausibles, Windows (drvfs) + Linux natif.
-
-    Globs sur `*` pour l'utilisateur et le profil : zéro valeur perso en dur (le repo
-    est partageable). Trié pour un ordre déterministe.
-    """
+    """Tous les cookies.sqlite Firefox plausibles : Windows natif, drvfs, Linux."""
     pats = [
+        os.path.expanduser("~/AppData/Roaming/Mozilla/Firefox/Profiles/*/cookies.sqlite"),
         "/mnt/*/Users/*/AppData/Roaming/Mozilla/Firefox/Profiles/*/cookies.sqlite",
         os.path.expanduser("~/.mozilla/firefox/*/cookies.sqlite"),
         os.path.expanduser("~/snap/firefox/common/.mozilla/firefox/*/cookies.sqlite"),
@@ -63,8 +93,8 @@ def read_ollama_cookies(db):
 
     On copie le fichier (+ -wal/-shm) avant lecture : Firefox peut le tenir ouvert en
     mode WAL, une lecture directe verrouillerait ou raterait les écritures récentes.
-    On ne garde que les cookies envoyés à ollama.com (host `ollama.com` / `.ollama.com`)
-    et on exige `__Secure-session` (le cookie d'auth) — sinon le profil n'est pas connecté.
+    On ne garde que les cookies envoyés à ollama.com et on exige `__Secure-session`
+    (le cookie d'auth) — sinon le profil n'est pas connecté.
     """
     import sqlite3
 
@@ -96,6 +126,17 @@ def read_ollama_cookies(db):
     return "; ".join(f"{n}={v}" for n, v in rows)
 
 
+def find_cookie():
+    cookie = read_cookie_file()
+    if cookie:
+        return cookie
+    for db in firefox_cookie_dbs():
+        cookie = read_ollama_cookies(db)
+        if cookie:
+            return cookie
+    return None
+
+
 def fetch_settings(cookie):
     """GET /settings avec le cookie. curl gère HTTP/2 + décompression. None si KO/redirigé."""
     try:
@@ -114,45 +155,96 @@ def fetch_settings(cookie):
     if len(parts) != 3:
         return None
     html, code, final_url = parts
-    # Cookie périmé → redirige vers la page de connexion : on rejette.
-    if code != "200" or "signin" in final_url or "Cloud usage" not in html:
+    # Cookie périmé → redirige vers la page de connexion : on rejette. Le titre de
+    # section varie selon le plan (« Cloud usage », « Included usage ») : on exige
+    # juste qu'une section d'usage existe.
+    if code != "200" or "signin" in final_url or " usage" not in html:
         return None
     return html
 
 
-def parse_window(html, label, end):
-    """Extrait (pct float, pct_str, reset) pour la section 'Session usage'/'Weekly usage'.
-
-    On ancre sur le libellé puis on prend, dans [label:end], le 1er '% used' et le 1er
-    'Resets in …'. La borne `end` (libellé suivant) évite de mordre sur la section d'à
-    côté ; la fenêtre doit rester généreuse car les boutons de segments par modèle
-    repoussent le 'Resets in' à ~2,1k caractères après le libellé.
-
-    On conserve la chaîne brute du pourcentage (`pct_str`, ex. "3.5") et le libellé de
-    reset tel qu'Ollama l'écrit (`reset`, ex. "in 3 days") pour un affichage identique
-    à ollama.com/settings. La valeur float (`pct`) sert au remplissage de la barre.
-    """
+def _window_text(html, label, end):
+    """Texte brut (balises retirées, espaces normalisés) de [label:end], ou None."""
     i = html.find(label)
     if i == -1:
         return None
-    window = html[i:end]
-    pm = re.search(r"([\d.]+)\s*%\s*used", window)
+    window = html[i:end if end > i else i + 4000]
+    text = re.sub(r"<[^>]+>", " ", window)
+    return re.sub(r"\s+", " ", text)
+
+
+def _reset(text):
+    rm = re.search(r"Resets (in [^.]+?)\s*\.", text)
+    return rm.group(1).strip() if rm else None
+
+
+def parse_window(html, label, end):
+    """(pct float, pct_str, reset) pour 'Session usage' / 'Weekly usage', ou None.
+
+    On conserve la chaîne brute du pourcentage (`pct_str`, ex. "3.5") et le libellé de
+    reset tel qu'Ollama l'écrit (`reset`, ex. "in 3 days") pour un affichage identique
+    à ollama.com/settings. Le float sert au remplissage de la barre.
+    """
+    text = _window_text(html, label, end)
+    if text is None:
+        return None
+    pm = re.search(r"([\d.]+)\s*%\s*used", text)
     if not pm:
         return None
     pct_str = pm.group(1)
-    rm = re.search(r"Resets (in [^<.]+)", window)
-    reset = rm.group(1).strip() if rm else None
-    return float(pct_str), pct_str, reset
+    return float(pct_str), pct_str, _reset(text)
+
+
+def parse_monthly(html):
+    """{'utilization', 'used', 'limit', 'reset'} pour 'Monthly usage', ou None.
+
+    Format Pro 2026-09 : « $0.97 of $60 used » puis « Resets in 4 weeks. ». Les
+    montants gardent la chaîne d'Ollama (`used`/`limit`) ; `utilization` est le
+    ratio en % pour la barre.
+    """
+    text = _window_text(html, "Monthly usage", -1)
+    if text is None:
+        return None
+    m = re.search(r"\$\s*([\d,]+(?:\.\d+)?)\s*of\s*\$\s*([\d,]+(?:\.\d+)?)\s*used", text)
+    if not m:
+        return None
+    used_s, limit_s = m.group(1), m.group(2)
+    used, limit = float(used_s.replace(",", "")), float(limit_s.replace(",", ""))
+    if limit <= 0:
+        return None
+    return {
+        "utilization": round(used / limit * 100, 1),
+        "used": used_s,
+        "limit": limit_s,
+        "reset": _reset(text),
+    }
+
+
+def parse_page(html):
+    """Dict des sections trouvées (monthly / session / weekly), sans fetched_at."""
+    data = {}
+    monthly = parse_monthly(html)
+    if monthly:
+        data["monthly"] = monthly
+
+    si = html.find("Session usage")
+    wi = html.find("Weekly usage")
+    session = parse_window(html, "Session usage", wi if (si != -1 and wi > si) else -1)
+    weekly = parse_window(html, "Weekly usage", -1)
+    if session:
+        data["session"] = {"utilization": session[0], "pct": session[1], "reset": session[2]}
+    if weekly:
+        data["weekly"] = {"utilization": weekly[0], "pct": weekly[1], "reset": weekly[2]}
+    return data
 
 
 def main():
-    cookie = None
-    for db in firefox_cookie_dbs():
-        cookie = read_ollama_cookies(db)
-        if cookie:
-            break
+    cookie = find_cookie()
     if not cookie:
-        print("ollama-usage: aucun cookie ollama.com trouvé (connecte-toi sur Firefox)", file=sys.stderr)
+        print(
+            f"ollama-usage: aucun cookie ollama.com (colle __Secure-session dans {COOKIE_FILE})",
+            file=sys.stderr,
+        )
         return 1
 
     html = fetch_settings(cookie)
@@ -160,20 +252,11 @@ def main():
         print("ollama-usage: échec du chargement de /settings (cookie périmé ?)", file=sys.stderr)
         return 2
 
-    si = html.find("Session usage")
-    wi = html.find("Weekly usage")
-    # Borne la session au libellé Weekly (sinon +4000) ; Weekly sur +4000.
-    session = parse_window(html, "Session usage", wi if (si != -1 and wi > si) else (si + 4000))
-    weekly = parse_window(html, "Weekly usage", (wi + 4000) if wi != -1 else 0)
-    if not session and not weekly:
+    data = parse_page(html)
+    if not data:
         print("ollama-usage: parsing impossible (page modifiée ?)", file=sys.stderr)
         return 3
-
-    data = {"fetched_at": int(time.time())}
-    if session:
-        data["session"] = {"utilization": session[0], "pct": session[1], "reset": session[2]}
-    if weekly:
-        data["weekly"] = {"utilization": weekly[0], "pct": weekly[1], "reset": weekly[2]}
+    data["fetched_at"] = int(time.time())
 
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     tmp = CACHE + ".tmp"
