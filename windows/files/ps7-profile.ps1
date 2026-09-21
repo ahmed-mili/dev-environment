@@ -435,7 +435,13 @@ function Start-ClaudeClipboardWatcher {
 # knows which machine/shell/context it is talking to. The detector writes a
 # JSON file at ~/.claude/.device-context that the assistant reads.
 # Recursion is avoided by calling the binary via its full path.
+# Ollama Cloud goes through `ollama launch claude --model <tag>` (wrapper
+# ollama() below). claude() keeps the device-context and the watcher, and always
+# runs the binary with the Anthropic subscription.
 function claude {
+    Invoke-ClaudeBinary @args
+}
+function Invoke-ClaudeBinary {
     $detectScript = "$env:USERPROFILE\.claude\device-context\detect.ps1"
     if (Test-Path $detectScript) {
         & $detectScript 2>$null
@@ -457,6 +463,8 @@ function claude {
 
 # `ollama launch claude` bypasses the `claude()` function above, so wrap the
 # application command too and start the same clipboard watcher for that path.
+# Everything is forwarded untouched: the permission flag is typed explicitly,
+#   ollama launch claude --model glm-5.3-flash:cloud --dangerously-skip-permissions -c
 function ollama {
     if ($args.Count -ge 2 -and $args[0] -eq 'launch' -and $args[1] -eq 'claude') {
         Start-ClaudeClipboardWatcher
