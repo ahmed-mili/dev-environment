@@ -462,12 +462,30 @@ function Invoke-ClaudeBinary {
 }
 
 # `ollama launch claude` bypasses the `claude()` function above, so wrap the
-# application command too and start the same clipboard watcher for that path.
-# Everything is forwarded untouched: the permission flag is typed explicitly,
-#   ollama launch claude --model glm-5.3-flash:cloud --dangerously-skip-permissions -c
+# application command too: same clipboard watcher, and bypass permissions by
+# default. ollama only hands arguments to claude after a `--` separator and
+# rejects unknown flags before it -- but pwsh swallows a typed `--` (end of
+# parameters marker, never reaches $args). So the wrapper sorts the arguments
+# itself: ollama's own launch flags stay in front, everything else goes behind
+# a generated `--` together with --dangerously-skip-permissions. Usage:
+#   ollama launch claude --model glm-5.3-flash:cloud        (bypass)
+#   ollama launch claude --model glm-5.3-flash:cloud -c     (bypass + resume)
 function ollama {
-    if ($args.Count -ge 2 -and $args[0] -eq 'launch' -and $args[1] -eq 'claude') {
+    $rest = @($args)
+    if ($rest.Count -ge 2 -and $rest[0] -eq 'launch' -and $rest[1] -eq 'claude') {
         Start-ClaudeClipboardWatcher
+        $own = @('launch', 'claude')
+        $fwd = @('--dangerously-skip-permissions')
+        for ($i = 2; $i -lt $rest.Count; $i++) {
+            $a = [string]$rest[$i]
+            if ($a -eq '--model' -and ($i + 1) -lt $rest.Count) { $own += @($a, $rest[$i + 1]); $i++; continue }
+            if ($a -like '--model=*' -or $a -in @('--config', '--restore', '--yes', '--help', '-h')) { $own += $a; continue }
+            if ($a -eq '--dangerously-skip-permissions') { continue }
+            $fwd += $a
+        }
+        # --config / --restore / --help never start claude: nothing to forward.
+        $noLaunch = @($own | Where-Object { $_ -in @('--config', '--restore', '--help', '-h') }).Count -gt 0
+        $rest = if ($noLaunch) { $own } else { $own + @('--') + $fwd }
     }
     $ollamaCmd = Get-Command ollama -CommandType Application -ErrorAction SilentlyContinue |
                  Select-Object -First 1
@@ -475,5 +493,5 @@ function ollama {
         Write-Error "ollama not found on PATH"
         return
     }
-    & $ollamaCmd.Source @args
+    & $ollamaCmd.Source @rest
 }
