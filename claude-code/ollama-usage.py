@@ -17,15 +17,17 @@ Deux modèles de quota coexistent selon le plan (2026-09) :
   On écrit ce que la page expose ; la statusline rend les sections présentes.
 
 Cookie, par ordre de priorité :
-  1. ~/.claude/ollama-cookie.local : la valeur du cookie `__Secure-session` collée à
-     la main depuis les DevTools du navigateur (Brave/Chrome/Edge chiffrent leurs
-     cookies en app-bound, illisibles sans privilèges ; c'est la seule voie fiable).
-     Le fichier peut aussi contenir un header Cookie complet (`a=1; b=2`).
+  1. ~/.claude/ollama-cookie.local : le header Cookie d'ollama.com. Brave/Chrome/Edge
+     chiffrent leurs cookies en app-bound (liés au chemin du profil) : ni la base
+     SQLite ni une copie du profil ne se lisent. `ollama-cookie-brave.ps1` le remplit
+     via le DevTools Protocol de Brave (redémarre Brave deux fois) ; à défaut, coller
+     la valeur de `__Secure-session` depuis DevTools → Application → Cookies.
   2. `cookies.sqlite` de Firefox (NON chiffré), balayé sur tous les profils
      plausibles — aucun nom d'utilisateur en dur, le repo reste partageable.
 
 Sortie : ~/.claude/ollama-usage-cache.json (écriture atomique) :
-  {"monthly":{"utilization":1.6,"used":"0.97","limit":"60","reset":"in 4 weeks"},
+  {"monthly":{"utilization":1.6,"used":"0.97","limit":"60","reset":"in 4 weeks",
+              "resets_at":"2026-10-21T13:38:29Z"},
    "fetched_at": 1790000000}
   ou, sur un plan à fenêtres :
   {"session":{"utilization":19.6,"pct":"19.6","reset":"in 6 minutes"},
@@ -163,14 +165,27 @@ def fetch_settings(cookie):
     return html
 
 
-def _window_text(html, label, end):
-    """Texte brut (balises retirées, espaces normalisés) de [label:end], ou None."""
+# Les boutons de segments par modèle repoussent le « Resets in … » loin du libellé
+# (~6,8 k caractères sur la page Pro de 2026-09) : la fenêtre par défaut doit rester
+# généreuse.
+WINDOW = 12000
+
+
+def _window_html(html, label, end):
     i = html.find(label)
     if i == -1:
         return None
-    window = html[i:end if end > i else i + 4000]
-    text = re.sub(r"<[^>]+>", " ", window)
-    return re.sub(r"\s+", " ", text)
+    return html[i:end if end > i else i + WINDOW]
+
+
+def _strip(window):
+    """Texte brut (balises retirées, espaces normalisés)."""
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", window))
+
+
+def _window_text(html, label, end):
+    window = _window_html(html, label, end)
+    return None if window is None else _strip(window)
 
 
 def _reset(text):
@@ -202,9 +217,12 @@ def parse_monthly(html):
     montants gardent la chaîne d'Ollama (`used`/`limit`) ; `utilization` est le
     ratio en % pour la barre.
     """
-    text = _window_text(html, "Monthly usage", -1)
-    if text is None:
+    # Borne sur la section suivante quand elle existe (la liste des modèles).
+    end = html.find("Models used this month")
+    window = _window_html(html, "Monthly usage", end)
+    if window is None:
         return None
+    text = _strip(window)
     m = re.search(r"\$\s*([\d,]+(?:\.\d+)?)\s*of\s*\$\s*([\d,]+(?:\.\d+)?)\s*used", text)
     if not m:
         return None
@@ -212,12 +230,18 @@ def parse_monthly(html):
     used, limit = float(used_s.replace(",", "")), float(limit_s.replace(",", ""))
     if limit <= 0:
         return None
-    return {
+    out = {
         "utilization": round(used / limit * 100, 1),
         "used": used_s,
         "limit": limit_s,
         "reset": _reset(text),
     }
+    # La page porte l'instant exact du reset, sur le <div class="local-time"
+    # data-time="2026-10-21T13:38:29Z"> qui enveloppe « Resets in … ».
+    tm = re.search(r'data-time="([^"]+)"[^>]*>\s*Resets', window)
+    if tm:
+        out["resets_at"] = tm.group(1)
+    return out
 
 
 def parse_page(html):
