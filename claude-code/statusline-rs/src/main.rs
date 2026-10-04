@@ -126,16 +126,19 @@ fn format_tokens(n: i64) -> String {
     format!("{:.1}M", v)
 }
 
-fn format_bar(pct: f64, col: &str, width: usize) -> String {
+/// A gauge bar on a track of the given colour (the claude.ai blue one of the
+/// usage gauges, 2026-10-04). Any use above 0 shows at least one cell: 3 %
+/// rounded to nothing read as nothing used.
+fn format_bar_sur(pct: f64, col: &str, width: usize, piste: (u8, u8, u8)) -> String {
     let mut filled = (pct / 100.0 * width as f64).round() as i64;
     if filled > width as i64 { filled = width as i64; }
     if filled < 0 { filled = 0; }
+    if pct > 0.0 && filled == 0 && width > 0 { filled = 1; }
     let filled = filled as usize;
     let empty = width - filled;
     // U+2501 est un glyphe box-drawing jointif entre cellules, contrairement a
     // U+25AC (rectangle geometrique) qui conserve des marges laterales visibles.
-    // Piste calquee sur claude.ai et centralisee dans RAIL.
-    let rail = rgb(RAIL.0, RAIL.1, RAIL.2);
+    let rail = rgb(piste.0, piste.1, piste.2);
     format!(
         "{}{}{}{}{}",
         col,
@@ -1422,6 +1425,12 @@ const USAGE_LABEL_FG: (u8, u8, u8) = (156, 139, 110);
 const USAGE_MUTED_FG: (u8, u8, u8) = (122, 108, 82);
 /// Piste relevee sur claude.ai, conservee car elle appartient deja a la palette chaude.
 const RAIL: (u8, u8, u8) = (66, 66, 64);
+/// The usage gauges in claude.ai's colours (2026-10-04): the used part bright
+/// blue, its % the same blue, the rest of the track dark blue. Dimmer while
+/// the figures are stale.
+const USAGE_FILL: (u8, u8, u8) = (52, 132, 228);
+const USAGE_FILL_STALE: (u8, u8, u8) = (40, 92, 160);
+const USAGE_TRACK: (u8, u8, u8) = (30, 55, 90);
 /// Glyphe Powerline conserve uniquement pour les transitions de la ligne 1.
 const CHEVRON: &str = "\u{E0B0}";
 
@@ -1698,6 +1707,7 @@ fn render_usage_seg(
     label: &str,
     util: f64,
     col: &str,
+    piste: (u8, u8, u8),
     pct: Option<&str>,
     reset: Option<&str>,
 ) -> String {
@@ -1706,7 +1716,7 @@ fn render_usage_seg(
     seg.push_str(label);
     seg.push_str(RESET);
     seg.push(' ');
-    seg.push_str(&format_bar(util, col, 14));
+    seg.push_str(&format_bar_sur(util, col, 14, piste));
     seg.push(' ');
     seg.push_str(col);
     // Une valeur qui commence par "$" est un montant (budget Ollama Pro) : pas de " %".
@@ -1744,14 +1754,15 @@ fn build_usage_seg(label: &str, util: f64, resets_at: &Value, stale: bool, refer
             let grey = rgb(USAGE_MUTED_FG.0, USAGE_MUTED_FG.1, USAGE_MUTED_FG.2);
             let age = fmt_age(now.signed_duration_since(reset_utc).num_seconds());
             let reset = format!("p\u{00E9}rim\u{00E9} {}", age);
-            return render_usage_seg(label, util, &grey, None, Some(&reset));
+            return render_usage_seg(label, util, &grey, RAIL, None, Some(&reset));
         }
     }
 
-    let col = get_usage_color(util, stale);
+    let bleu = if stale { USAGE_FILL_STALE } else { USAGE_FILL };
+    let col = rgb(bleu.0, bleu.1, bleu.2);
     let pct = (util as i64).to_string();
     let reset = format_reset(resets_at, reference);
-    render_usage_seg(label, util, &col, Some(&pct), reset.as_deref())
+    render_usage_seg(label, util, &col, USAGE_TRACK, Some(&pct), reset.as_deref())
 }
 
 fn build_line2(usage: &UsageResult) -> String {
@@ -1925,7 +1936,7 @@ fn build_line2_ollama(u: &Value) -> String {
             _ => s("pct").unwrap_or_else(|| (util as i64).to_string()),
         };
         let reset = w.get("reset").and_then(|v| v.as_str());
-        segments.push(render_usage_seg(label, util, &col, Some(&text), reset));
+        segments.push(render_usage_seg(label, util, &col, RAIL, Some(&text), reset));
     }
     segments.join("  ")
 }
@@ -2367,7 +2378,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{arabic_display, format_bar, parse_ollama_context_length, RESET};
+    use super::{arabic_display, format_bar_sur, parse_ollama_context_length, RAIL, RESET};
 
     // Parse de la vraie sortie `ollama show glm-5.2:cloud`.
     #[test]
@@ -2443,7 +2454,7 @@ mod tests {
 
     #[test]
     fn barre_continue_box_drawing() {
-        let plain = format_bar(50.0, "", 4).replace(RESET, "");
+        let plain = format_bar_sur(50.0, "", 4, RAIL).replace(RESET, "");
         assert!(plain.starts_with("\u{2501}\u{2501}"));
         assert!(!plain.contains('\u{25AC}'));
     }
