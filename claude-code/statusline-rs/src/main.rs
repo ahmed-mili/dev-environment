@@ -234,6 +234,23 @@ fn format_reset(reset_at: &Value, reference: Option<DateTime<Utc>>) -> Option<St
     Some(format!("{} {}", day, local.format("%H:%M")))
 }
 
+// Reset lointain en date absolue "15:38 21 octobre 2026" (heure d'abord, comme
+// l'horloge de la barre des taches, 2026-10-04). Sous 24 h : compte a rebours
+// de format_reset.
+fn format_reset_date(reset_at: &Value) -> Option<String> {
+    let s = reset_at.as_str()?;
+    let reset_utc = DateTime::parse_from_rfc3339(s).ok()?.with_timezone(&Utc);
+    if reset_utc.signed_duration_since(Utc::now()).num_hours() < 24 {
+        return format_reset(reset_at, None);
+    }
+    let local = reset_utc.with_timezone(&Local);
+    const MOIS: [&str; 12] = [
+        "janvier", "f\u{00E9}vrier", "mars", "avril", "mai", "juin",
+        "juillet", "ao\u{00FB}t", "septembre", "octobre", "novembre", "d\u{00E9}cembre",
+    ];
+    Some(format!("{} {} {} {}", local.format("%H:%M"), local.day(), MOIS[local.month0() as usize], local.year()))
+}
+
 // Age compact pour le marqueur "(perime <age>)" d'une fenetre expiree : secondes
 // depuis le reset rate (toujours >= 0 dans ce contexte). Bornes lisibles a coup
 // d'oeil : s -> m -> h -> j.
@@ -1374,7 +1391,7 @@ struct BannerSeg {
 // Palette Claude unifiee. Les couleurs sources viennent de claude.exe 2.1.260 ;
 // RAIL est relevee sur claude.ai et les autres variantes signalent leur derive.
 // Theme BLEU (2026-10-04) : la banniere suit les jauges d'usage aux couleurs de
-// claude.ai (USAGE_FILL / USAGE_TRACK) au lieu des bruns du theme diagrams.
+// claude.ai (usage_palette) au lieu des bruns du theme diagrams.
 /// Stop profond : bleu nuit, ouvre la banniere.
 const BANNER_STOP_1: (u8, u8, u8) = (20, 28, 42);
 /// Stop intermediaire : bleu marine, la piste des jauges eclaircie.
@@ -1429,12 +1446,32 @@ const USAGE_LABEL_FG: (u8, u8, u8) = (156, 139, 110);
 const USAGE_MUTED_FG: (u8, u8, u8) = (122, 108, 82);
 /// Piste relevee sur claude.ai, conservee car elle appartient deja a la palette chaude.
 const RAIL: (u8, u8, u8) = (66, 66, 64);
-/// The usage gauges in claude.ai's colours (2026-10-04): the used part bright
-/// blue, its % the same blue, the rest of the track dark blue. Dimmer while
-/// the figures are stale.
-const USAGE_FILL: (u8, u8, u8) = LOAD_LOW;
-const USAGE_FILL_STALE: (u8, u8, u8) = LOAD_LOW_STALE;
-const USAGE_TRACK: (u8, u8, u8) = (30, 55, 90);
+/// Jauges d'usage = claude.ai/settings/usage, theme sombre, releve dans son code
+/// le 2026-10-04 : palier normal < 75 %, warning >= 75 %, critical >= 90 %
+/// (UT/VT/HT du bundle). Remplissage bg-fill-{accent,warning,danger}, piste
+/// bg-{accent,warning,danger} ; le % prend la couleur du remplissage.
+const USAGE_SEUIL_WARNING: f64 = 75.0;
+const USAGE_SEUIL_CRITICAL: f64 = 90.0;
+const USAGE_FILL_NORMAL: (u8, u8, u8) = (42, 120, 214);
+const USAGE_TRACK_NORMAL: (u8, u8, u8) = (3, 32, 66);
+const USAGE_FILL_WARNING: (u8, u8, u8) = (250, 178, 25);
+const USAGE_TRACK_WARNING: (u8, u8, u8) = (49, 26, 0);
+const USAGE_FILL_CRITICAL: (u8, u8, u8) = (208, 59, 59);
+const USAGE_TRACK_CRITICAL: (u8, u8, u8) = (60, 14, 14);
+
+/// (remplissage, piste) d'une jauge d'usage ; remplissage assombri si stale.
+fn usage_palette(pct: f64, stale: bool) -> ((u8, u8, u8), (u8, u8, u8)) {
+    let (fill, track) = if pct >= USAGE_SEUIL_CRITICAL {
+        (USAGE_FILL_CRITICAL, USAGE_TRACK_CRITICAL)
+    } else if pct >= USAGE_SEUIL_WARNING {
+        (USAGE_FILL_WARNING, USAGE_TRACK_WARNING)
+    } else {
+        (USAGE_FILL_NORMAL, USAGE_TRACK_NORMAL)
+    };
+    let dim = |c: u8| (c as f64 * 0.7).round() as u8;
+    let fill = if stale { (dim(fill.0), dim(fill.1), dim(fill.2)) } else { fill };
+    (fill, track)
+}
 /// Glyphe Powerline conserve uniquement pour les transitions de la ligne 1.
 const CHEVRON: &str = "\u{E0B0}";
 
@@ -1717,7 +1754,7 @@ fn render_usage_seg(
 ) -> String {
     // The claude.ai-blue gauges are styled EXACTLY like the `quota` command
     // (2026-10-04): label in bold default colour, % in bold, reset dimmed.
-    let comme_quota = piste == USAGE_TRACK;
+    let comme_quota = piste != RAIL;
     let mut seg = String::new();
     if comme_quota {
         seg.push_str("[1m");
@@ -1770,11 +1807,11 @@ fn build_usage_seg(label: &str, util: f64, resets_at: &Value, stale: bool, refer
         }
     }
 
-    let bleu = if stale { USAGE_FILL_STALE } else { USAGE_FILL };
-    let col = rgb(bleu.0, bleu.1, bleu.2);
+    let (fill, track) = usage_palette(util, stale);
+    let col = rgb(fill.0, fill.1, fill.2);
     let pct = (util as i64).to_string();
     let reset = format_reset(resets_at, reference);
-    render_usage_seg(label, util, &col, USAGE_TRACK, Some(&pct), reset.as_deref())
+    render_usage_seg(label, util, &col, track, Some(&pct), reset.as_deref())
 }
 
 fn build_line2(usage: &UsageResult) -> String {
@@ -1947,8 +1984,10 @@ fn build_line2_ollama(u: &Value) -> String {
             (Some(used), Some(limit)) => format!("${}/${}", used, limit),
             _ => s("pct").unwrap_or_else(|| (util as i64).to_string()),
         };
-        let reset = w.get("reset").and_then(|v| v.as_str());
-        segments.push(render_usage_seg(label, util, &col, RAIL, Some(&text), reset));
+        // Date absolue si ollama-usage.py a fourni resets_at, sinon le texte brut
+        // de la page ("in 2 weeks").
+        let reset = w.get("resets_at").and_then(format_reset_date).or_else(|| s("reset"));
+        segments.push(render_usage_seg(label, util, &col, RAIL, Some(&text), reset.as_deref()));
     }
     segments.join("  ")
 }
@@ -2890,6 +2929,32 @@ mod tests {
         assert!(l2.contains("$0.97/$60"), "montants Ollama preserves : {l2}");
         assert!(!l2.contains(" %"), "pas de pourcentage sur un budget en dollars");
         assert!(l2.contains("(in 4 weeks)"));
+    }
+
+    // Paliers de claude.ai : bleu < 75 %, ambre >= 75 %, rouge >= 90 %.
+    #[test]
+    fn jauge_usage_paliers_claude_ai() {
+        let futur = json!("2099-01-01T00:00:00+00:00");
+        assert!(super::build_usage_seg("7d", 74.0, &futur, false, None).contains("[38;2;42;120;214m"));
+        assert!(super::build_usage_seg("7d", 75.0, &futur, false, None).contains("[38;2;250;178;25m"));
+        assert!(super::build_usage_seg("7d", 98.0, &futur, false, None).contains("[38;2;208;59;59m"));
+    }
+
+    // resets_at present : date absolue en francais, heure d'abord.
+    #[test]
+    fn line2_ollama_mensuel_reset_en_date() {
+        let usage = json!({
+            "monthly": {
+                "utilization": 32.6,
+                "used": "19.53",
+                "limit": "60",
+                "reset": "in 2 weeks",
+                "resets_at": "2099-10-21T13:38:29Z"
+            }
+        });
+        let l2 = super::build_line2_ollama(&usage);
+        assert!(l2.contains(" octobre 2099)"), "date absolue : {l2}");
+        assert!(!l2.contains("in 2 weeks"));
     }
 
     // =============== SOUS-AGENTS VIVANTS ===============
