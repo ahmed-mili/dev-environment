@@ -142,6 +142,9 @@ Write-Result ($r.Json.systemMessage -match '20:30') 'le message nomme l heure d 
 # Jour absent de la table (autre annee) : repli sur 23:00, jamais de silence.
 Test-Warning 'autre annee : 22:00 -> aucun avertissement (repli 23:00)' $false '2027-10-04 22:00' $cfgIsha | Out-Null
 Test-Warning 'autre annee : 23:05 -> avertissement (repli 23:00)'       $true  '2027-10-04 23:05' $cfgIsha | Out-Null
+$cfgPlafond = New-Config 'curfew-isha-plafond.json' ('{ "enabled": true, "start": "isha", "startLatest": "20:00", "mosque": "test-mosque", "timetablesDir": "' + $ishaDir + '", "end": "05:00" }')
+Test-Warning 'plafond 20:00 avant Isha 20:30 : 20:05 -> avertissement' $true '2026-10-04 20:05' $cfgPlafond | Out-Null
+Test-Warning 'plafond 20:00 : 19:00 -> aucun avertissement' $false '2026-10-04 19:00' $cfgPlafond | Out-Null
 $cfgAbsent = New-Config 'curfew-isha-absent.json' ('{ "enabled": true, "start": "isha", "mosque": "inconnue", "timetablesDir": "' + $ishaDir + '", "end": "05:00" }')
 Test-Warning 'table introuvable : 23:05 -> avertissement (repli 23:00)' $true '2026-10-04 23:05' $cfgAbsent | Out-Null
 

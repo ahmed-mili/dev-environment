@@ -35,6 +35,8 @@
 #                par la mosquee, aucun calcul), ex. "alkitab-wa-sunnah".
 #   timetablesDir : optionnel, le dossier de ces tables (defaut
 #                C:\dev\neo-calendar\src\ui\calendar\prayerTimetables).
+#   startLatest : optionnel, avec "isha" : jamais plus tard que cette heure
+#                ("HH:mm"), ex. "22:30" -- l'Isha d'ete (23:55) est trop tardive.
 #   startFallback : optionnel, defaut "23:00". Debut utilise quand l'Isha du
 #                jour est introuvable (table absente, autre annee, jour
 #                manquant) : un couvre-feu ne saute jamais faute de donnees.
@@ -255,6 +257,8 @@ try {
         $day = if ($current -lt $end) { $nowDt.Date.AddDays(-1) } else { $nowDt.Date }
         $file = if ($cfg.mosque) { Join-Path $dir (([string]$cfg.mosque) + '.ts') } else { $null }
         $start = Get-IshaMinute $file $day
+        $latest = ConvertTo-MinuteOfDay $cfg.startLatest
+        if ($null -ne $start -and $null -ne $latest -and $start -gt $latest) { $start = $latest }
         if ($null -eq $start) {
             $fallback = if ($cfg.startFallback) { $cfg.startFallback } else { '23:00' }
             $start = ConvertTo-MinuteOfDay $fallback
