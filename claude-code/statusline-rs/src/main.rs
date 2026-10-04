@@ -1373,14 +1373,16 @@ struct BannerSeg {
 //   U+F0322 nf-md-laptop        -> laptop  (idem config fastfetch, install.ps1)
 // Palette Claude unifiee. Les couleurs sources viennent de claude.exe 2.1.260 ;
 // RAIL est relevee sur claude.ai et les autres variantes signalent leur derive.
-/// Stop profond obtenu en assombrissant le brun du theme diagrams pour ouvrir la banniere.
-const BANNER_STOP_1: (u8, u8, u8) = (43, 37, 32);
-/// Stop intermediaire obtenu en assombrissant le brun du theme diagrams.
-const BANNER_STOP_2: (u8, u8, u8) = (74, 51, 40);
-/// Stop rust obtenu en assombrissant l'accent Claude pour fermer le degrade.
-const BANNER_STOP_3: (u8, u8, u8) = (110, 58, 40);
-/// Creme extrait du theme diagrams, reserve au texte principal sur fonds sombres.
-const TEXT_FG: (u8, u8, u8) = (244, 239, 228);
+// Theme BLEU (2026-10-04) : la banniere suit les jauges d'usage aux couleurs de
+// claude.ai (USAGE_FILL / USAGE_TRACK) au lieu des bruns du theme diagrams.
+/// Stop profond : bleu nuit, ouvre la banniere.
+const BANNER_STOP_1: (u8, u8, u8) = (20, 28, 42);
+/// Stop intermediaire : bleu marine, la piste des jauges eclaircie.
+const BANNER_STOP_2: (u8, u8, u8) = (27, 46, 74);
+/// Stop bleu : ferme le degrade vers le bleu des jauges, assombri pour garder le texte lisible.
+const BANNER_STOP_3: (u8, u8, u8) = (33, 66, 112);
+/// Blanc froid, reserve au texte principal sur fonds sombres.
+const TEXT_FG: (u8, u8, u8) = (234, 240, 250);
 /// Saumon obtenu en eclaircissant l'accent Claude pour isoler le compteur dirty.
 const DIRTY_FG: (u8, u8, u8) = (240, 165, 140);
 /// Or obtenu en decalant la teinte chaude Claude pour les fleches de sync fraiches.
@@ -1404,18 +1406,19 @@ const MODE_ACCEPT_EDITS_BG: (u8, u8, u8) = (51, 64, 47);
 const MODE_DONT_ASK_BG: (u8, u8, u8) = (61, 50, 66);
 /// Bronze sombre obtenu en teintant le brun Claude pour le mode auto.
 const MODE_AUTO_BG: (u8, u8, u8) = (74, 58, 36);
-/// Sombre chaud extrait de la paire light du theme diagrams pour le bloc modele.
-const SEG_BG: (u8, u8, u8) = (31, 31, 30);
+/// Sombre froid du bloc modele, dans la famille bleue de la banniere.
+const SEG_BG: (u8, u8, u8) = (22, 26, 34);
 /// Gris chaud extrait du theme diagrams pour subordonner le suffixe des agents.
 const AGENTS_FG: (u8, u8, u8) = (138, 127, 109);
-/// Accent /usage extrait de claude.exe pour le palier de charge nominal.
-const LOAD_LOW: (u8, u8, u8) = (218, 119, 86);
+/// Palier de charge nominal : le bleu des jauges claude.ai (theme bleu, 2026-10-04),
+/// pour que le compteur de contexte de la banniere suive les jauges d'usage.
+const LOAD_LOW: (u8, u8, u8) = (52, 132, 228);
 /// Ambre obtenu en decalant l'accent Claude pour le palier de charge eleve.
 const LOAD_MEDIUM: (u8, u8, u8) = (224, 163, 60);
 /// Rouge obtenu en decalant l'accent Claude pour le palier de charge critique.
 const LOAD_HIGH: (u8, u8, u8) = (224, 80, 60);
 /// Variante nominale stale derivee par melange sRGB a 45 % vers le gris chaud discret.
-const LOAD_LOW_STALE: (u8, u8, u8) = (175, 114, 84);
+const LOAD_LOW_STALE: (u8, u8, u8) = (40, 92, 160);
 /// Variante elevee stale derivee par melange sRGB a 45 % vers le gris chaud discret.
 const LOAD_MEDIUM_STALE: (u8, u8, u8) = (178, 138, 70);
 /// Variante critique stale derivee par melange sRGB a 45 % vers le gris chaud discret.
@@ -1429,8 +1432,8 @@ const RAIL: (u8, u8, u8) = (66, 66, 64);
 /// The usage gauges in claude.ai's colours (2026-10-04): the used part bright
 /// blue, its % the same blue, the rest of the track dark blue. Dimmer while
 /// the figures are stale.
-const USAGE_FILL: (u8, u8, u8) = (52, 132, 228);
-const USAGE_FILL_STALE: (u8, u8, u8) = (40, 92, 160);
+const USAGE_FILL: (u8, u8, u8) = LOAD_LOW;
+const USAGE_FILL_STALE: (u8, u8, u8) = LOAD_LOW_STALE;
 const USAGE_TRACK: (u8, u8, u8) = (30, 55, 90);
 /// Glyphe Powerline conserve uniquement pour les transitions de la ligne 1.
 const CHEVRON: &str = "\u{E0B0}";
