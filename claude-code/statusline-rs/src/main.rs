@@ -221,16 +221,17 @@ fn format_reset(reset_at: &Value, reference: Option<DateTime<Utc>>) -> Option<St
         return Some(format!("{}h{:02}m", h, m));
     }
     let local = reset_utc.with_timezone(&Local);
-    let day_abbr = match local.weekday() {
-        Weekday::Sun => "dim",
-        Weekday::Mon => "lun",
-        Weekday::Tue => "mar",
-        Weekday::Wed => "mer",
-        Weekday::Thu => "jeu",
-        Weekday::Fri => "ven",
-        Weekday::Sat => "sam",
+    // Full day names, like the `quota` command (2026-10-04).
+    let day = match local.weekday() {
+        Weekday::Sun => "dimanche",
+        Weekday::Mon => "lundi",
+        Weekday::Tue => "mardi",
+        Weekday::Wed => "mercredi",
+        Weekday::Thu => "jeudi",
+        Weekday::Fri => "vendredi",
+        Weekday::Sat => "samedi",
     };
-    Some(format!("{}. {}", day_abbr, local.format("%H:%M")))
+    Some(format!("{} {}", day, local.format("%H:%M")))
 }
 
 // Age compact pour le marqueur "(perime <age>)" d'une fenetre expiree : secondes
@@ -1711,13 +1712,21 @@ fn render_usage_seg(
     pct: Option<&str>,
     reset: Option<&str>,
 ) -> String {
+    // The claude.ai-blue gauges are styled EXACTLY like the `quota` command
+    // (2026-10-04): label in bold default colour, % in bold, reset dimmed.
+    let comme_quota = piste == USAGE_TRACK;
     let mut seg = String::new();
-    seg.push_str(&rgb(USAGE_LABEL_FG.0, USAGE_LABEL_FG.1, USAGE_LABEL_FG.2));
+    if comme_quota {
+        seg.push_str("[1m");
+    } else {
+        seg.push_str(&rgb(USAGE_LABEL_FG.0, USAGE_LABEL_FG.1, USAGE_LABEL_FG.2));
+    }
     seg.push_str(label);
     seg.push_str(RESET);
     seg.push(' ');
     seg.push_str(&format_bar_sur(util, col, 14, piste));
     seg.push(' ');
+    if comme_quota { seg.push_str("[1m"); }
     seg.push_str(col);
     // Une valeur qui commence par "$" est un montant (budget Ollama Pro) : pas de " %".
     match pct {
@@ -1727,7 +1736,7 @@ fn render_usage_seg(
     }
     seg.push_str(RESET);
     if let Some(value) = reset {
-        let reset_col = rgb(USAGE_MUTED_FG.0, USAGE_MUTED_FG.1, USAGE_MUTED_FG.2);
+        let reset_col = if comme_quota { "[2m".to_string() } else { rgb(USAGE_MUTED_FG.0, USAGE_MUTED_FG.1, USAGE_MUTED_FG.2) };
         seg.push_str(&format!(" {}({}){}", reset_col, value, RESET));
     }
     seg
@@ -2808,23 +2817,13 @@ mod tests {
         assert!(l1.contains(&format!("{dirty}*5")), "dirty en saumon");
     }
 
-    // La hierarchie de la ligne 2 repose sur la couleur : le label reste en
-    // retrait sans reintroduire la forme Powerline de la banniere.
+    // Les jauges d'usage ont exactement le style de la commande `quota`
+    // (2026-10-04) : label en gras, sans reintroduire la forme Powerline.
     #[test]
     fn usage_seg_colore_le_label_sans_chevron() {
         let future = Value::from("2099-01-01T00:00:00+00:00");
         let seg = build_usage_seg("5h", 42.0, &future, false, None);
-        assert!(
-            seg.starts_with(&format!(
-                "{}5h",
-                rgb(
-                    USAGE_LABEL_FG.0,
-                    USAGE_LABEL_FG.1,
-                    USAGE_LABEL_FG.2
-                )
-            )),
-            "le label doit porter la couleur en retrait"
-        );
+        assert!(seg.starts_with("[1m5h"), "le label doit etre en gras, comme dans quota");
         assert!(!seg.contains(CHEVRON), "la ligne 2 ne doit plus contenir de chevron");
     }
 
