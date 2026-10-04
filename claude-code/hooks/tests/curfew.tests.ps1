@@ -116,6 +116,36 @@ Test-Warning '02:30 (coeur de nuit) -> avertissement'        $true  '02:30' $cfg
 Test-Warning '12:00 (plein jour) -> aucun avertissement'     $false '12:00' $cfg | Out-Null
 
 Write-Host ''
+Write-Host 'Debut a l Isha du jour (table de mosquee)' -ForegroundColor Cyan
+
+$ttDir = Join-Path $TmpDir 'tables'
+New-Item -ItemType Directory -Path $ttDir -Force | Out-Null
+# 2026-10-04 : Isha 20:30 (1230) ; 2026-10-03 : Isha 20:32 (1232).
+Set-Content -Path (Join-Path $ttDir 'test-mosque.ts') -Encoding ascii -Value @'
+const timetable = {
+    id: "test-mosque",
+    year: 2026,
+    days: {
+        "10-03": [380, 470, 820, 1000, 1150, 1232],
+        "10-04": [381, 471, 820, 999, 1148, 1230],
+    },
+};
+'@
+$ishaDir = $ttDir.Replace('\', '\\')
+$cfgIsha = New-Config 'curfew-isha.json' ('{ "enabled": true, "start": "isha", "mosque": "test-mosque", "timetablesDir": "' + $ishaDir + '", "end": "05:00" }')
+Test-Warning 'Isha 20:30 : 20:00 (hors preavis) -> aucun avertissement' $false '2026-10-04 20:00' $cfgIsha | Out-Null
+Test-Warning 'Isha 20:30 : 20:20 (preavis 10 min) -> avertissement'     $true  '2026-10-04 20:20' $cfgIsha | Out-Null
+Test-Warning 'Isha 20:30 : 20:31 -> avertissement de fenetre'           $true  '2026-10-04 20:31' $cfgIsha | Out-Null
+Test-Warning 'Isha de la veille : 01:00 -> avertissement'               $true  '2026-10-05 01:00' $cfgIsha | Out-Null
+$r = Invoke-Hook -Now '2026-10-04 20:40' -ConfigPath $cfgIsha
+Write-Result ($r.Json.systemMessage -match '20:30') 'le message nomme l heure d Isha (20:30)' "systemMessage=$($r.Json.systemMessage)"
+# Jour absent de la table (autre annee) : repli sur 23:00, jamais de silence.
+Test-Warning 'autre annee : 22:00 -> aucun avertissement (repli 23:00)' $false '2027-10-04 22:00' $cfgIsha | Out-Null
+Test-Warning 'autre annee : 23:05 -> avertissement (repli 23:00)'       $true  '2027-10-04 23:05' $cfgIsha | Out-Null
+$cfgAbsent = New-Config 'curfew-isha-absent.json' ('{ "enabled": true, "start": "isha", "mosque": "inconnue", "timetablesDir": "' + $ishaDir + '", "end": "05:00" }')
+Test-Warning 'table introuvable : 23:05 -> avertissement (repli 23:00)' $true '2026-10-04 23:05' $cfgAbsent | Out-Null
+
+Write-Host ''
 Write-Host "Contenu de l'avertissement de fenetre" -ForegroundColor Cyan
 
 $r = Invoke-Hook -Now '23:30' -ConfigPath $cfg

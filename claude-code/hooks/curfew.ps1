@@ -27,7 +27,17 @@
 #     "warnBefore": [15, 10, 5], "graceAfter": 10 }
 #
 #   enabled    : optionnel, defaut true. false -> hook inerte.
-#   start      : debut de la fenetre, INCLUS  ("HH:mm" ou heure entiere).
+#   start      : debut de la fenetre, INCLUS  ("HH:mm", heure entiere, ou
+#                "isha" : l'heure d'Isha du jour, lue dans la table publiee
+#                par la mosquee, voir "mosque" ci-dessous).
+#   mosque     : avec "start": "isha", l'id d'une table de Neo Calendar
+#                (src/ui/calendar/prayerTimetables/<id>.ts, horaires publies
+#                par la mosquee, aucun calcul), ex. "alkitab-wa-sunnah".
+#   timetablesDir : optionnel, le dossier de ces tables (defaut
+#                C:\dev\neo-calendar\src\ui\calendar\prayerTimetables).
+#   startFallback : optionnel, defaut "23:00". Debut utilise quand l'Isha du
+#                jour est introuvable (table absente, autre annee, jour
+#                manquant) : un couvre-feu ne saute jamais faute de donnees.
 #   end        : fin de la fenetre, EXCLUE    ("HH:mm" ou heure entiere).
 #   warnBefore : optionnel, defaut [15, 10, 5]. Paliers de preavis en minutes
 #                avant "start". Valeurs hors ]0, 720] ignorees ; liste vide ou
@@ -102,6 +112,23 @@ function ConvertTo-MinuteOfDay($value) {
         return (($h % 24) * 60 + $m)
     }
     return $null
+}
+
+# Minutes depuis minuit de l'Isha du jour $day, lues dans une table de Neo
+# Calendar : la ligne "MM-dd": [fajr, chourouk, dhuhr, asr, maghrib, isha].
+# $null si le fichier manque, si sa "year" n'est pas celle du jour, ou si le
+# jour n'y figure pas.
+function Get-IshaMinute($file, [datetime]$day) {
+    if (-not $file -or -not (Test-Path $file -PathType Leaf)) { return $null }
+    $text = Get-Content $file -Raw
+    if ($text -notmatch 'year:\s*([0-9]{4})') { return $null }
+    if ([int]$Matches[1] -ne $day.Year) { return $null }
+    $key = $day.ToString('MM-dd')
+    $pattern = '"' + $key + '":\s*\[\s*(?:[0-9]+\s*,\s*){5}([0-9]+)\s*\]'
+    if ($text -notmatch $pattern) { return $null }
+    $isha = [int]$Matches[1]
+    if ($isha -lt 0 -or $isha -ge 1440) { return $null }
+    return $isha
 }
 
 function Format-Window($minuteOfDay) {
@@ -202,10 +229,8 @@ try {
     if ($null -eq $cfg) { exit 0 }
     if ($null -ne $cfg.enabled -and -not [bool]$cfg.enabled) { exit 0 }
 
-    $start = ConvertTo-MinuteOfDay $cfg.start
     $end   = ConvertTo-MinuteOfDay $cfg.end
-    if ($null -eq $start -or $null -eq $end) { exit 0 }
-    if ($start -eq $end) { exit 0 }   # fenetre vide : rien a signaler
+    if ($null -eq $end) { exit 0 }
 
     if ($Now) {
         # Formats personnalises uniquement : un specificateur standard d'un
@@ -222,6 +247,23 @@ try {
         $nowDt = Get-Date
     }
     $current = $nowDt.Hour * 60 + $nowDt.Minute
+
+    # "isha" : l'Isha du jour en cours. Apres minuit et avant la fin de la
+    # fenetre, c'est encore la nuit d'hier : son Isha est celle de la veille.
+    if (([string]$cfg.start).Trim() -eq 'isha') {
+        $dir = if ($cfg.timetablesDir) { [string]$cfg.timetablesDir } else { 'C:\dev\neo-calendar\src\ui\calendar\prayerTimetables' }
+        $day = if ($current -lt $end) { $nowDt.Date.AddDays(-1) } else { $nowDt.Date }
+        $file = if ($cfg.mosque) { Join-Path $dir (([string]$cfg.mosque) + '.ts') } else { $null }
+        $start = Get-IshaMinute $file $day
+        if ($null -eq $start) {
+            $fallback = if ($cfg.startFallback) { $cfg.startFallback } else { '23:00' }
+            $start = ConvertTo-MinuteOfDay $fallback
+        }
+    } else {
+        $start = ConvertTo-MinuteOfDay $cfg.start
+    }
+    if ($null -eq $start) { exit 0 }
+    if ($start -eq $end) { exit 0 }   # fenetre vide : rien a signaler
 
     # --- Nuit blanche -------------------------------------------------------
     # Deux temps : le prompt qui porte "#jedors" arme le marqueur, et tant que
