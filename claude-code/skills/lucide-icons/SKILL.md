@@ -1,11 +1,13 @@
 ---
 name: lucide-icons
-description: Règle obligatoire : toutes les icônes d'UI dans un projet web/app doivent utiliser Lucide (SVG inline) ; les logos de marque (YouTube, GitHub, Discord…) viennent des sources dédiées listées (Simple Icons, SVG Repo…). Jamais de caractères Unicode, d'emoji, de Font Awesome, de Material Icons, ou d'images PNG/SVG externes pour des icônes d'UI. Se déclenche quand on parle d'icônes, de logos, de boutons, d'UI, de site web, de web app, ou quand on modifie du HTML/CSS.
+description: Règle par défaut des icônes d'UI : Lucide (SVG inline) ; MIEUX est permis (décision d'Ahmed, 2026-10-01) — un jeu plus adapté au contexte, ex. Material Symbols Rounded pour une barre de navigation Android native, avec vraies versions pleine/trait. Logos de marque via les sources dédiées (Simple Icons, SVG Repo…). Jamais de caractères Unicode, d'emoji ni d'icônes improvisées. Icônes animées : lucide-animated (React) ou CSS sur le SVG Lucide. Se déclenche quand on parle d'icônes (y compris animées), de logos, de boutons, d'UI, de site web, de web app, ou quand on modifie du HTML/CSS.
 ---
 
-# Règle absolue — Icônes Lucide uniquement
+# Icônes : Lucide par défaut, mieux si mieux existe
 
-Dans tout projet web/app, **toute icône d'interface** doit utiliser **Lucide** en SVG inline. Aucune exception.
+Dans tout projet web/app, **toute icône d'interface** utilise **Lucide** en SVG inline **par défaut**.
+
+**Exception assumée (Ahmed, 2026-10-01 : « par défaut c'est Lucide, mais si on peut avoir mieux alors on fait mieux »)** : quand un autre jeu d'icônes COHÉRENT donne un résultat clairement meilleur pour le contexte, on le prend — par exemple **Material Symbols Rounded** (Google, Apache 2.0) pour une barre de navigation Android, parce qu'il a de vraies paires pleine/trait dessinées ensemble et que c'est le langage natif d'Android. Conditions : un seul jeu par zone (pas de mélange dans une même barre), une licence libre, des SVG inline (pas de police d'icônes chargée d'un CDN), et dire dans le commit/la note pourquoi ce jeu est meilleur ici. Jamais d'icônes générées à la main ou par IA pour de l'UI courante.
 
 ## Qu'est-ce que Lucide ?
 
@@ -60,6 +62,43 @@ Attributs obligatoires :
 | Œil / Voir | Eye | `<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>` |
 | Copier | Copy | `<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>` |
 | Lien externe | ExternalLink | `<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>` |
+
+## Icônes animées
+
+Une micro-animation sert à guider l'attention ou à confirmer une action (copié, envoyé, chargement), jamais à décorer. Source : post @DevDsgn du 2026-10-09, trié le 2026-10-10.
+
+| Projet | Choix | Pourquoi |
+|---|---|---|
+| React (neo-calendar, opcode…) | **lucide-animated** (https://lucide-animated.com, repo `pqoqubbw/icons`, MIT, ~470 icônes) | Mêmes glyphes que Lucide : la règle « un seul jeu par zone » tient, on peut mélanger statiques et animées. |
+| Sans React (HTML/CSS, vanilla, Obsidian sans React) | **CSS sur le SVG Lucide inline** | Zéro dépendance ; `motion` n'existe qu'en React. |
+
+**React** : chaque icône est un item de registre shadcn, `https://lucide-animated.com/r/<nom-kebab>.json` (vérifié le 2026-10-10 : `dependencies: ["motion"]`, fichier `.tsx` dans `files[0].content`).
+- Projet avec `components.json` : `npx shadcn@latest add "https://lucide-animated.com/r/copy.json"`.
+- Sinon : récupérer le JSON, écrire `files[0].content` dans le projet, remplacer l'import `cn` de `@/lib/utils` par l'utilitaire du projet (ou une simple concaténation de classes), puis `npm i motion`.
+- L'icône s'anime au survol de son propre `div`. Pour l'animer au survol du bouton parent, passer une `ref` et appeler `startAnimation()` / `stopAnimation()`.
+- Dans un plugin Obsidian, vérifier le poids du bundle après l'ajout de `motion`.
+
+**Sans React** : animer des sous-parties du SVG Lucide inline, au survol du **parent** :
+
+```css
+.icon-anim * { transform-box: fill-box; transform-origin: center; transition: transform 120ms ease-in, opacity 120ms ease-in; } /* sortie */
+.btn:hover .icon-anim * { transition-duration: 180ms; transition-timing-function: cubic-bezier(.2,.8,.2,1); }   /* entrée */
+.btn:hover .icon-anim .part-a { transform: translate(-2px, -2px); }
+@media (prefers-reduced-motion: reduce) { .icon-anim * { transition: none; animation: none; } }
+```
+
+Règles de mouvement (reprises d'Arc UI, uiarc.dev) :
+- n'animer que `transform` et `opacity` ;
+- un seul mouvement continu par interaction ;
+- une sortie plus rapide que l'entrée ;
+- pas de rebond sur un indicateur d'état ;
+- toujours une branche `prefers-reduced-motion`.
+
+Écartés (même post) :
+- **Lordicon, useanimations, Flaticon animé** : style différent de Lucide (mélange interdit dans une zone), format Lottie ou GIF, attribution exigée par Flaticon.
+- **heroicons-animated, hugeicons-animated** : d'autres jeux que Lucide.
+- **SVGator** : outil d'animation payant, pas une bibliothèque.
+- **allsvgicons** : simple agrégateur.
 
 ## Ce qui est INTERDIT
 
