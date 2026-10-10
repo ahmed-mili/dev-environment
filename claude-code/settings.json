@@ -25,9 +25,15 @@
     "defaultMode": "auto"
   },
   "deniedMcpServers": [
-    { "serverUrl": "https://gmailmcp.googleapis.com/*" },
-    { "serverUrl": "https://calendarmcp.googleapis.com/*" },
-    { "serverUrl": "https://drivemcp.googleapis.com/*" }
+    {
+      "serverUrl": "https://gmailmcp.googleapis.com/*"
+    },
+    {
+      "serverUrl": "https://calendarmcp.googleapis.com/*"
+    },
+    {
+      "serverUrl": "https://drivemcp.googleapis.com/*"
+    }
   ],
   "model": "opus[1m]",
   "outputStyle": "Concise",
@@ -47,6 +53,17 @@
           {
             "type": "command",
             "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File \"$USERPROFILE/.claude/hooks/error-vault-trigger.ps1\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File \"$USERPROFILE/.claude/hooks/hourly-wakeup.ps1\"",
             "timeout": 10
           }
         ]
