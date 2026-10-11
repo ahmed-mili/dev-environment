@@ -493,5 +493,30 @@ function ollama {
         Write-Error "ollama not found on PATH"
         return
     }
-    & $ollamaCmd.Source @rest
+    # Claude Code does not know an Ollama model id: it assumes a 200k window
+    # and, with 32k of output reserved, compacts around 167k (seen 2026-09-21
+    # on glm-5.3-flash:cloud, which has 1M). Declare the real window (`ollama
+    # show`, "context length" line) and compact at 300k: every turn resends
+    # the whole context, so further costs more per request and small models
+    # lose quality there. Both variables are RESTORED afterwards:
+    # CLAUDE_CODE_AUTO_COMPACT_WINDOW wins over everything and would wrongly
+    # cap an Anthropic `claude` launched later from the same shell.
+    $ctxPrev = $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS
+    $compactPrev = $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW
+    $modelIdx = [array]::IndexOf($rest, '--model')
+    if ($rest.Count -ge 2 -and $rest[0] -eq 'launch' -and $rest[1] -eq 'claude' -and $modelIdx -ge 0) {
+        $shown = & $ollamaCmd.Source show $rest[$modelIdx + 1] 2>$null
+        $ctxLine = $shown | Where-Object { $_ -match 'context length\s+(\d+)' } | Select-Object -First 1
+        if ($ctxLine -and $ctxLine -match 'context length\s+(\d+)') {
+            $ctx = [long]$Matches[1]
+            $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = [string]$ctx
+            $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = [string][Math]::Max(100000, [Math]::Min(300000, $ctx))
+        }
+    }
+    try {
+        & $ollamaCmd.Source @rest
+    } finally {
+        $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = $ctxPrev
+        $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = $compactPrev
+    }
 }
