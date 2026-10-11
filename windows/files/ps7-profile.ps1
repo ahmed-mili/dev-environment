@@ -522,3 +522,8 @@ function ollama {
         $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = $compactPrev
     }
 }
+
+# Machine-local additions, never versioned (functions with personal paths,
+# per-machine tweaks). Same idea as ~/.bashrc.local on the Termux side.
+$localProfile = Join-Path (Split-Path -Parent $PROFILE) 'profile.local.ps1'
+if (Test-Path $localProfile) { . $localProfile }
