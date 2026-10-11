@@ -4,9 +4,11 @@
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 $OutputEncoding           = [System.Text.UTF8Encoding]::new()
 $script:PowerShellArgs = @([Environment]::GetCommandLineArgs() | ForEach-Object { $_.ToLowerInvariant() })
+# -NoExit keeps the session interactive after -File/-Command: that is how the
+# PyCharm terminal starts pwsh (-NoExit -File <JetBrains integration>).
 $script:RunsCommandOrFile = [bool]($script:PowerShellArgs | Where-Object {
     $_ -in @('-command', '-c', '-encodedcommand', '-e', '-file', '-f', '-noninteractive')
-})
+}) -and ($script:PowerShellArgs -notcontains '-noexit')
 $script:HasInteractiveConsole = (-not $script:RunsCommandOrFile) -and (-not [System.Console]::IsInputRedirected) -and (-not [System.Console]::IsOutputRedirected)
 
 function isadmin {
