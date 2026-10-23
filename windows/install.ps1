@@ -356,6 +356,7 @@ Install-UserFont -DisplayName 'Noto Color Emoji (Android-style, COLRv1)' `
     -Url         'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/fonts/Noto-COLRv1.ttf' `
     -MarkerFile  'NotoColorEmoji-COLRv1.ttf'
 Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
+Install-WingetPackage -Id 'Warp.Warp'                     -DisplayName 'Warp'
 # Rust toolchain : requis pour compiler claude-code/statusline-rs/ -> statusline.exe.
 Install-WingetPackage -Id 'Rustlang.Rustup'               -DisplayName 'Rust toolchain (rustup)'
 # Claude Code itself : the one-liner's whole point is to bootstrap a working
@@ -590,6 +591,78 @@ if (-not (Test-Path $wtDir)) {
     Write-Utf8File -Path $wtTarget -Content $wtSettings -WithBom $false
     Write-Ok (Short-Path $wtTarget)
 }
+
+# ---------------------------------------------------------------------------
+# 4b) Warp : theme island-sunset + police Warp JetBrains Naskh
+# ---------------------------------------------------------------------------
+#
+# Rendu de reference de la statusline Claude Code. Elle n'emet que des
+# couleurs ANSI (c'est la palette du terminal qui choisit la teinte) et des
+# glyphes Nerd Font ; sans ce theme et cette police, le meme statusline.exe
+# sort criard et avec des carres a la place des icones.
+# Warp n'accepte qu'UNE police (pas de chaine de fallback comme WT), d'ou une
+# police fusionnee : JetBrains Mono + Noto Naskh Arabic + Symbols Nerd Font.
+# Seules les cles listees dans $warpKeys sont touchees dans settings.toml.
+
+Write-Step 'Warp (theme island-sunset + police)'
+$warpFiles = Join-Path $FilesDir 'warp'
+
+$naskh = @(Register-UserFontFiles -FontFiles (Get-Item (Join-Path $warpFiles 'WarpJetBrainsNaskh-Regular.ttf')) `
+    -UserFontsDir (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'))
+foreach ($f in $naskh) { [void][FontBroadcast]::AddFontResource($f) }
+$res = [IntPtr]::Zero
+[void][FontBroadcast]::SendMessageTimeout([IntPtr]0xFFFF, 0x001D, [IntPtr]::Zero, [IntPtr]::Zero, 0x0002, 1000, [ref]$res)
+Write-Ok 'Warp JetBrains Naskh'
+
+# Le chemin de l'image est ecrit en absolu : c'est la forme que Warp produit
+# lui-meme quand on choisit une image de fond depuis son interface.
+$warpThemes = Join-Path $env:APPDATA 'warp\Warp\data\themes'
+if (-not (Test-Path $warpThemes)) { New-Item -ItemType Directory -Path $warpThemes -Force | Out-Null }
+$imgTarget = Join-Path $warpThemes 'island-sunset.jpg'
+Copy-Item (Join-Path $warpFiles 'island-sunset.jpg') $imgTarget -Force
+$themeYaml = (Read-Utf8File (Join-Path $warpFiles 'island-sunset.yaml')) -replace '(?m)^(\s+path:\s*).*$', ('$1"' + $imgTarget.Replace('\', '\\') + '"')
+Write-Utf8File -Path (Join-Path $warpThemes 'island-sunset.yaml') -Content $themeYaml -WithBom $false
+Write-Ok (Short-Path (Join-Path $warpThemes 'island-sunset.yaml'))
+
+# Remplace (ou ajoute) une cle dans une section TOML, sans toucher au reste.
+function Set-TomlKey {
+    param([string[]]$Lines, [string]$Section, [string]$Key, [string]$Value)
+    $out = [System.Collections.Generic.List[string]]::new()
+    $out.AddRange([string[]]@($Lines))
+    $header = "[$Section]"
+    $start = $out.FindIndex([Predicate[string]]{ param($l) $l.Trim() -eq $header })
+    if ($start -lt 0) {
+        if ($out.Count -gt 0 -and $out[$out.Count - 1].Trim() -ne '') { $out.Add('') }
+        $out.Add($header)
+        $out.Add("$Key = $Value")
+        return ,$out.ToArray()
+    }
+    $end = $start + 1
+    while ($end -lt $out.Count -and $out[$end].Trim() -notmatch '^\[') { $end++ }
+    for ($i = $start + 1; $i -lt $end; $i++) {
+        if ($out[$i] -match ('^\s*' + [regex]::Escape($Key) + '\s*=')) {
+            $out[$i] = "$Key = $Value"
+            return ,$out.ToArray()
+        }
+    }
+    $out.Insert($start + 1, "$Key = $Value")
+    return ,$out.ToArray()
+}
+
+$warpKeys = @(
+    @('appearance.themes', 'system_theme', 'false'),
+    @('appearance.themes', 'theme', '{ custom = { name = "island-sunset", path = "island-sunset.yaml" } }'),
+    @('appearance.text',   'font_name', '"Warp JetBrains Naskh"'),
+    @('appearance.text',   'font_size', '16.0'),
+    @('appearance.window', 'override_opacity', '23'),
+    @('appearance.window', 'backdrop', '"mica"')
+)
+$warpToml = Join-Path $env:LOCALAPPDATA 'warp\Warp\config\settings.toml'
+$tomlLines = @()
+if (Test-Path $warpToml) { $tomlLines = (Read-Utf8File $warpToml) -split "\r?\n" }
+foreach ($k in $warpKeys) { $tomlLines = Set-TomlKey -Lines $tomlLines -Section $k[0] -Key $k[1] -Value $k[2] }
+Write-Utf8File -Path $warpToml -Content (($tomlLines -join "`n").TrimEnd() + "`n") -WithBom $false
+Write-Ok "$(Short-Path $warpToml) (redemarrer Warp pour l'appliquer)"
 
 # ---------------------------------------------------------------------------
 # 5) Fastfetch config (~/.config/fastfetch/config.jsonc)

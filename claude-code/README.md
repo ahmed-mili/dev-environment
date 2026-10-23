@@ -385,6 +385,19 @@ anthropic-beta: oauth-2025-04-20
 
 Caches: usage 60s (`~/.claude/usage-cache.json`), auth 1h (`~/.claude/auth-status-cache.json`).
 
+### Reference look (Warp)
+
+The statusline only emits ANSI color slots and Nerd Font glyphs: the terminal decides the actual shades and draws the icons. The same `statusline.exe` therefore looks harsh in a default terminal palette, and shows empty boxes instead of icons without a Nerd Font. The reference look is Warp with:
+
+| Piece | Repo file | Installed to |
+| --- | --- | --- |
+| `island-sunset` theme (pastel palette, `#362d21` background, image at 30 %) | `windows/files/warp/island-sunset.yaml` + `.jpg` | `%APPDATA%\warp\Warp\data\themes\` |
+| `Warp JetBrains Naskh` font (JetBrains Mono + Noto Naskh Arabic + Symbols Nerd Font merged: Warp takes a single font, no fallback chain) | `windows/files/warp/WarpJetBrainsNaskh-Regular.ttf` | user fonts (HKCU) |
+| Window: 16 pt, opacity 23, Mica backdrop | — | `%LOCALAPPDATA%\warp\Warp\config\settings.toml` |
+| Claude Code theme `custom:sombre` (`dark-ansi` without the grey user-message background) | `claude-code/themes/sombre.json` | `~/.claude/themes/` (via `deploy.ps1`) |
+
+`windows/install.ps1` installs Warp (winget) and sets all of the above; in `settings.toml` it only replaces those six keys and keeps everything else (a `.bak-<timestamp>` copy is written first). Restart Warp afterwards. Already installed? Re-run just that part with `windows/install.ps1 -SkipWinget`.
+
 ## Effort level rendering
 
 The 5 effort levels (`low`, `medium`, `high`, `xhigh`, `max`) render as follows in the statusline:
