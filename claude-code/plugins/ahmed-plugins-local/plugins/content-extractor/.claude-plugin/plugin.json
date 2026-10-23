@@ -1,0 +1,23 @@
+{
+  "name": "content-extractor",
+  "description": "Extract everything from a content URL: videos (YouTube, TikTok, Instagram, Twitch, +1800 yt-dlp sites), X/Twitter posts with thread and replies, Reddit threads, web pages, French shop product pages (Amazon.fr, LDLC, Cdiscount, TopAchat), price comparators (LeDénicheur, idealo) and Steam games. Transcripts, metadata, descriptions, comments, media downloads, and on-screen frame extraction.",
+  "version": "0.3.0",
+  "author": {
+    "name": "Ahmed",
+    "email": "ahmed@local"
+  },
+  "keywords": [
+    "youtube",
+    "tiktok",
+    "instagram",
+    "reddit",
+    "twitter",
+    "video",
+    "transcript",
+    "comments",
+    "extract",
+    "yt-dlp",
+    "x"
+  ],
+  "homepage": "file:///C:/Users/Ahmed/.claude/plugins/ahmed-plugins-local/plugins/content-extractor/README.md"
+}

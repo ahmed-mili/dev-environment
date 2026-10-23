@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   Trouve le screenshot le plus recent et met son chemin absolu dans le presse-papiers.
   Option -Paste : simule Ctrl+V pour coller le chemin dans la fenetre active (Claude Code).

@@ -1,26 +1,26 @@
-﻿<#
+<#
 .SYNOPSIS
   Analyse une image via kimi-k2.7-code:cloud (Ollama cloud, vision MoonViT).
 
 .DESCRIPTION
-  Délégation vision pour les sessions Claude Code dont le backend n'a pas la
-  vision (ex. glm-5.2:cloud). Encode l'image en base64, l'envoie à l'API Ollama
+  Delegation vision pour les sessions Claude Code dont le backend n'a pas la
+  vision (ex. glm-5.2:cloud). Encode l'image en base64, l'envoie a l'API Ollama
   locale (http://localhost:11434/api/chat) qui route vers le cloud, et imprime
-  la description textuelle de kimi sur stdout. À appeler depuis Claude Code
+  la description textuelle de kimi sur stdout. A appeler depuis Claude Code
   (Bash/PowerShell) quand on a besoin d'analyser une image.
 
 .PARAMETER ImagePath
-  Chemin de l'image à analyser.
+  Chemin de l'image a analyser.
 
 .PARAMETER Prompt
-  Question/instruction à poser à kimi à propos de l'image.
+  Question/instruction a poser a kimi a propos de l'image.
 
 .EXAMPLE
-  powershell -NoProfile -File kimi-vision.ps1 -ImagePath "C:\img.png" -Prompt "Décris cette image"
+  powershell -NoProfile -File kimi-vision.ps1 -ImagePath "C:\img.png" -Prompt "Decris cette image"
 #>
 param(
     [Parameter(Mandatory = $true)][string]$ImagePath,
-    [string]$Prompt = "Décris cette image en détail : texte visible (OCR exact), éléments visuels, mise en page, couleurs, et toute information utile. Sois précis et complet."
+    [string]$Prompt = "Decris cette image en detail : texte visible (OCR exact), elements visuels, mise en page, couleurs, et toute information utile. Sois precis et complet."
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8

@@ -301,6 +301,20 @@ if (-not $claudeCmd) {
     & $claudeCmd.Source plugin marketplace update claude-plugins-official 2>&1 | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) { Write-Warn ("claude plugin marketplace update returned {0}" -f $LASTEXITCODE) }
 
+    # Marketplace ahmed-plugins-local (content-extractor, requis par /investigate) :
+    # servie directement depuis le clone, donc un `git pull` + `marketplace
+    # update` suffit a la mettre a jour. Deja enregistree (ex. machine d'Ahmed,
+    # ou elle pointe sur ~/.claude/plugins/ahmed-plugins-local) : simple update.
+    $marketplaces = (& $claudeCmd.Source plugin marketplace list 2>&1) -join "`n"
+    if ($marketplaces -match 'ahmed-plugins-local') {
+        Write-Info 'syncing ahmed-plugins-local marketplace'
+        & $claudeCmd.Source plugin marketplace update ahmed-plugins-local 2>&1 | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
+    } else {
+        Write-Info 'registering ahmed-plugins-local marketplace (from the clone)'
+        & $claudeCmd.Source plugin marketplace add (Join-Path $RepoPath 'claude-code\plugins\ahmed-plugins-local') 2>&1 | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
+    }
+    if ($LASTEXITCODE -ne 0) { Write-Warn ("ahmed-plugins-local marketplace returned {0}" -f $LASTEXITCODE) }
+
     $settings = Get-Content (Join-Path $RepoPath 'claude-code\settings.json') -Raw | ConvertFrom-Json
     $plugins = @($settings.enabledPlugins.PSObject.Properties | Where-Object { $_.Value -eq $true } | ForEach-Object { $_.Name })
     foreach ($p in $plugins) {
@@ -309,6 +323,46 @@ if (-not $claudeCmd) {
         if ($LASTEXITCODE -ne 0) { Write-Warn ("claude plugin install {0} returned {1}" -f $p, $LASTEXITCODE) }
     }
     Write-Ok ("{0} plugin(s) processed" -f $plugins.Count)
+
+    # Serveurs MCP utilises par /investigate et content-extractor (scope user,
+    # idempotent : un serveur deja present n'est pas touche). Le `--` passe
+    # par un tableau splatte : ecrit en dur, Windows PowerShell 5.1 peut le
+    # manger avant de lancer claude.exe.
+    Write-Info 'MCP servers for /investigate'
+    $playwrightCfg = Join-Path $env:USERPROFILE '.claude\playwright-brave.json'
+    $braveExe = @(
+        (Join-Path $env:ProgramFiles 'BraveSoftware\Brave-Browser\Application\brave.exe'),
+        (Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\Application\brave.exe')
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($braveExe -and (Test-Path $playwrightCfg)) {
+        # Brave installe en scope user : le chemin n'est pas celui du depot.
+        $cfg = Get-Content $playwrightCfg -Raw | ConvertFrom-Json
+        $cfg.browser.launchOptions.executablePath = $braveExe.Replace('\', '/')
+        [System.IO.File]::WriteAllText($playwrightCfg, ($cfg | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
+    } elseif (-not $braveExe) {
+        Write-Warn 'Brave not found: the playwright MCP will not start until Brave is installed.'
+    }
+    $mcpServers = [ordered]@{
+        'fetch'      = @('npx', '-y', 'fetch-mcp')
+        'freeweb'    = @('npx', '-y', 'freeweb-mcp')
+        'playwright' = @('npx', '-y', '@playwright/mcp', '--allow-unrestricted-file-access',
+                         '--config', $playwrightCfg, '--output-dir', (Join-Path $env:TEMP 'playwright-mcp'))
+    }
+    if ($env:BRAVE_API_KEY) {
+        $mcpServers['brave-search'] = @('npx', '-y', '@modelcontextprotocol/server-brave-search')
+    }
+    foreach ($name in $mcpServers.Keys) {
+        & $claudeCmd.Source mcp get $name *> $null
+        if ($LASTEXITCODE -eq 0) { Write-Info ("MCP {0} already configured" -f $name); continue }
+        $mcpArgs = @('mcp', 'add', '--scope', 'user', $name)
+        if ($name -eq 'brave-search') { $mcpArgs += @('-e', "BRAVE_API_KEY=$env:BRAVE_API_KEY") }
+        $mcpArgs += @('--') + $mcpServers[$name]
+        & $claudeCmd.Source @mcpArgs 2>&1 | ForEach-Object { Write-Host ('    ' + $_) -ForegroundColor DarkGray }
+        if ($LASTEXITCODE -ne 0) { Write-Warn ("claude mcp add {0} returned {1}" -f $name, $LASTEXITCODE) }
+    }
+    if (-not $env:BRAVE_API_KEY) {
+        Write-Hint 'brave-search MCP skipped (no BRAVE_API_KEY). /investigate falls back to freeweb; to add it: get a free key at https://brave.com/search/api/ then re-run with $env:BRAVE_API_KEY set.'
+    }
 }
 
 # ---------------------------------------------------------------------------

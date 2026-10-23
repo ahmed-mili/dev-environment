@@ -385,6 +385,20 @@ anthropic-beta: oauth-2025-04-20
 
 Caches: usage 60s (`~/.claude/usage-cache.json`), auth 1h (`~/.claude/auth-status-cache.json`).
 
+## `/investigate` (multi-channel research)
+
+The `investigate` skill sweeps YouTube, Reddit, X and the web through the `content-extractor` plugin. `bootstrap.ps1` sets up everything it needs:
+
+| Piece | How |
+| --- | --- |
+| `skills/investigate` | `deploy.ps1` (whitelist) |
+| `content-extractor` plugin (8 skills) | marketplace `ahmed-plugins-local`, registered straight from `plugins/ahmed-plugins-local` in the clone, then `claude plugin install` |
+| Python 3.12, FFmpeg, Brave | winget (`windows/install.ps1`); the Python packages (yt-dlp, playwright...) install themselves on first run |
+| MCP `fetch`, `freeweb`, `playwright` (Brave, `playwright-brave.json`) | `claude mcp add --scope user`, skipped when already present |
+| MCP `brave-search` | only when `BRAVE_API_KEY` is set (free key at brave.com/search/api); without it `/investigate` falls back to `freeweb` |
+
+Update on another machine: `git pull`, re-run `bootstrap.ps1` (or just `claude plugin marketplace update ahmed-plugins-local`). On this machine, `deploy.ps1 -Push` copies the local plugin into the repo.
+
 ### Reference look (Warp)
 
 The statusline only emits ANSI color slots and Nerd Font glyphs: the terminal decides the actual shades and draws the icons. The same `statusline.exe` therefore looks harsh in a default terminal palette, and shows empty boxes instead of icons without a Nerd Font. The reference look is Warp with:

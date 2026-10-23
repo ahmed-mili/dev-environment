@@ -357,6 +357,11 @@ Install-UserFont -DisplayName 'Noto Color Emoji (Android-style, COLRv1)' `
     -MarkerFile  'NotoColorEmoji-COLRv1.ttf'
 Install-WingetPackage -Id 'Fastfetch-cli.Fastfetch'       -DisplayName 'Fastfetch'
 Install-WingetPackage -Id 'Warp.Warp'                     -DisplayName 'Warp'
+# /investigate : scripts content-extractor (Python), frames video (ffmpeg),
+# MCP playwright pilote Brave.
+Install-WingetPackage -Id 'Python.Python.3.12'            -DisplayName 'Python 3.12'
+Install-WingetPackage -Id 'Gyan.FFmpeg'                   -DisplayName 'FFmpeg'
+Install-WingetPackage -Id 'Brave.Brave'                   -DisplayName 'Brave'
 # Rust toolchain : requis pour compiler claude-code/statusline-rs/ -> statusline.exe.
 Install-WingetPackage -Id 'Rustlang.Rustup'               -DisplayName 'Rust toolchain (rustup)'
 # Claude Code itself : the one-liner's whole point is to bootstrap a working

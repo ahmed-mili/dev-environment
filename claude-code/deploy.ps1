@@ -5,7 +5,7 @@
 #   .\deploy.ps1 -Push    # from ~/.claude/ to repo  (before git commit/push)
 #
 # Touches ONLY the repo-tracked files: statusline.ps1, settings.json,
-# themes/sombre.json, hooks/, skills/. The rest of ~/.claude/ (sessions, history, official
+# themes/sombre.json, playwright-brave.json, hooks/, skills/. The rest of ~/.claude/ (sessions, history, official
 # plugins, credentials) is left intact.
 #
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ $HomeClaude = "$env:USERPROFILE\.claude"
 # Custom skills tracked in the repo (explicit whitelist)
 $CustomSkills = @(
     'claude-file-recovery', 'copy-edit', 'css-layout-check', 'deploy-safety',
-    'humanizer', 'lucide-icons', 'root-cause-fix',
+    'humanizer', 'investigate', 'lucide-icons', 'root-cause-fix',
     'smart-edit', 'sticky-column-bleed-fix', 'webapp-deploy'
 )
 
@@ -122,7 +122,7 @@ if ($Pull) {
     Write-Host ("=== Pull : {0} -> {1} ===" -f $RepoClaude, $HomeClaude) -ForegroundColor Cyan
 
     # Top-level files
-    $files = @('statusline.ps1', 'settings.json', 'keybindings.json', 'themes\sombre.json')
+    $files = @('statusline.ps1', 'settings.json', 'keybindings.json', 'themes\sombre.json', 'playwright-brave.json')
     $fileW = Get-NameWidth $files
     Write-TableHeader 'Files' $files.Count $fileW
     foreach ($f in $files) {
@@ -191,7 +191,7 @@ if ($Pull) {
 if ($Push) {
     Write-Host ("=== Push : {0} -> {1} ===" -f $HomeClaude, $RepoClaude) -ForegroundColor Cyan
 
-    $files = @('statusline.ps1', 'settings.json', 'keybindings.json', 'themes\sombre.json')
+    $files = @('statusline.ps1', 'settings.json', 'keybindings.json', 'themes\sombre.json', 'playwright-brave.json')
     $fileW = Get-NameWidth $files
     Write-TableHeader 'Files' $files.Count $fileW
     foreach ($f in $files) {
@@ -249,6 +249,23 @@ if ($Push) {
     $st = Copy-One "$HomeClaude\tools" "$RepoClaude\tools"
     Write-TableRow $toolsName $st $toolsW
     Write-TableFooter $toolsW
+
+    # Plugin content-extractor (requis par /investigate). Push seulement : sur
+    # une autre machine, bootstrap.ps1 enregistre la marketplace directement
+    # depuis le clone, et ici ~/.claude/plugins/ahmed-plugins-local est la
+    # source de verite (un Pull l'ecraserait, cf. Copy-One).
+    $pluginName = 'content-extractor'
+    $pluginW = Get-NameWidth @($pluginName)
+    Write-TableHeader 'Plugins' 1 $pluginW
+    $pluginTo = "$RepoClaude\plugins\ahmed-plugins-local\plugins\$pluginName"
+    $st = Copy-One "$HomeClaude\plugins\ahmed-plugins-local\plugins\$pluginName" $pluginTo
+    if (Test-Path $pluginTo) {
+        Get-ChildItem $pluginTo -Recurse -Force |
+            Where-Object { $_.Name -like '*.bak-*' -or $_.Name -eq '__pycache__' } |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-TableRow $pluginName $st $pluginW
+    Write-TableFooter $pluginW
 
     Write-Host "`nDone. Reminder : cd dev-environment ; git add -A ; git commit ; git push" -ForegroundColor Yellow
 }

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ahmed-plugins-local",
+  "description": "Ahmed's personal plugins shipped with dev-environment. Registered by bootstrap.ps1 straight from the clone; the /investigate skill relies on content-extractor.",
+  "owner": {
+    "name": "Ahmed"
+  },
+  "plugins": [
+    {
+      "name": "content-extractor",
+      "description": "Extract everything from a content URL: videos (YouTube, TikTok, Instagram, Twitch, +1800 yt-dlp sites), X/Twitter posts, Reddit threads, web pages, French shop product pages, price comparators and Steam games.",
+      "author": {
+        "name": "Ahmed"
+      },
+      "version": "0.3.0",
+      "source": "./plugins/content-extractor",
+      "category": "productivity"
+    }
+  ]
+}

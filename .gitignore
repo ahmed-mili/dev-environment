@@ -51,3 +51,6 @@ curfew.nuit.json
 # Cookie de session ollama.com colle a la main (lu par ollama-usage.py) : secret,
 # jamais versionne.
 ollama-cookie.local
+
+# Python
+__pycache__/
